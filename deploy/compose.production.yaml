@@ -1,0 +1,16 @@
+services:
+  api:
+    extends: { file: compose.yaml, service: api }
+    read_only: true
+    tmpfs: [/tmp]
+    user: "10001:10001"
+    security_opt: [no-new-privileges:true]
+    deploy: { resources: { limits: { cpus: "1.0", memory: 1G } } }
+  web:
+    extends: { file: compose.yaml, service: web }
+    read_only: true
+    user: "10001:10001"
+    security_opt: [no-new-privileges:true]
+  postgres:
+    extends: { file: compose.yaml, service: postgres }
+    deploy: { resources: { limits: { cpus: "1.0", memory: 2G } } }

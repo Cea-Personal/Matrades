@@ -1,0 +1,105 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "traderx"
+version = "0.1.0"
+description = "Conservative manual-trading research, risk, and decision-support platform"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+  "alembic>=1.18,<2",
+  "celery[redis]>=5.6,<6",
+  "cryptography>=46,<47",
+  "email-validator>=2.2,<3",
+  "fastapi>=0.141,<0.142",
+  "itsdangerous>=2.2,<3",
+  "numpy>=2.3,<3",
+  "pandas>=2.3,<3",
+  "polars>=1.37,<2",
+  "psycopg[binary]>=3.2,<4",
+  "pydantic>=2.13,<3",
+  "pwdlib[argon2]>=0.3,<1",
+  "pyotp>=2.9,<3",
+  "pyarrow>=21,<24",
+  "python-multipart>=0.0.20,<1",
+  "scipy>=1.16,<2",
+  "sqlalchemy>=2.0.51,<3",
+  "uvicorn[standard]>=0.35,<1"
+]
+
+[dependency-groups]
+dev = [
+  "hypothesis>=6.139,<7",
+  "httpx>=0.28,<1",
+  "mypy>=1.18,<2",
+  "pytest>=9,<10",
+  "pytest-asyncio>=1.2,<2",
+  "pytest-cov>=7,<8",
+  "ruff>=0.14,<1",
+  "testcontainers[postgres,redis]>=4.12,<5"
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/traderx", "apps/api/traderx_api", "apps/worker/traderx_worker"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+  "contract: API and provider contract tests",
+  "integration: external boundary integration tests",
+  "safety: constitution-mandated financial safety tests",
+  "security: authentication, authorization, and secret tests",
+  "reproducibility: deterministic analytical tests",
+  "data_quality: market and account data quality tests",
+  "e2e: user-flow tests",
+  "performance: success-criteria performance tests"
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["src", "apps/api", "apps/worker", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S", "SIM"]
+# Ruff's formatter is authoritative for line wrapping; risk-decision enum labels
+# such as PASS are not credentials and should not be treated as hard-coded secrets.
+ignore = ["E501", "S101", "S105"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+warn_unreachable = true
+warn_unused_ignores = true
+mypy_path = ["src", "apps/api", "apps/worker"]
+exclude = ["migrations"]
+
+[[tool.mypy.overrides]]
+module = ["celery.*", "polars.*", "pyotp.*", "traderx_worker.*"]
+ignore_missing_imports = true
+disallow_untyped_decorators = false
+disallow_untyped_defs = false
+warn_unused_ignores = false
+
+[[tool.mypy.overrides]]
+# Framework protocol values and JSON/provider payloads are dynamically typed at
+# the boundary; their deterministic domain checks are covered by tests.
+module = [
+  "traderx.market_data.ingestion",
+  "traderx.market_research.volatility",
+  "traderx.strategies.runtime",
+  "traderx.integrations.crypto",
+  "traderx.shared.unit_of_work",
+  "traderx.audit.model",
+  "traderx.shared.config",
+  "traderx.validation.stability",
+  "traderx_api.middleware.context",
+  "traderx_api.main"
+]
+disable_error_code = ["arg-type", "call-overload", "no-any-return", "operator", "unused-ignore"]
+
+[tool.coverage.run]
+branch = true
+source = ["src/traderx", "apps/api/traderx_api", "apps/worker/traderx_worker"]

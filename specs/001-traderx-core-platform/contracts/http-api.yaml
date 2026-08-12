@@ -1,0 +1,1087 @@
+openapi: 3.1.0
+info:
+  title: TraderX Core Platform API
+  version: 1.0.0
+  summary: Authenticated UI contract for conservative manual trading decision support
+  description: |
+    Contract for TraderX V1. The API exposes decision support and read-only broker visibility.
+    It deliberately contains no operation for creating, modifying, or closing a real-money order.
+servers:
+  - url: /api/v1
+security:
+  - sessionCookie: []
+tags:
+  - name: Identity
+  - name: Command Center
+  - name: Accounts and Risk
+  - name: Integrations
+  - name: Markets
+  - name: Research and Strategies
+  - name: Validation and Paper
+  - name: Opportunities
+  - name: Positions and Journal
+  - name: Notifications and Jobs
+  - name: Audit and Health
+paths:
+  /auth/bootstrap-status:
+    get:
+      tags: [Identity]
+      operationId: getBootstrapStatus
+      security: []
+      responses:
+        '200':
+          description: Whether the one-time first-owner setup remains available
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BootstrapStatus'}
+  /auth/bootstrap:
+    post:
+      tags: [Identity]
+      operationId: bootstrapInitialOwner
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/LoginRequest'}
+      responses:
+        '201':
+          description: Initial owner created; TOTP enrollment is required before access
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LoginResult'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /auth/password-reset:
+    post:
+      tags: [Identity]
+      operationId: requestPasswordReset
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PasswordResetRequest'}
+      responses:
+        '202':
+          description: Reset request accepted. The response does not disclose whether the email exists.
+        '429': {$ref: '#/components/responses/Problem'}
+  /auth/password-reset/complete:
+    post:
+      tags: [Identity]
+      operationId: completePasswordReset
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PasswordResetCompleteRequest'}
+      responses:
+        '200':
+          description: Password reset completed and an MFA-assured session issued
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LoginResult'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '410': {$ref: '#/components/responses/Problem'}
+  /auth/login:
+    post:
+      tags: [Identity]
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Session established or MFA challenge required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResult'
+        '401': {$ref: '#/components/responses/Problem'}
+        '429': {$ref: '#/components/responses/Problem'}
+  /auth/mfa/enroll:
+    post:
+      tags: [Identity]
+      operationId: beginMfaEnrollment
+      responses:
+        '200':
+          description: One-time authenticator enrollment URI for the current password-authenticated user
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MfaEnrollment'}
+        '401': {$ref: '#/components/responses/Problem'}
+  /auth/mfa/enroll/verify:
+    post:
+      tags: [Identity]
+      operationId: completeMfaEnrollment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MfaCodeRequest'}
+      responses:
+        '200':
+          description: Authenticator enrollment complete and MFA session issued
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LoginResult'}
+        '401': {$ref: '#/components/responses/Problem'}
+  /auth/mfa/verify:
+    post:
+      tags: [Identity]
+      operationId: verifyMfa
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MfaCodeRequest'}
+      responses:
+        '200':
+          description: MFA challenge complete and MFA session issued
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LoginResult'}
+        '401': {$ref: '#/components/responses/Problem'}
+  /auth/mfa/recovery:
+    post:
+      tags: [Identity]
+      operationId: recoverMfaWithCode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MfaRecoveryCodeRequest'}
+      responses:
+        '200':
+          description: Recovery code accepted; all sessions are revoked and fresh TOTP enrollment is required
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LoginResult'}
+        '401': {$ref: '#/components/responses/Problem'}
+  /users/{user_id}/mfa-reset:
+    post:
+      tags: [Identity]
+      operationId: initiateAssistedMfaReset
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MfaResetCommand'}
+      responses:
+        '202':
+          description: Audited `OWNER` or `ADMIN` reset initiated; target must enroll a fresh TOTP factor
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /auth/logout:
+    post:
+      tags: [Identity]
+      operationId: logout
+      responses:
+        '204': {description: Session revoked}
+  /auth/sessions:
+    get:
+      tags: [Identity]
+      operationId: listSessions
+      responses:
+        '200':
+          description: Active sessions
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Session'}
+  /auth/sessions/{session_id}:
+    delete:
+      tags: [Identity]
+      operationId: revokeSession
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      responses:
+        '204': {description: Session revoked}
+        '404': {$ref: '#/components/responses/Problem'}
+  /dashboard:
+    get:
+      tags: [Command Center]
+      operationId: getDashboard
+      responses:
+        '200':
+          description: Current account, risk, market, opportunity, alert, and health summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Dashboard'
+  /accounts:
+    get:
+      tags: [Accounts and Risk]
+      operationId: listAccounts
+      responses:
+        '200':
+          description: Accounts visible to the user
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Account'}
+    post:
+      tags: [Accounts and Risk]
+      operationId: createAccount
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AccountCommand'}
+      responses:
+        '201':
+          description: Account created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Account'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /accounts/{account_id}:
+    get:
+      tags: [Accounts and Risk]
+      operationId: getAccount
+      parameters:
+        - $ref: '#/components/parameters/AccountId'
+      responses:
+        '200':
+          description: Account and current version
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Account'}
+        '404': {$ref: '#/components/responses/Problem'}
+  /accounts/{account_id}/prop-profile:
+    put:
+      tags: [Accounts and Risk]
+      operationId: replacePropProfile
+      parameters:
+        - $ref: '#/components/parameters/AccountId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/HighRiskCommand'}
+      responses:
+        '200': {$ref: '#/components/responses/VersionedResource'}
+        '412': {$ref: '#/components/responses/Problem'}
+        '428': {$ref: '#/components/responses/Problem'}
+  /accounts/{account_id}/risk-policy:
+    put:
+      tags: [Accounts and Risk]
+      operationId: replaceRiskPolicy
+      parameters:
+        - $ref: '#/components/parameters/AccountId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/HighRiskCommand'}
+      responses:
+        '200': {$ref: '#/components/responses/VersionedResource'}
+        '412': {$ref: '#/components/responses/Problem'}
+        '428': {$ref: '#/components/responses/Problem'}
+  /accounts/{account_id}/risk:
+    get:
+      tags: [Accounts and Risk]
+      operationId: getCurrentRisk
+      parameters:
+        - $ref: '#/components/parameters/AccountId'
+      responses:
+        '200':
+          description: Current risk snapshot and freshness
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RiskSnapshot'}
+  /accounts/{account_id}/circuit-breakers:
+    get:
+      tags: [Accounts and Risk]
+      operationId: listCircuitBreakers
+      parameters:
+        - $ref: '#/components/parameters/AccountId'
+      responses:
+        '200':
+          description: Circuit breaker history/current state
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/CircuitBreaker'}
+  /circuit-breakers/{breaker_id}/acknowledge:
+    post:
+      tags: [Accounts and Risk]
+      operationId: acknowledgeCircuitBreaker
+      parameters:
+        - $ref: '#/components/parameters/BreakerId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/HighRiskCommand'}
+      responses:
+        '200': {$ref: '#/components/responses/VersionedResource'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /integrations:
+    get:
+      tags: [Integrations]
+      operationId: listIntegrations
+      responses:
+        '200':
+          description: Configured integrations and health
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Integration'}
+    post:
+      tags: [Integrations]
+      operationId: createIntegration
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/IntegrationCommand'}
+      responses:
+        '201':
+          description: Integration created with secrets write-only
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Integration'}
+        '422': {$ref: '#/components/responses/Problem'}
+  /integrations/{integration_id}/test:
+    post:
+      tags: [Integrations]
+      operationId: testIntegration
+      parameters:
+        - $ref: '#/components/parameters/IntegrationId'
+      responses:
+        '202': {$ref: '#/components/responses/AcceptedJob'}
+  /integrations/{integration_id}/credentials:
+    put:
+      tags: [Integrations]
+      operationId: rotateIntegrationCredential
+      parameters:
+        - $ref: '#/components/parameters/IntegrationId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SecretRotationCommand'}
+      responses:
+        '200': {$ref: '#/components/responses/VersionedResource'}
+  /instruments:
+    get:
+      tags: [Markets]
+      operationId: listInstruments
+      parameters:
+        - name: category
+          in: query
+          schema: {$ref: '#/components/schemas/MarketCategory'}
+        - name: status
+          in: query
+          schema: {type: string, enum: [ACTIVE, INACTIVE, ARCHIVED]}
+      responses:
+        '200':
+          description: Instrument Library results
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Instrument'}
+  /market-research-runs:
+    post:
+      tags: [Markets]
+      operationId: startMarketResearch
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MarketResearchCommand'}
+      responses:
+        '202': {$ref: '#/components/responses/AcceptedJob'}
+  /market-research-runs/{run_id}:
+    get:
+      tags: [Markets]
+      operationId: getMarketResearchRun
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '200':
+          description: Reproducible eligibility and suitability report
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MarketResearchReport'}
+  /active-markets:
+    get:
+      tags: [Markets]
+      operationId: listActiveMarkets
+      responses:
+        '200':
+          description: At most one assignment per category
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 3
+                items: {$ref: '#/components/schemas/ActiveMarket'}
+  /active-markets/{category}:
+    put:
+      tags: [Markets]
+      operationId: approveActiveMarket
+      parameters:
+        - $ref: '#/components/parameters/Category'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ActiveMarketCommand'}
+      responses:
+        '200': {$ref: '#/components/responses/VersionedResource'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '412': {$ref: '#/components/responses/Problem'}
+  /research-jobs:
+    post:
+      tags: [Research and Strategies]
+      operationId: startStrategyResearch
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ResearchCommand'}
+      responses:
+        '202': {$ref: '#/components/responses/AcceptedJob'}
+  /strategies:
+    get:
+      tags: [Research and Strategies]
+      operationId: listStrategies
+      responses:
+        '200':
+          description: Strategies visible to user
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Strategy'}
+    post:
+      tags: [Research and Strategies]
+      operationId: createStrategy
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/StrategyCommand'}
+      responses:
+        '201':
+          description: Strategy with initial immutable draft version
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Strategy'}
+  /strategies/{strategy_id}/versions:
+    post:
+      tags: [Research and Strategies]
+      operationId: createStrategyVersion
+      parameters:
+        - $ref: '#/components/parameters/StrategyId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/StrategyVersionCommand'}
+      responses:
+        '201': {$ref: '#/components/responses/VersionedResource'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /backtest-runs:
+    post:
+      tags: [Validation and Paper]
+      operationId: startBacktest
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RunCommand'}
+      responses:
+        '202': {$ref: '#/components/responses/AcceptedJob'}
+  /validation-runs:
+    post:
+      tags: [Validation and Paper]
+      operationId: startValidation
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RunCommand'}
+      responses:
+        '202': {$ref: '#/components/responses/AcceptedJob'}
+  /paper-runs:
+    post:
+      tags: [Validation and Paper]
+      operationId: startPaperRun
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RunCommand'}
+      responses:
+        '202': {$ref: '#/components/responses/AcceptedJob'}
+  /strategies/{strategy_id}/versions/{version_id}/approval:
+    post:
+      tags: [Validation and Paper]
+      operationId: decideStrategyApproval
+      parameters:
+        - $ref: '#/components/parameters/StrategyId'
+        - $ref: '#/components/parameters/VersionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ApprovalCommand'}
+      responses:
+        '200': {$ref: '#/components/responses/VersionedResource'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '412': {$ref: '#/components/responses/Problem'}
+  /opportunities:
+    get:
+      tags: [Opportunities]
+      operationId: listOpportunities
+      responses:
+        '200':
+          description: Ranked opportunities; score is distinct from risk decision
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Opportunity'}
+  /recommendations/{recommendation_id}:
+    get:
+      tags: [Opportunities]
+      operationId: getRecommendation
+      parameters:
+        - $ref: '#/components/parameters/RecommendationId'
+      responses:
+        '200':
+          description: Complete recommendation or non-actionable terminal state
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Recommendation'}
+  /positions:
+    get:
+      tags: [Positions and Journal]
+      operationId: listPositions
+      responses:
+        '200':
+          description: Broker and paper positions
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Position'}
+  /positions/{position_id}/classification:
+    put:
+      tags: [Positions and Journal]
+      operationId: correctPositionClassification
+      parameters:
+        - $ref: '#/components/parameters/PositionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ClassificationCommand'}
+      responses:
+        '200': {$ref: '#/components/responses/VersionedResource'}
+  /positions/{position_id}/monitoring:
+    get:
+      tags: [Positions and Journal]
+      operationId: getPositionMonitoring
+      parameters:
+        - $ref: '#/components/parameters/PositionId'
+      responses:
+        '200':
+          description: Frozen thesis plus append-only monitoring observations
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+  /journal:
+    get:
+      tags: [Positions and Journal]
+      operationId: listJournalEntries
+      responses:
+        '200':
+          description: Journal records and analytics filters
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/JournalEntry'}
+  /journal/{entry_id}/annotations:
+    post:
+      tags: [Positions and Journal]
+      operationId: addJournalAnnotation
+      parameters:
+        - $ref: '#/components/parameters/EntryId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/JournalAnnotationCommand'}
+      responses:
+        '201': {$ref: '#/components/responses/VersionedResource'}
+  /notifications:
+    get:
+      tags: [Notifications and Jobs]
+      operationId: listNotifications
+      responses:
+        '200':
+          description: Durable web notification inbox
+          content:
+            application/json:
+              schema: {type: array, items: {type: object, additionalProperties: true}}
+  /jobs:
+    get:
+      tags: [Notifications and Jobs]
+      operationId: listJobs
+      responses:
+        '200':
+          description: Durable job states
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: '#/components/schemas/Job'}}
+  /jobs/{job_id}:
+    get:
+      tags: [Notifications and Jobs]
+      operationId: getJob
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          description: Job progress, attempts, checkpoints, and result
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Job'}
+  /jobs/{job_id}/{action}:
+    post:
+      tags: [Notifications and Jobs]
+      operationId: controlJob
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+        - name: action
+          in: path
+          required: true
+          schema: {type: string, enum: [pause, resume, cancel, retry]}
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200': {$ref: '#/components/responses/VersionedResource'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /audit-events:
+    get:
+      tags: [Audit and Health]
+      operationId: listAuditEvents
+      responses:
+        '200':
+          description: Authorized append-only audit history
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: '#/components/schemas/AuditEvent'}}
+  /health:
+    get:
+      tags: [Audit and Health]
+      operationId: getHealth
+      security: []
+      responses:
+        '200':
+          description: Process liveness without sensitive details
+          content:
+            application/json:
+              schema: {type: object, required: [status], properties: {status: {const: ok}}}
+  /events:
+    get:
+      tags: [Notifications and Jobs]
+      operationId: streamUserEvents
+      responses:
+        '200':
+          description: Authenticated SSE stream for job progress and alerts; clients poll on loss
+          content:
+            text/event-stream:
+              schema: {type: string}
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: __Host-tx_session
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: {type: string, minLength: 16, maxLength: 128}
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      schema: {type: string}
+    AccountId: {name: account_id, in: path, required: true, schema: {$ref: '#/components/schemas/Id'}}
+    BreakerId: {name: breaker_id, in: path, required: true, schema: {$ref: '#/components/schemas/Id'}}
+    IntegrationId: {name: integration_id, in: path, required: true, schema: {$ref: '#/components/schemas/Id'}}
+    RunId: {name: run_id, in: path, required: true, schema: {$ref: '#/components/schemas/Id'}}
+    StrategyId: {name: strategy_id, in: path, required: true, schema: {$ref: '#/components/schemas/Id'}}
+    VersionId: {name: version_id, in: path, required: true, schema: {$ref: '#/components/schemas/Id'}}
+    RecommendationId: {name: recommendation_id, in: path, required: true, schema: {$ref: '#/components/schemas/Id'}}
+    PositionId: {name: position_id, in: path, required: true, schema: {$ref: '#/components/schemas/Id'}}
+    EntryId: {name: entry_id, in: path, required: true, schema: {$ref: '#/components/schemas/Id'}}
+    JobId: {name: job_id, in: path, required: true, schema: {$ref: '#/components/schemas/Id'}}
+    SessionId: {name: session_id, in: path, required: true, schema: {$ref: '#/components/schemas/Id'}}
+    UserId: {name: user_id, in: path, required: true, schema: {$ref: '#/components/schemas/Id'}}
+    Category: {name: category, in: path, required: true, schema: {$ref: '#/components/schemas/MarketCategory'}}
+  headers:
+    ETag:
+      description: Quoted aggregate version used with If-Match
+      schema: {type: string}
+  responses:
+    Problem:
+      description: RFC 9457 problem details
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    Session:
+      description: Authenticated session summary; token remains in HttpOnly cookie
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Session'}
+    AcceptedJob:
+      description: Durable asynchronous job accepted
+      headers:
+        Location: {schema: {type: string, format: uri-reference}}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Job'}
+    VersionedResource:
+      description: Versioned command result
+      headers:
+        ETag: {$ref: '#/components/headers/ETag'}
+      content:
+        application/json:
+          schema: {type: object, additionalProperties: true}
+  schemas:
+    Id: {type: string, format: uuid}
+    Decimal:
+      type: string
+      pattern: '^-?[0-9]+(?:\.[0-9]+)?$'
+      description: Exact decimal serialized as a string
+    Instant: {type: string, format: date-time}
+    MarketCategory: {type: string, enum: [COMMODITY, FOREX, CRYPTO]}
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: {type: string, format: email}
+        password: {type: string, format: password}
+    PasswordResetRequest:
+      type: object
+      required: [email]
+      properties:
+        email: {type: string, format: email}
+    PasswordResetCompleteRequest:
+      type: object
+      required: [reset_token, new_password, proof]
+      properties:
+        reset_token: {type: string, writeOnly: true}
+        new_password: {type: string, format: password, writeOnly: true, minLength: 12}
+        proof:
+          oneOf:
+            - $ref: '#/components/schemas/MfaCodeRequest'
+            - $ref: '#/components/schemas/MfaRecoveryCodeRequest'
+    MfaRecoveryCodeRequest:
+      type: object
+      required: [recovery_code]
+      properties:
+        recovery_code: {type: string, writeOnly: true, minLength: 12}
+    MfaResetCommand:
+      type: object
+      required: [reason, confirmation]
+      properties:
+        reason: {type: string, minLength: 8}
+        confirmation: {type: string, enum: [CONFIRMED]}
+    LoginResult:
+      type: object
+      required: [status]
+      properties:
+        status: {type: string, enum: [AUTHENTICATED, MFA_ENROLLMENT_REQUIRED, MFA_REQUIRED]}
+        recovery_codes:
+          type: array
+          description: One-time recovery codes; returned only when TOTP enrollment completes.
+          items: {type: string}
+    BootstrapStatus:
+      type: object
+      required: [bootstrap_available]
+      properties:
+        bootstrap_available: {type: boolean}
+    MfaCodeRequest:
+      type: object
+      required: [code]
+      properties:
+        code: {type: string, pattern: '^[0-9]{6}$'}
+    MfaEnrollment:
+      type: object
+      required: [provisioning_uri]
+      properties:
+        provisioning_uri:
+          type: string
+          format: uri
+          description: Sensitive one-time TOTP setup URI. Do not log or persist it in the browser.
+    Session:
+      type: object
+      required: [id, user_id, assurance, expires_at]
+      properties:
+        id: {$ref: '#/components/schemas/Id'}
+        user_id: {$ref: '#/components/schemas/Id'}
+        assurance: {type: string, enum: [PASSWORD, MFA]}
+        expires_at: {$ref: '#/components/schemas/Instant'}
+        revoked_at: {$ref: '#/components/schemas/Instant'}
+    Dashboard: {type: object, additionalProperties: true}
+    Account:
+      type: object
+      required: [id, version, name, currency, status]
+      properties:
+        id: {$ref: '#/components/schemas/Id'}
+        version: {type: integer, minimum: 1}
+        name: {type: string}
+        currency: {type: string, minLength: 3, maxLength: 3}
+        status: {type: string}
+    AccountCommand:
+      type: object
+      required: [name, currency, starting_balance]
+      properties:
+        name: {type: string}
+        currency: {type: string, minLength: 3, maxLength: 3}
+        starting_balance: {$ref: '#/components/schemas/Decimal'}
+        broker_integration_id: {$ref: '#/components/schemas/Id'}
+    HighRiskCommand:
+      type: object
+      required: [reason, confirmation, payload]
+      properties:
+        reason: {type: string, minLength: 8}
+        confirmation: {type: string, enum: [CONFIRMED]}
+        payload: {type: object, additionalProperties: true}
+    RiskSnapshot:
+      type: object
+      required: [state, capacity, quality, calculated_at, reason_codes]
+      properties:
+        state: {type: string, enum: [NORMAL, CAUTION, DEFENSIVE, LOCKDOWN]}
+        capacity: {type: integer, minimum: 0, maximum: 2}
+        quality: {type: string, enum: [VERIFIED, STALE, CONTRADICTORY, UNKNOWN]}
+        calculated_at: {$ref: '#/components/schemas/Instant'}
+        reason_codes: {type: array, items: {type: string}}
+    CircuitBreaker:
+      type: object
+      required: [id, version, type, state]
+      properties:
+        id: {$ref: '#/components/schemas/Id'}
+        version: {type: integer}
+        type: {type: string}
+        state: {type: string, enum: [ARMED, TRIPPED, ACKNOWLEDGED, CLEARED]}
+    Integration:
+      type: object
+      required: [id, version, category, provider, status]
+      properties:
+        id: {$ref: '#/components/schemas/Id'}
+        version: {type: integer}
+        category: {type: string}
+        provider: {type: string}
+        status: {type: string, enum: [HEALTHY, DEGRADED, FAILED, DISABLED]}
+        credential_hint: {type: string, description: Masked value only}
+    IntegrationCommand:
+      type: object
+      required: [category, provider, configuration, credentials]
+      properties:
+        category: {type: string}
+        provider: {type: string}
+        configuration: {type: object, additionalProperties: true}
+        credentials: {type: object, writeOnly: true, additionalProperties: true}
+    SecretRotationCommand:
+      type: object
+      required: [reason, confirmation, credentials]
+      properties:
+        reason: {type: string, minLength: 8}
+        confirmation: {const: CONFIRMED}
+        credentials: {type: object, writeOnly: true, additionalProperties: true}
+    Instrument:
+      type: object
+      required: [id, symbol, category, status, specification_quality]
+      properties:
+        id: {$ref: '#/components/schemas/Id'}
+        symbol: {type: string}
+        category: {$ref: '#/components/schemas/MarketCategory'}
+        status: {type: string, enum: [ACTIVE, INACTIVE, ARCHIVED]}
+        specification_quality: {type: string, enum: [VERIFIED, INCOMPLETE, STALE]}
+    MarketResearchCommand:
+      type: object
+      required: [account_id, category, methodology_version]
+      properties:
+        account_id: {$ref: '#/components/schemas/Id'}
+        category: {$ref: '#/components/schemas/MarketCategory'}
+        methodology_version: {type: string}
+        windows: {type: array, items: {type: string}}
+    MarketResearchReport:
+      type: object
+      required: [id, category, status, methodology_version, candidates]
+      properties:
+        id: {$ref: '#/components/schemas/Id'}
+        category: {$ref: '#/components/schemas/MarketCategory'}
+        status: {type: string}
+        methodology_version: {type: string}
+        candidates: {type: array, items: {type: object, additionalProperties: true}}
+    ActiveMarket:
+      type: object
+      required: [category, instrument_id, assessment_id, effective_at]
+      properties:
+        category: {$ref: '#/components/schemas/MarketCategory'}
+        instrument_id: {$ref: '#/components/schemas/Id'}
+        assessment_id: {$ref: '#/components/schemas/Id'}
+        effective_at: {$ref: '#/components/schemas/Instant'}
+    ActiveMarketCommand:
+      type: object
+      required: [instrument_id, candidate_assessment_id, reason, confirmation]
+      properties:
+        instrument_id: {$ref: '#/components/schemas/Id'}
+        candidate_assessment_id: {$ref: '#/components/schemas/Id'}
+        reason: {type: string, minLength: 8}
+        confirmation: {const: CONFIRMED}
+    ResearchCommand: {type: object, additionalProperties: true}
+    Strategy:
+      type: object
+      required: [id, version, name, instrument_id, lifecycle_state]
+      properties:
+        id: {$ref: '#/components/schemas/Id'}
+        version: {type: integer}
+        name: {type: string}
+        instrument_id: {$ref: '#/components/schemas/Id'}
+        lifecycle_state: {type: string}
+    StrategyCommand: {type: object, additionalProperties: true}
+    StrategyVersionCommand:
+      type: object
+      required: [parent_version_id, change_summary, definition]
+      properties:
+        parent_version_id: {$ref: '#/components/schemas/Id'}
+        change_summary: {type: string}
+        definition: {type: object, additionalProperties: true}
+    RunCommand:
+      type: object
+      required: [strategy_version_id, input_manifest]
+      properties:
+        strategy_version_id: {$ref: '#/components/schemas/Id'}
+        input_manifest: {type: object, additionalProperties: true}
+    ApprovalCommand:
+      type: object
+      required: [decision, reason, confirmation]
+      properties:
+        decision: {type: string, enum: [APPROVE_LIVE, REJECT, RETURN_TO_RESEARCH]}
+        reason: {type: string, minLength: 8}
+        confirmation: {const: CONFIRMED}
+    Opportunity:
+      type: object
+      required: [id, state, score, instrument_id, strategy_version_id]
+      properties:
+        id: {$ref: '#/components/schemas/Id'}
+        state: {type: string, enum: [READY, WATCH, WAIT, BLOCKED, NO_TRADE, EXPIRED]}
+        score: {$ref: '#/components/schemas/Decimal'}
+        instrument_id: {$ref: '#/components/schemas/Id'}
+        strategy_version_id: {$ref: '#/components/schemas/Id'}
+        risk_decision: {type: string, enum: [PASS, PASS_REDUCED, BLOCKED]}
+    Recommendation:
+      type: object
+      required: [id, state, opportunity_id, risk_decision_id, expires_at]
+      properties:
+        id: {$ref: '#/components/schemas/Id'}
+        state: {type: string, enum: [ACTIONABLE, EXPIRED, INVALIDATED, MATCHED, WITHDRAWN]}
+        opportunity_id: {$ref: '#/components/schemas/Id'}
+        risk_decision_id: {$ref: '#/components/schemas/Id'}
+        expires_at: {$ref: '#/components/schemas/Instant'}
+        details: {type: object, additionalProperties: true}
+    Position:
+      type: object
+      required: [id, environment, classification, instrument_id, state]
+      properties:
+        id: {$ref: '#/components/schemas/Id'}
+        environment: {type: string, enum: [LIVE, PAPER, DEMO]}
+        classification: {type: string, enum: [RECOMMENDED, DISCRETIONARY, PAPER]}
+        instrument_id: {$ref: '#/components/schemas/Id'}
+        state: {type: string}
+    ClassificationCommand:
+      type: object
+      required: [classification, reason]
+      properties:
+        classification: {type: string, enum: [RECOMMENDED, DISCRETIONARY]}
+        recommendation_id: {$ref: '#/components/schemas/Id'}
+        reason: {type: string}
+    JournalEntry: {type: object, additionalProperties: true}
+    JournalAnnotationCommand:
+      type: object
+      required: [type, value]
+      properties:
+        type: {type: string}
+        value: {}
+    Job:
+      type: object
+      required: [id, version, type, state, progress]
+      properties:
+        id: {$ref: '#/components/schemas/Id'}
+        version: {type: integer}
+        type: {type: string}
+        state: {type: string, enum: [QUEUED, RUNNING, PAUSED, COMPLETED, FAILED, CANCELLED]}
+        progress: {type: object, additionalProperties: true}
+    AuditEvent: {type: object, additionalProperties: true}
+    Problem:
+      type: object
+      required: [type, title, status, code, correlation_id]
+      properties:
+        type: {type: string, format: uri-reference}
+        title: {type: string}
+        status: {type: integer, minimum: 400, maximum: 599}
+        detail: {type: string}
+        instance: {type: string, format: uri-reference}
+        code: {type: string}
+        correlation_id: {type: string}
+        field_errors: {type: array, items: {type: object, additionalProperties: true}}

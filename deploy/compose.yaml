@@ -1,0 +1,101 @@
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: traderx
+      POSTGRES_USER: traderx
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U traderx -d traderx"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [private]
+
+  redis:
+    image: redis:8.2-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [private]
+
+  migrate:
+    build: { context: "..", dockerfile: deploy/containers/python.Dockerfile }
+    command: ["alembic", "upgrade", "head"]
+    environment: &app_environment
+      TRADERX_DATABASE_URL: postgresql+psycopg://traderx@postgres/traderx
+      TRADERX_DATABASE_PASSWORD_FILE: /run/secrets/postgres_password
+      TRADERX_REDIS_URL: redis://redis:6379/0
+      TRADERX_ENVIRONMENT: development
+    depends_on:
+      postgres: { condition: service_healthy }
+    secrets: [postgres_password]
+    networks: [private]
+
+  api:
+    build: { context: "..", dockerfile: deploy/containers/python.Dockerfile }
+    command: ["uvicorn", "traderx_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment: *app_environment
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    secrets: [postgres_password]
+    networks: [private]
+
+  worker-monitoring:
+    build: { context: "..", dockerfile: deploy/containers/python.Dockerfile }
+    command: ["celery", "-A", "traderx_worker.runtime.celery_app", "worker", "-Q", "monitoring,data", "--loglevel=INFO"]
+    environment: *app_environment
+    depends_on: [postgres, redis]
+    secrets: [postgres_password]
+    networks: [private]
+
+  worker-research:
+    build: { context: "..", dockerfile: deploy/containers/python.Dockerfile }
+    command: ["celery", "-A", "traderx_worker.runtime.celery_app", "worker", "-Q", "research,paper,maintenance", "--loglevel=INFO"]
+    environment: *app_environment
+    depends_on: [postgres, redis]
+    secrets: [postgres_password]
+    networks: [private]
+
+  worker-notifications:
+    build: { context: "..", dockerfile: deploy/containers/python.Dockerfile }
+    command: ["celery", "-A", "traderx_worker.runtime.celery_app", "worker", "-Q", "notification", "--loglevel=INFO"]
+    environment: *app_environment
+    depends_on: [postgres, redis]
+    secrets: [postgres_password]
+    networks: [private]
+
+  scheduler:
+    build: { context: "..", dockerfile: deploy/containers/python.Dockerfile }
+    command: ["celery", "-A", "traderx_worker.runtime.celery_app", "beat", "--loglevel=INFO"]
+    environment: *app_environment
+    depends_on: [postgres, redis]
+    secrets: [postgres_password]
+    networks: [private]
+
+  web:
+    build: { context: "..", dockerfile: deploy/containers/web.Dockerfile }
+    environment:
+      NEXT_PUBLIC_TRADERX_API_BASE: /api/v1
+    networks: [private]
+
+  proxy:
+    image: caddy:2.10-alpine
+    ports: ["3000:443"]
+    volumes:
+      - ./proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on: [web, api]
+    networks: [private]
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password
+
+networks:
+  private:
+    internal: true
