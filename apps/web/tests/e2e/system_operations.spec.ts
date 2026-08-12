@@ -1,0 +1,6 @@
+import { expect, test } from "@playwright/test";
+
+test("operations are exposed through the UI", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByText(/manual trading/i)).toBeVisible();
+});
