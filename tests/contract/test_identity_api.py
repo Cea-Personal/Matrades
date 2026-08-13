@@ -43,6 +43,10 @@ def test_initial_owner_bootstrap_requires_totp_before_dashboard_access() -> None
         )
         assert bootstrap.status_code == 201
         assert bootstrap.json()["status"] == "MFA_ENROLLMENT_REQUIRED"
+        assert f"{SESSION_COOKIE}=" in bootstrap.headers["set-cookie"]
+        assert "Secure" in bootstrap.headers["set-cookie"]
+        assert "HttpOnly" in bootstrap.headers["set-cookie"]
+        assert "SameSite=strict" in bootstrap.headers["set-cookie"]
         password_token = bootstrap.cookies[SESSION_COOKIE]
         password_headers = {"Cookie": f"{SESSION_COOKIE}={password_token}"}
 

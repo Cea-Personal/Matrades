@@ -135,7 +135,10 @@ def _set_session_cookie(response: Response, token: str) -> None:
         key=SESSION_COOKIE,
         value=token,
         max_age=settings.session_absolute_hours * 60 * 60,
-        secure=settings.environment != "development",
+        # The __Host- prefix is accepted by browsers only for Secure cookies.
+        # TraderX exposes authentication only through the HTTPS proxy, including
+        # local development, so the transport guarantee must never be relaxed.
+        secure=True,
         httponly=True,
         samesite="strict",
         path="/",

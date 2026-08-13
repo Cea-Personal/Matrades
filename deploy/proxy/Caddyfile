@@ -4,7 +4,8 @@ localhost:443 {
   tls internal
   encode zstd gzip
   header {
-    Content-Security-Policy "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    # The web application generates a per-request nonce CSP so its hydration
+    # scripts can run without allowing arbitrary inline scripts.
     Referrer-Policy "no-referrer"
     X-Content-Type-Options "nosniff"
     X-Frame-Options "DENY"

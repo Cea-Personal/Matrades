@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { connection } from "next/server";
 import { ReactNode } from "react";
 
 import { Providers } from "./providers";
@@ -6,7 +7,10 @@ import "./globals.css";
 
 export const metadata = { title: "TraderX", description: "Conservative trading decision support" };
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default async function RootLayout({ children }: { children: ReactNode }) {
+  // CSP nonces are generated per request, so pages must not be statically rendered.
+  await connection();
+
   return (
     <html lang="en">
       <body>
