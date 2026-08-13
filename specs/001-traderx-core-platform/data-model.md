@@ -97,8 +97,8 @@ creates a target-user operational session.
 | `name` | User-facing name |
 | `mode` | `LIVE`, `PAPER`, or `DEMO` |
 | `currency` | ISO currency code |
-| `broker_integration_id` | Enabled broker connection |
-| `provider_account_id` | Encrypted or masked external identifier as appropriate |
+| `broker_integration_id` | The tested, enabled broker connection that is the only risk-authoritative source |
+| `provider_account_id` | Explicitly selected external account identifier; OANDA account ID or the verified MT5 login/server pair, encrypted or masked as appropriate |
 | `starting_balance` | Positive decimal |
 | `prop_profile_id` | Current external rule version |
 | `risk_policy_id` | Current internal rule version |
@@ -120,10 +120,13 @@ author, and reason.
 
 ### AccountSnapshot
 
-Append-only observation containing provider sequence/time, observed/received time, balance, equity,
-realized and floating profit/loss, margin and free margin, broker-reported daily values, data
-quality/freshness, and raw-payload reference. Unique on integration plus provider observation
-identity to prevent double counting.
+Append-only observation containing integration/account identity, provider sequence/time,
+observed/received time, balance, equity, realized and floating profit/loss, margin and free
+margin, broker-reported daily values, data quality/freshness, reconciliation checkpoint reference,
+and raw-payload reference. OANDA records the source `NAV` used for equity; MT5 records the verified
+login/server and terminal observation. Unique on integration plus provider observation identity to
+prevent double counting. A snapshot becomes risk-authoritative only when its linked reconciliation
+outcome is complete, coherent, and within the configured freshness SLO.
 
 ### RiskSnapshot
 
@@ -169,8 +172,19 @@ Fields: `id`, category (`BROKER`, `MARKET_DATA`, `ECONOMIC`, `MACRO`, `CRYPTO`, 
 `MESSAGING`), provider type, display name, enabled state, capability allowlist, configuration
 without secrets, credential version reference, created/updated by, and concurrency version.
 
-Validation: a live broker integration cannot advertise or invoke order-submission capabilities.
-Production data integrations must be approved official connections or datasets, never scrapers.
+For V1 broker connections, `provider_type` is exactly one of:
+
+- `OANDA_V20`: configuration contains environment (`PRACTICE` or explicit `LIVE`) and the selected
+  account only after discovery. Its credential version contains an encrypted Personal Access Token.
+  `PRACTICE` is the default for a new integration.
+- `MT5_TERMINAL_BRIDGE`: configuration contains the registered HTTPS bridge identity/URL, MT5
+  account login, and broker server. Its credential version contains only the TraderX-to-bridge
+  client credential. The investor password exists only in the bridge's separate secret boundary.
+
+Broker capabilities are a fixed subset of `ACCOUNT_READ`, `POSITION_READ`, `DEAL_READ`,
+`INSTRUMENT_READ`, and optional `QUOTE_READ`; they cannot include order placement, modification,
+cancellation, or closure. Production data integrations must be approved official connections or
+datasets, never scrapers.
 
 ### IntegrationCredentialVersion
 
@@ -182,6 +196,24 @@ persisted outside the encryption boundary.
 
 Fields: integration, state (`HEALTHY`, `DEGRADED`, `FAILED`, `DISABLED`), observed/received times,
 last success, latency, freshness, error category and redacted detail, and affected capabilities.
+
+For a broker connection, include verified provider-account identity, reconciliation completeness,
+and provider-safe diagnostics: OANDA environment/last transaction cursor fingerprint or MT5 bridge
+identity, terminal version, connection state, and trading-permitted flags. Credentials, full
+cursors, MT5 password, and raw provider errors are not exposed in health responses.
+
+### BrokerReconciliationCheckpoint
+
+Append-only checkpoint for an integration and selected provider account. Fields: `id`, provider
+type, opaque source cursor or overlapping-history window fingerprint, authoritative snapshot
+identity, source/observed/committed times, completeness, validation outcome, raw-evidence hash,
+and superseded checkpoint reference.
+
+For OANDA, the cursor is `lastTransactionID` from a complete snapshot or accepted account-changes
+response. For MT5, the checkpoint is a bounded, overlapping deal-history window plus the terminal
+account/server identity; it is not a fabricated sequence cursor. A successful checkpoint and its
+normalized account snapshot commit in one transaction. Invalid, partial, stale, or contradictory
+results create evidence and health/breaker state but never advance the last usable checkpoint.
 
 ### BackgroundJob
 

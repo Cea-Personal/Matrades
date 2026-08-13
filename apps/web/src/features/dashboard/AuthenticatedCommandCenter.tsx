@@ -1,21 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { CommandCenter } from "./CommandCenter";
-
-type Dashboard = {
-  risk: { state: string; capacity: number };
-};
+import { CommandCenter, type Dashboard } from "./CommandCenter";
 
 export function AuthenticatedCommandCenter() {
   const router = useRouter();
   const [dashboard, setDashboard] = useState<Dashboard>();
   const [error, setError] = useState<string>();
 
-  useEffect(() => {
-    void fetch("/api/v1/dashboard", { credentials: "same-origin" }).then(async (response) => {
+  const loadDashboard = useCallback(async () => {
+    try {
+      const response = await fetch("/api/v1/dashboard", { credentials: "same-origin" });
       if (response.status === 401) {
         router.replace("/sign-in?reason=session-expired");
         return;
@@ -25,10 +22,18 @@ export function AuthenticatedCommandCenter() {
         return;
       }
       setDashboard(await response.json() as Dashboard);
-    }).catch(() => setError("The Command Center is unavailable. Please try again."));
+    } catch {
+      setError("The Command Center is unavailable. Please try again.");
+    }
   }, [router]);
+
+  useEffect(() => {
+    // Defer the request to an asynchronous task so this effect only establishes
+    // the external fetch, rather than synchronously cascading a state update.
+    void Promise.resolve().then(loadDashboard);
+  }, [loadDashboard]);
 
   if (error) return <p role="alert">{error}</p>;
   if (!dashboard) return <p role="status">Loading Command Center…</p>;
-  return <CommandCenter capacity={dashboard.risk.capacity} state={dashboard.risk.state} />;
+  return <CommandCenter dashboard={dashboard} onAccountChanged={loadDashboard} />;
 }

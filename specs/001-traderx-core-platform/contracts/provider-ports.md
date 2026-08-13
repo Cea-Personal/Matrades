@@ -31,7 +31,7 @@ list_instruments(account_ref)
 get_instrument_spec(account_ref, provider_symbol)
 get_open_positions(account_ref)
 get_deals(account_ref, cursor_or_range)
-stream_account_and_position_changes(account_ref, cursor)
+get_account_changes(account_ref, cursor)  # returns UNSUPPORTED if no documented delta protocol exists
 ```
 
 Normalized outputs:
@@ -60,10 +60,71 @@ close_live_position
 Adapters that require broad provider credentials MUST still enforce the read-only capability
 allowlist inside TraderX. Connection testing fails if the configured use cannot be limited safely.
 
+### OANDA v20 Adapter Profile
+
+The OANDA adapter uses only the official v20 REST host selected by integration environment:
+`https://api-fxpractice.oanda.com` for `PRACTICE` and `https://api-fxtrade.oanda.com` for `LIVE`.
+It accepts a write-only Personal Access Token and first calls `GET /v3/accounts` to discover the
+accounts accessible to that credential. A TraderX account cannot bind until its owner selects one
+returned `accountID`.
+
+- Bootstrap with `GET /v3/accounts/{accountID}`. Normalize its account, open positions, and open
+  trades as one coherent snapshot; map OANDA `NAV` to TraderX `equity`; save `lastTransactionID`.
+- Increment with `GET /v3/accounts/{accountID}/changes?sinceTransactionID={cursor}`. Apply both
+  transaction-derived `changes` and price-dependent `state`; advance the cursor only with a
+  complete successful normalization.
+- Cross-check current risk with `GET /v3/accounts/{accountID}/openPositions` and, when needed,
+  `GET /v3/accounts/{accountID}/openTrades`. Use documented transaction history pages/ranges for
+  audit recovery; transaction identities are immutable source IDs.
+- Allow only reviewed GET methods for account, position, trade, transaction, and instrument reads.
+  The adapter has no generic HTTP method/path escape hatch. On invalid cursor, selected-account
+  mismatch, unsuccessful validation, 401/403/404, exhausted 429 retry, TLS/network failure, or
+  stale data, it records evidence and demands a new complete bootstrap.
+
+The provider credential may be capable of more than reading. Its scope is therefore not an
+authorization claim made by TraderX; the endpoint/method allowlist, secret handling, and outbound
+egress restriction are mandatory compensating controls. See OANDA's
+[account model](https://developer.oanda.com/rest-live-v20/account-ep/) and
+[account-change guidance](https://developer.oanda.com/rest-live-v20/best-practices/).
+
+### MetaTrader 5 Terminal-Bridge Profile
+
+The MT5 adapter communicates only with a registered bridge over mutually authenticated HTTPS. The
+bridge is co-located with one provisioned MT5 terminal and owns that terminal's investor/read-only
+password. TraderX sends no order intent and never persists or returns the MT5 password.
+
+The bridge must expose only these read operations to the TraderX adapter:
+
+```text
+get_health_and_terminal_state()
+get_account_snapshot()
+get_open_positions()
+get_deals(overlapping_time_range)
+list_instruments()
+get_instrument_spec(provider_symbol)
+get_quote(provider_symbol)  # optional
+```
+
+Internally, the bridge may use only terminal lifecycle/diagnostic APIs, `terminal_info`,
+`account_info`, `positions_get`, `history_deals_get`, `symbols_get`, `symbol_info`, and optional
+`symbol_info_tick`. It MUST NOT invoke `order_send`, `order_check`, `order_calc_margin`,
+`order_calc_profit`, `symbol_select`, scripts, EAs, or any other state-changing terminal function.
+Every response proves the configured login/server, terminal connectivity, and `trade_allowed =
+false` for account and terminal. A `None`/missing MT5 result, account mismatch, disconnect,
+trading-enabled flag, non-fresh response, or incomplete snapshot is a failed observation, never an
+empty portfolio.
+
+There is no MT5 transaction cursor assumption. Reconciliation polls one terminal/account at a time,
+upserts positions by terminal ticket/identifier, and deduplicates deal history by immutable deal
+ticket plus account/server over an overlapping window. It retains source/observation time and runs
+periodic fuller lookbacks. The bridge validates its narrow contract and denied API surface in CI;
+the core adapter validates mTLS identity, response schema, freshness, and account binding.
+
 ### Reconciliation
 
 - Begin with an authoritative account/position snapshot.
-- Apply streams for latency where supported.
+- Apply documented account-change/delta protocols for latency where supported; otherwise use the
+  provider's bounded polling protocol.
 - Poll authoritative snapshots periodically and after reconnect or detected sequence gaps.
 - Preserve every partial fill/deal independently.
 - Duplicate/out-of-order inputs are evidence but cannot regress the current projection.
@@ -141,3 +202,7 @@ Every adapter MUST pass contract tests for:
 - canonical instrument alias/specification mapping;
 - incremental historical synchronization without overwriting evidence; and
 - absence of callable real-money order methods in broker implementations.
+- OANDA practice/live host selection, selected-account binding, GET-only allowlist, transaction
+  cursor recovery, and `NAV`-to-equity evidence;
+- MT5 bridge mTLS identity, investor-password/trading-disabled checks, rejected null responses,
+  account/server match, overlapping-deal reconciliation, and denied terminal API surface.

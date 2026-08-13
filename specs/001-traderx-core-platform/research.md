@@ -364,6 +364,125 @@ providing a practical, bounded operating session.
 **Alternatives considered**: Client-only timers, rolling unlimited sessions, eight-hour idle
 sessions, and explicit-logout-only sessions are rejected.
 
+## 22. OANDA v20 Read-Only Account Adapter
+
+**Decision**: Use the official OANDA v20 REST API directly for account truth. The UI creates a
+broker integration with an explicit `PRACTICE` or `LIVE` environment (defaulting to `PRACTICE`) and
+a write-only Personal Access Token (PAT), then tests the token with the account-discovery endpoint.
+The owner must select exactly one returned OANDA account before it can bind to TraderX. A PAT grants
+access to all of its account holder's sub-accounts, so it is treated as a password and is never
+returned, logged, or copied into jobs.
+
+Bootstrap each selected account with the complete account endpoint, which supplies a self-consistent
+account/position/trade snapshot and `lastTransactionID`. Map OANDA `NAV` explicitly to TraderX
+`equity`, retain the source field name as evidence, and use `openPositions`/`openTrades` as
+diagnostic cross-checks rather than racing independent projections. Thereafter poll account changes
+from the saved transaction cursor, apply returned `changes` plus the authoritative price-dependent
+`state`, and commit the returned cursor only when normalized validation succeeds. An invalid cursor,
+gap, account mismatch, bad required number, or freshness breach requires a complete bootstrap;
+the prior snapshot remains audit evidence but cannot authorize risk. History uses immutable
+transaction identifiers and documented pagination/ranges.
+
+The implementation owns a strict GET-only endpoint allowlist, egress allowlist for the chosen OANDA
+host, redacted request correlation, bounded retry/backoff for rate limits, and credential revocation
+on disconnect. It never exposes a generic OANDA client or an order/configuration endpoint. OANDA
+documents practice and live REST hosts separately, its account/change endpoints, and a REST limit
+of 120 requests per second per IP; the 15-second TraderX poll target is deliberately much more
+conservative. See [OANDA authentication](https://developer.oanda.com/rest-live-v20/authentication/),
+[account endpoints](https://developer.oanda.com/rest-live-v20/account-ep/),
+[transaction endpoints](https://developer.oanda.com/rest-live-v20/transaction-ep/),
+[best practices](https://developer.oanda.com/rest-live-v20/best-practices/), and the
+[development guide](https://developer.oanda.com/rest-live-v20/development-guide/).
+
+**Rationale**: OANDA's documented complete snapshot plus transaction-cursor changes provide a
+coherent, recoverable account-truth protocol. Independent calls may be useful for diagnosis but
+are not safe as an unversioned merge source. An adapter-level GET allowlist protects the TraderX
+product boundary even where the provider credential is broader than needed.
+
+**Alternatives considered**: polling account summary alone, treating a missing response as zero
+positions, consuming only a transaction stream, storing one cursor before validating the resulting
+projection, or enabling a live connection by default are rejected.
+
+**Release-gating unknown**: the public v20 material does not establish a customer-usable read-only
+PAT or OAuth scope for this use case. Production distribution requires provider confirmation of a
+least-privilege credential or a documented security exception with compensating controls; the
+adapter's own read-only allowlist is mandatory in either case.
+
+## 23. MetaTrader 5 Read-Only Terminal Bridge
+
+**Decision**: Integrate MT5 through an isolated terminal bridge, not a direct core-service API
+client. The official `MetaTrader5` Python package communicates through IPC with a locally running
+terminal, so the first production bridge is a small service on a managed Windows host beside one
+provisioned terminal/account. It exposes only mutually authenticated HTTPS `health`,
+`account-snapshot`, `positions`, `deals`, and `instruments` operations to TraderX. The core API
+stores bridge registration/client credentials, not the MT5 password; the bridge stores the
+account-specific investor password in its own encryption boundary.
+
+Every bridge connection uses explicit terminal path, login, server, and investor password. Before
+publishing and on every poll, it verifies terminal connectivity, exact `account_info` login/server,
+and `trade_allowed = false` for both account and terminal. Its internal allowlist is limited to
+initialization/lifecycle diagnostics, terminal/account info, positions, historical deals, symbols,
+instrument info, and optional tick reads. It must not call `symbol_select`, `order_check`,
+`order_send`, calculation helpers, scripts, EAs, or any trade method. A null MT5 result is an error
+to classify using `last_error`, never proof that no position or deal exists.
+
+Polling is single-flight per terminal/account at a 15-second normal cadence with bounded manual
+refresh, an overlapping deal-history window, immutable deal-ticket deduplication, and periodic
+full lookback reconciliation. A snapshot is rejected when any component is missing, stale,
+disconnected, inconsistent, or belongs to a different login/server. The bridge reports source and
+observation times, terminal version/connection diagnostics, source IDs, and payload hashes; it
+never overwrites a previous valid snapshot silently. MT5's investor password is the provider
+mechanism that makes account trading disallowed. See the official
+[Python integration overview](https://www.mql5.com/en/docs/python_metatrader5),
+[`initialize`](https://www.mql5.com/en/docs/python_metatrader5/mt5initialize_py),
+[terminal information](https://www.mql5.com/en/docs/python_metatrader5/mt5terminalinfo_py),
+[account information](https://www.mql5.com/en/docs/python_metatrader5/mt5accountinfo_py),
+[positions](https://www.mql5.com/en/docs/python_metatrader5/mt5positionsget_py),
+[deal history](https://www.mql5.com/en/docs/python_metatrader5/mt5historydealsget_py), and the
+[investor-password restriction](https://www.mql5.com/en/book/automation/account/account_limits_and_restrictions).
+
+**Rationale**: MT5's integration boundary is a terminal process, not a broker REST API. A local
+bridge makes that boundary explicit, permits network and credential isolation, and produces a
+small contract that can be verified as incapable of trading. Investor-password and
+`trade_allowed` checks provide defense in depth rather than relying on code-path intent.
+
+**Alternatives considered**: importing `MetaTrader5` into the Linux API container, sharing one
+terminal among accounts, a Docker/headless terminal without a compatibility proof, using a normal
+trading password, remote desktop as a data protocol, and treating `None` as an empty result are
+rejected.
+
+**Release-gating unknowns**: confirm broker investor-password support, server naming, retained
+deal history, symbol suffixes, terminal restart behavior, and a Windows-host bridge proof of
+connectivity. The vendor documents Linux installation through Wine but does not make Docker or
+headless terminal operation a supported deployment assumption.
+
+## 24. Provider Selection, Freshness, and Account Authority
+
+**Decision**: V1 supports only `OANDA_V20` and `MT5_TERMINAL_BRIDGE` for broker account truth. An
+authenticated owner creates/tests an integration, sees only discovered/verified provider accounts,
+then binds one account as TraderX's primary live account. The risk service accepts account truth
+only from the bound integration after a complete, fresh reconciliation. Configured but unbound,
+disabled, degraded, or failed integrations never replace the primary account automatically.
+
+Record provider-specific cursor or overlapping-window checkpoints separately from append-only raw
+observations and account snapshots. A checkpoint advances atomically with a normalized complete
+snapshot. Any authentication, authorization, TLS/network, rate-limit exhaustion, schema,
+identity, cursor/window, or freshness failure triggers an integration-scoped data-quality breaker;
+the account remains in `LOCKDOWN` until a subsequent complete reconciliation clears it through the
+normal breaker lifecycle. Provider health transitions, connection tests, account selection, binding,
+credential rotation, and recovery are auditable high-risk actions.
+
+**Rationale**: TraderX needs one unambiguous source for balance, equity, and positions. A
+provider-neutral authority rule prevents a secondary connection, stale cached state, or a partial
+reconnect from silently changing portfolio risk.
+
+**Alternatives considered**: accepting the newest provider response without an account binding,
+merging simultaneous broker accounts, clearing a breaker on transport recovery alone, storing a
+cursor outside the snapshot transaction, and automatic provider failover are rejected.
+
 ## Resolution Status
 
-All Technical Context unknowns are resolved. The decisions introduce no constitutional exception.
+The core Technical Context is resolved. Provider-specific release gates are explicit: OANDA
+least-privilege credential confirmation and an MT5 Windows bridge proof with a target broker's
+investor-password account. They do not permit a constitutional exception; until resolved, affected
+accounts stay unavailable for risk authority.

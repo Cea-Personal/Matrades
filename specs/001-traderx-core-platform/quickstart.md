@@ -13,6 +13,9 @@ interfaces are defined under [contracts/](contracts/).
 - Python 3.13 and `uv`
 - No real-money trading credentials; use contract fixtures, sandbox/demo accounts, or read-only
   test credentials only
+- For broker-adapter validation: an OANDA **practice** Personal Access Token and a dedicated MT5
+  **demo** account using an investor/read-only password. The MT5 password is provisioned only to a
+  registered test terminal bridge, never to TraderX's central API.
 - A test MFA authenticator and optional test Email/Telegram destinations
 
 Never place production secrets in shell history, repository files, fixtures, screenshots, or test
@@ -105,12 +108,47 @@ Expected outcomes:
 
 ## 5. Validate Integrations and Fail-Closed Data
 
-1. Connect a fixture broker through the UI with a write-only secret.
-2. Test, disable, reconnect, and rotate the credential.
-3. Ingest canonical account, instrument, quote, candle, position, and deal fixtures.
-4. Replay duplicates, out-of-order observations, a partial fill, a stream gap, and a contradictory
-   authoritative snapshot.
-5. Advance the fixture clock beyond the freshness policy and restore it with reconciliation.
+### OANDA v20
+
+1. In the authenticated Integrations UI choose **OANDA v20**. Confirm `PRACTICE` is preselected;
+   do not use `LIVE` for this validation. Enter the practice PAT in the write-only field and run
+   **Test connection**.
+2. Confirm that the test discovers only the accounts accessible to that PAT. Select one, create or
+   bind the TraderX account to the returned provider account ID, and confirm the Command Center
+   displays the normalized balance, OANDA `NAV` mapped to equity, and open-position count.
+3. Record the full bootstrap snapshot and `lastTransactionID`. Replay OANDA account-change fixtures
+   with duplicate, out-of-order, invalid-cursor, and selected-account-mismatch cases. Verify a
+   cursor moves only after the entire normalized snapshot validates; recovery must run a full
+   bootstrap rather than merge a partial delta.
+4. Attempt a non-GET OANDA operation in adapter contract tests. It must be impossible to construct
+   or send. Revoke/rotate the PAT, generate a 401/429/timeout fixture, and advance the snapshot
+   beyond the freshness policy.
+
+### MetaTrader 5 terminal bridge
+
+1. Provision a test bridge on the managed Windows host beside one MT5 terminal. Configure that
+   terminal with its demo investor/read-only password, then register its bridge URL/identity,
+   account login, server, and write-only TraderX-to-bridge client secret in the Integrations UI.
+   The central API must not receive or persist the MT5 password.
+2. Run **Test connection** and require the bridge to prove mTLS identity, terminal connectivity,
+   exact login/server, and `trade_allowed = false` at both the account and terminal. Select the
+   verified provider account and bind it through the same account UI flow.
+3. Verify a complete snapshot includes account equity/balance, positions, overlapping deal history,
+   instrument specifications, source/observation time, and a safe terminal diagnostic. Replay a
+   terminal disconnect, `None` result, stale response, account/server mismatch, trading-enabled
+   flag, duplicate deal, and partial response. None may be interpreted as an empty portfolio.
+4. Contract-test the bridge's terminal allowlist and denylist: read methods work; `order_send`,
+   `order_check`, calculation helpers, `symbol_select`, scripts, EAs, and every order endpoint are
+   absent or rejected before reaching a terminal.
+
+### Shared fail-closed behavior
+
+1. Test, disable, reconnect, and rotate each integration's applicable write-only credential.
+2. Ingest canonical account, instrument, quote, candle, position, and deal fixtures.
+3. Replay duplicates, out-of-order observations, a partial fill, a reconciliation gap, and a
+   contradictory authoritative snapshot.
+4. Advance the fixture clock beyond the freshness policy and restore it with a complete
+   reconciliation.
 
 Expected outcomes:
 
@@ -121,6 +159,12 @@ Expected outcomes:
   blocks new recommendations;
 - fresh authoritative reconciliation clears the data block only through the configured breaker
   lifecycle, retaining all history.
+- OANDA uses only the selected practice/live host and a GET-only endpoint allowlist; a PAT is never
+  displayed or logged, and lack of a provider-proven read-only PAT remains a production release
+  gate;
+- MT5 account truth is accepted only from the registered mTLS bridge when its terminal and account
+  are connected, identity-matched, trading-disabled, complete, and fresh. A central Docker service
+  does not communicate directly with an MT5 terminal.
 
 ## 6. Validate Market Selection
 

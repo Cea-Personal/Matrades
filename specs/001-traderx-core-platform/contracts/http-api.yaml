@@ -375,6 +375,21 @@ paths:
         - $ref: '#/components/parameters/IntegrationId'
       responses:
         '202': {$ref: '#/components/responses/AcceptedJob'}
+  /integrations/{integration_id}/accounts:
+    get:
+      tags: [Integrations]
+      operationId: listDiscoveredBrokerAccounts
+      parameters:
+        - $ref: '#/components/parameters/IntegrationId'
+      responses:
+        '200':
+          description: Provider accounts discovered by the latest successful, non-stale integration test. Secrets and credentials are never included.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/ProviderAccountCandidate'}
+        '409': {$ref: '#/components/responses/Problem'}
   /integrations/{integration_id}/credentials:
     put:
       tags: [Integrations]
@@ -898,6 +913,9 @@ components:
         currency: {type: string, minLength: 3, maxLength: 3}
         starting_balance: {$ref: '#/components/schemas/Decimal'}
         broker_integration_id: {$ref: '#/components/schemas/Id'}
+        provider_account_id:
+          type: string
+          description: A broker account returned by GET /integrations/{integration_id}/accounts; required when binding a broker source of risk truth.
     HighRiskCommand:
       type: object
       required: [reason, confirmation, payload]
@@ -929,17 +947,89 @@ components:
         id: {$ref: '#/components/schemas/Id'}
         version: {type: integer}
         category: {type: string}
-        provider: {type: string}
+        provider:
+          type: string
+          description: Broker V1 providers are OANDA_V20 and MT5_TERMINAL_BRIDGE. Other categories define their own provider values.
         status: {type: string, enum: [HEALTHY, DEGRADED, FAILED, DISABLED]}
         credential_hint: {type: string, description: Masked value only}
     IntegrationCommand:
+      oneOf:
+        - $ref: '#/components/schemas/OandaV20IntegrationCommand'
+        - $ref: '#/components/schemas/Mt5TerminalBridgeIntegrationCommand'
+        - $ref: '#/components/schemas/NonBrokerIntegrationCommand'
+    OandaV20IntegrationCommand:
+      type: object
+      required: [category, provider, configuration, credentials]
+      additionalProperties: false
+      properties:
+        category: {const: BROKER}
+        provider: {const: OANDA_V20}
+        configuration: {$ref: '#/components/schemas/OandaV20Configuration'}
+        credentials: {$ref: '#/components/schemas/OandaV20Credentials'}
+    OandaV20Configuration:
+      type: object
+      required: [environment]
+      additionalProperties: false
+      properties:
+        environment: {type: string, enum: [PRACTICE, LIVE], default: PRACTICE}
+        account_id:
+          type: string
+          description: Optional until test succeeds; the owner must select a discovered account before it is bound to a TradingAccount.
+    OandaV20Credentials:
+      type: object
+      required: [personal_access_token]
+      additionalProperties: false
+      properties:
+        personal_access_token: {type: string, minLength: 1, writeOnly: true}
+    Mt5TerminalBridgeIntegrationCommand:
+      type: object
+      required: [category, provider, configuration, credentials]
+      additionalProperties: false
+      properties:
+        category: {const: BROKER}
+        provider: {const: MT5_TERMINAL_BRIDGE}
+        configuration: {$ref: '#/components/schemas/Mt5TerminalBridgeConfiguration'}
+        credentials: {$ref: '#/components/schemas/Mt5TerminalBridgeCredentials'}
+    Mt5TerminalBridgeConfiguration:
+      type: object
+      required: [bridge_url, bridge_id, account_login, server]
+      additionalProperties: false
+      properties:
+        bridge_url: {type: string, format: uri, pattern: '^https://'}
+        bridge_id: {type: string, minLength: 1}
+        account_login: {type: string, minLength: 1}
+        server: {type: string, minLength: 1}
+    Mt5TerminalBridgeCredentials:
+      type: object
+      required: [bridge_client_secret]
+      additionalProperties: false
+      properties:
+        bridge_client_secret:
+          type: string
+          minLength: 1
+          writeOnly: true
+          description: Authenticates TraderX to the registered bridge. It is not an MT5 trading or investor password.
+    NonBrokerIntegrationCommand:
       type: object
       required: [category, provider, configuration, credentials]
       properties:
-        category: {type: string}
+        category:
+          type: string
+          not: {const: BROKER}
         provider: {type: string}
         configuration: {type: object, additionalProperties: true}
         credentials: {type: object, writeOnly: true, additionalProperties: true}
+    ProviderAccountCandidate:
+      type: object
+      required: [provider_account_id, provider, verification_status]
+      properties:
+        provider_account_id: {type: string}
+        provider: {type: string, enum: [OANDA_V20, MT5_TERMINAL_BRIDGE]}
+        display_name: {type: string}
+        currency: {type: string, minLength: 3, maxLength: 3}
+        account_mode: {type: string, enum: [PRACTICE, DEMO, LIVE, UNKNOWN]}
+        verification_status: {type: string, enum: [DISCOVERED, VERIFIED, UNAVAILABLE]}
+        verified_at: {$ref: '#/components/schemas/Instant'}
     SecretRotationCommand:
       type: object
       required: [reason, confirmation, credentials]

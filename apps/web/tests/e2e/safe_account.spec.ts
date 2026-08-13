@@ -57,3 +57,51 @@ test("first-owner signup advances directly to authenticator enrollment", async (
   await expect(page.getByRole("heading", { name: "Set up your authenticator" })).toBeVisible();
   await expect(page.getByLabel("Authenticator setup key")).toContainText("JBSWY3DPEHPK3PXP");
 });
+
+test("Command Center gives a new owner a safe account-configuration path", async ({ page }) => {
+  let accountCreated = false;
+  const noAccount = {
+    account: null,
+    risk: { state: "LOCKDOWN", capacity: 0, quality: "UNKNOWN", reason_codes: ["NO_PRIMARY_ACCOUNT"] },
+    metrics: null,
+    onboarding: {
+      account_configured: false,
+      prop_profile_configured: false,
+      risk_policy_configured: false,
+      account_data_verified: false
+    }
+  };
+  const account = {
+    id: "93c4d259-3341-4d26-91d5-7891e3f1b340",
+    name: "Primary evaluation",
+    mode: "LIVE",
+    currency: "USD",
+    starting_balance: "100000",
+    status: "DRAFT",
+    version: 1,
+    etag: "\"account-1\"",
+    prop_profile_configured: false,
+    risk_policy_configured: false
+  };
+
+  await page.route("**/api/v1/dashboard", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(accountCreated ? { ...noAccount, account, onboarding: { ...noAccount.onboarding, account_configured: true }, risk: { ...noAccount.risk, reason_codes: ["NO_VERIFIED_ACCOUNT_SNAPSHOT"] } } : noAccount)
+    });
+  });
+  await page.route("**/api/v1/accounts", async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    accountCreated = true;
+    await route.fulfill({ contentType: "application/json", status: 201, body: JSON.stringify(account) });
+  });
+
+  await page.goto("/command-center");
+  await expect(page.getByRole("heading", { name: "Command Center" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "New recommendations are blocked" })).toBeVisible();
+  await expect(page.getByRole("form", { name: "Primary account setup" })).toBeVisible();
+  await page.getByLabel("Account name").fill("Primary evaluation");
+  await page.getByLabel("Starting balance").fill("100000");
+  await page.getByRole("button", { name: "Record account identity" }).click();
+  await expect(page.getByRole("heading", { name: "Record external loss rules" })).toBeVisible();
+});

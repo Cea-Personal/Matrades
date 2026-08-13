@@ -1,19 +1,22 @@
 # Implementation Plan: TraderX Core Platform
 
 **Branch**: `001-traderx-core-platform` (Spec Kit feature context; current Git branch: `master`) |
-**Date**: 2026-08-12 | **Spec**: [spec.md](spec.md)
+**Date**: 2026-08-13 | **Spec**: [spec.md](spec.md)
 
 **Input**: Feature specification from `specs/001-traderx-core-platform/spec.md` and the attached
-TraderX Speckit Plan v1.0.0, reconciled with TraderX Constitution v1.1.0.
+TraderX Speckit Plan v1.0.0, reconciled with TraderX Constitution v1.1.0 and amended to select
+OANDA v20 and MetaTrader 5 as the initial broker-account integrations.
 
 ## Summary
 
 Build TraderX as a modular monolith with an authenticated browser UI, one application API, and
 asynchronous workers sharing a deterministic domain core. PostgreSQL is the system of record;
 Redis coordinates transient jobs and events but never owns financial truth. Provider adapters
-normalize broker, market, economic, and notification integrations. The delivery order establishes
-identity, audit, account truth, and risk controls before market selection, strategy research,
-paper trading, live recommendations, monitoring, journaling, and learning.
+normalize broker, market, economic, and notification integrations. The first broker-account
+adapters are an OANDA v20 REST adapter and a MetaTrader 5 (MT5) terminal bridge; both provide
+account truth only and expose no trading operation. The delivery order establishes identity,
+audit, account truth, and risk controls before market selection, strategy research, paper
+trading, live recommendations, monitoring, journaling, and learning.
 
 The design has no real-money order submission capability. It admits one user-approved Commodity,
 Forex pair, and Cryptocurrency pair to the active universe only after data, liquidity, execution,
@@ -32,8 +35,10 @@ server-validated MFA session.
 24 LTS with TypeScript 5.9 for the web application; SQL and YAML for migrations and contracts
 
 **Primary Dependencies**: Next.js 16, React 19, TanStack Query, Tailwind CSS, Zod, Lightweight
-Charts; FastAPI, Pydantic 2, SQLAlchemy 2, Alembic, Celery 5, Polars, NumPy, SciPy, pandas only at
-compatibility boundaries, and vectorbt behind an internal backtesting port
+Charts; FastAPI, Pydantic 2, SQLAlchemy 2, Alembic, Celery 5, HTTPX for the OANDA adapter, Polars,
+NumPy, SciPy, pandas only at compatibility boundaries, and vectorbt behind an internal backtesting
+port. The MT5 bridge is a separately deployed, small Python service that uses the official
+`MetaTrader5` terminal IPC package; the core API never imports that package.
 
 **Storage**: PostgreSQL 18 as the sole durable system of record; Redis 8 for job coordination,
 short-lived caching, distributed locks, and delivery queues; object storage or filesystem-backed
@@ -44,7 +49,10 @@ for Python; Vitest, Testing Library, Playwright, ESLint, and TypeScript checks f
 contract, integration, reproducibility, safety, security, data-quality, and end-to-end suites
 
 **Target Platform**: Linux server deployed as containers behind HTTPS; evergreen desktop and
-mobile browsers; workers and scheduled monitoring continue independently of browser sessions
+mobile browsers; workers and scheduled monitoring continue independently of browser sessions. The
+MT5 bridge initially runs beside one provisioned MT5 terminal on a managed Windows host, connected
+to TraderX over mutually authenticated HTTPS; Docker/headless MT5 is release-blocked pending a
+separate proof of compatibility.
 
 **Project Type**: Authenticated web application with a modular-monolith backend and separately
 scalable asynchronous worker processes
@@ -61,7 +69,10 @@ manual real-money execution only; no production scraping; immutable strategy ver
 theses; UTC storage with explicit account reset time zone; decimal arithmetic for money, price,
 size, and risk; all ordinary operation through the authenticated UI; initial owner setup is
 one-time and UI-only; sessions expire after 30 idle minutes or 12 absolute hours; password reset
-requires TOTP or a one-time recovery code before an operational session is issued
+requires TOTP or a one-time recovery code before an operational session is issued. A new OANDA
+connection defaults to `PRACTICE`; enabling `LIVE` is explicit. MT5 credentials are restricted to
+an investor/read-only password and remain inside the isolated bridge, which must reject any
+terminal that reports trading as permitted.
 
 **Scale/Scope**: One manual trader or small role-controlled team, one live account, three active
 markets, up to 10,000 catalogued instruments, tens of millions of time-series observations,
@@ -78,6 +89,7 @@ recommendations, monitoring, journal, integrations, and audit
 | Capital preservation and Risk Manager veto | A pure deterministic risk decision service is the final live-recommendation gate; missing truth activates circuit breakers. | PASS |
 | Mandatory evidence lifecycle | Strategy transition rules require research, realistic historical testing, unseen-data validation, robustness, portfolio simulation, paper evidence, and human approval. | PASS |
 | Manual real-money execution | Broker ports expose account, market, position, and deal reads only; no live order command exists in application or provider contracts. | PASS |
+| Broker credentials and provider boundaries | OANDA uses a GET-only endpoint allowlist despite a potentially broad PAT; MT5 runs behind an mTLS read-only terminal bridge and requires an investor password plus `trade_allowed = false`. Both fail to `LOCKDOWN` on incomplete verification. | PASS |
 | Volatility plus deep-liquidity selection | Mandatory data, liquidity, execution, prop-firm, and sizing gates precede multi-horizon volatility and suitability scoring. | PASS |
 | Shared equity and dynamic 0/1/2 capacity | One account aggregate owns risk snapshots; serializable decision transactions and invariants block a third live position. | PASS |
 | Authenticated and UI-first operation | Dedicated setup, sign-in, MFA, reset, and recovery routes use server-validated MFA sessions; every ordinary workflow has an authenticated UI/API contract and workers continue after the browser closes. | PASS |
@@ -91,8 +103,10 @@ recommendations, monitoring, journal, integrations, and audit
 The data model makes safety evidence durable, including singleton owner bootstrap, sessions,
 factors, recovery, reset, and audit state. The HTTP and UI contracts separate authentication
 stages from operational access and opportunity score from risk authorization; the event contracts
-use transactional outbox delivery, and the broker port deliberately omits order submission. No
-design artifact introduces a constitutional exception.
+use transactional outbox delivery, and the broker port deliberately omits order submission. OANDA
+reconciliation commits its transaction cursor only with a validated normalized snapshot; the MT5
+bridge accepts only an investor-password terminal with trading disallowed and publishes complete
+snapshots over mTLS. No design artifact introduces a constitutional exception.
 
 ## Project Structure
 
@@ -207,6 +221,32 @@ as separate processes.
 - Repeated and out-of-order updates are deduplicated by provider identity and sequence/time,
   reconciled against current snapshots, and never allowed to double-count exposure.
 
+### Selected Broker-Account Adapters
+
+- **OANDA v20** is a direct, official REST adapter. The owner creates an integration in the UI,
+  chooses `PRACTICE` (the default) or explicitly confirms `LIVE`, supplies a write-only Personal
+  Access Token, tests it, selects one account returned by the provider, and binds that account to
+  the single TraderX live account. The adapter may issue only a reviewed GET allowlist for account,
+  positions, trades, transactions, and instruments. It starts from a complete account snapshot,
+  then applies account changes from the saved transaction cursor; it commits a new cursor only
+  after validation and falls back to a full snapshot after any gap or invalid cursor.
+- **MT5** is not treated as a broker-hosted REST API. A dedicated bridge runs beside one provisioned
+  MT5 terminal and communicates with TraderX only through a narrow mutually authenticated HTTPS
+  contract. The bridge keeps the terminal's investor/read-only password locally; the core service
+  stores only the bridge registration/client secret. At connection and on every poll it verifies
+  terminal connectivity, exact account login/server, and that both terminal and account report
+  trading disallowed. It publishes complete account, position, deal, and instrument snapshots;
+  a failed or partial poll never means “no positions.”
+- Both adapters use a single-flight normal poll target of 15 seconds, bounded retries/backoff, and
+  periodic full reconciliation. Snapshot age, provider identity, schema validity, cursor/window
+  continuity, and completeness are risk inputs. Any failure degrades the integration and leaves
+  the account in `LOCKDOWN` until a fresh authoritative reconciliation succeeds through the
+  configured breaker lifecycle.
+- OANDA's public v20 documentation does not establish a customer-configurable read-only PAT. That
+  capability is a release gate, not an assumption: the application enforces read-only behavior
+  independently and production launch requires written provider confirmation or an equivalent
+  compensating control approved by the security review.
+
 ### Quantitative Reproducibility
 
 - Each run freezes strategy version, dataset manifest, provider/time coverage, quality report,
@@ -247,22 +287,29 @@ Deliver repository/runtime setup, public landing, dedicated `/setup`, `/sign-in`
 password reset; TOTP and recovery-code enrollment/recovery; assisted MFA reset; RBAC; 30-minute
 idle/12-hour absolute sessions; audit framework; one trading account, prop-firm profiles, internal
 policies, account snapshots, risk states, dynamic 0/1/2 capacity, circuit-breaker foundation,
-UI-managed integrations, health, and deployment/CI scaffolding.
+UI-managed integrations, health, and deployment/CI scaffolding. The integration UI supports the
+provider-specific configuration and verification states needed by OANDA account selection and MT5
+bridge registration; neither path can become risk-authoritative until the broker adapters arrive
+in Milestone 2 and produce a complete validated snapshot.
 
 Exit gate: a first owner can establish and recover MFA through the UI, then configure the account
 entirely through the UI. Deterministic tests prove duplicate bootstrap is impossible; reset/recovery
 never bypasses MFA; expiry rejects mutations; stricter internal limits win; accumulated loss never
-increases risk; and unknown equity produces zero capacity.
+increases risk; unknown equity produces zero capacity; and no configured but unverified broker
+connection can make an account active.
 
 ### Milestone 2 — Broker and Market Intelligence Foundation
 
-Deliver read-only broker connection, normalized market-data contracts, incremental historical
-sync, freshness/quality tracking, Instrument Library, alias mapping, eligibility gates,
+Deliver the OANDA v20 and MT5 terminal-bridge read-only account-truth slices, normalized
+market-data contracts, incremental historical sync, freshness/quality tracking, Instrument
+Library, alias mapping, eligibility gates,
 multi-horizon volatility/liquidity measures, versioned suitability scoring, three active slots,
 human selection/replacement, and inactive-market research.
 
-Exit gate: category reports rank only eligible candidates; one user-approved instrument may occupy
-each category; replacing a market preserves all knowledge; manually opened positions are visible.
+Exit gate: each selected broker has completed a current, coherent account/position/deal
+reconciliation within the freshness SLO before it can provide risk truth; category reports rank
+only eligible candidates; one user-approved instrument may occupy each category; replacing a
+market preserves all knowledge; manually opened positions are visible.
 
 ### Milestone 3 — Strategy Research and Validation Platform
 
@@ -334,6 +381,9 @@ scope. The following safety tests are release-blocking:
 13. production connector registration rejects scraping-based providers;
 14. backtest and Monte Carlo runs reproduce identical results for identical frozen inputs/seeds;
 15. provider and worker failures recover idempotently without losing durable work or outbox events.
+16. OANDA refuses every non-GET request, never advances a transaction cursor after a failed
+    normalization, and performs a full bootstrap after cursor recovery; MT5 rejects a terminal
+    with a mismatched account/server, disconnect, missing response, or any trading-enabled flag.
 
 Production promotion also requires migration rehearsal, backup/restore validation, secret rotation
 validation, accessibility and usability checks, dependency/security scans, and a documented
