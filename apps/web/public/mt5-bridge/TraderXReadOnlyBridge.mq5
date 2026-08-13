@@ -1,0 +1,1 @@
+../../../mt5_bridge/mql5/TraderXReadOnlyBridge.mq5

@@ -1,9 +1,17 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Header, Response
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Header, Response
 from pydantic import BaseModel, Field
 
-router = APIRouter(prefix="/strategies", tags=["Strategies"])
+from traderx_api.routes.access import authenticated_operation_context, operator_context
+from traderx_api.routes.identity import AuthenticationContext
+
+router = APIRouter(
+    prefix="/strategies", tags=["Strategies"], dependencies=[Depends(authenticated_operation_context)]
+)
+Operator = Annotated[AuthenticationContext, Depends(operator_context)]
 
 
 class StrategyCommand(BaseModel):
@@ -18,7 +26,9 @@ def list_strategies() -> dict[str, object]:
 
 @router.post("", status_code=201)
 def create_strategy(
-    payload: StrategyCommand, idempotency_key: str = Header(alias="Idempotency-Key")
+    payload: StrategyCommand,
+    _: Operator,
+    idempotency_key: str = Header(alias="Idempotency-Key"),
 ) -> dict[str, object]:
     return {
         "name": payload.name,

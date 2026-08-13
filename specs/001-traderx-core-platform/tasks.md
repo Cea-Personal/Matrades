@@ -83,7 +83,7 @@ idempotent, the common HTTP contract works, and all user stories may now be deve
 
 ## Phase 3: User Story 1 — Establish a Safe Trading Account (Priority: P1) — MVP
 
-**Goal**: Authenticate an owner, connect one verified OANDA or MT5 primary account, configure
+**Goal**: Authenticate an owner, connect one verified MT5 primary account, configure
 external and stricter internal limits, and show deterministic shared-equity risk and capacity.
 
 **Independent Test**: From a new installation, an owner signs in with MFA, configures one account
@@ -120,23 +120,23 @@ state/capacity; anonymous and unauthorized access fails, stale/unverified provid
 - [ ] T058 [US1] Implement the Command Center account, equity, loss-margin, risk-state, capacity, alert, and freshness panels in `apps/web/src/features/dashboard/CommandCenter.tsx`
 - [ ] T059 [US1] Wire account snapshots to risk recalculation, dashboard projection, circuit breakers, audit, and outbox consumers in `apps/worker/traderx_worker/tasks/risk.py`
 
-### OANDA and MT5 Account-Truth Slice
+### MT5 Account-Truth Slice
 
-- [ ] T060 [P] [US1] Write OANDA v20 and MT5 bridge create/test/discovered-account/bind HTTP contract tests, including masked/write-only secrets and explicit OANDA environment selection, in `tests/contract/test_broker_integration_api.py`
-- [ ] T061 [P] [US1] Write OANDA complete-bootstrap, `NAV`-to-equity, account-change cursor, invalid-cursor recovery, selected-account mismatch, rate-limit, and GET-only adapter tests in `tests/integration/test_oanda_v20_adapter.py`
+- [X] T060 [P] [US1] Write MT5 bridge create/test/discovered-account/bind HTTP contract tests, including masked enrollment credentials, in `tests/contract/test_broker_integrations_api.py`
+- [X] T061 [P] [US1] Write MT5 complete-snapshot, account/server mismatch, investor-mode, and fail-closed adapter tests in `tests/integration/test_mt5_bridge_adapter.py`
 - [ ] T062 [P] [US1] Write mTLS MT5 bridge tests for investor-password-only configuration, terminal/account `trade_allowed = false`, login/server match, null response, disconnect, and denied terminal APIs in `apps/mt5_bridge/tests/test_read_only_bridge.py`
-- [ ] T063 [P] [US1] Write end-to-end broker-account-truth tests proving a partial, stale, contradictory, or degraded OANDA/MT5 snapshot remains non-authoritative and keeps capacity at zero in `tests/integration/test_broker_account_truth.py`
-- [ ] T064 [P] [US1] Write the accessible OANDA practice-account selection and MT5 bridge-registration/bind/LOCKDOWN browser journeys in `apps/web/tests/e2e/broker_account_setup.spec.ts`
-- [X] T065 [P] [US1] Implement broker Integration, credential-version, health-observation, discovered-account, and reconciliation-checkpoint models for `OANDA_V20` and `MT5_TERMINAL_BRIDGE` in `src/traderx/integrations/broker_model.py`
+- [X] T063 [P] [US1] Write end-to-end broker-account-truth tests proving a partial, stale, contradictory, or degraded MT5 snapshot remains non-authoritative and keeps capacity at zero in `tests/integration/test_broker_account_truth.py`
+- [X] T064 [P] [US1] Write the accessible MT5 bridge-registration/bind/LOCKDOWN browser journey in `apps/web/tests/e2e/broker_account_setup.spec.ts`
+- [X] T065 [P] [US1] Implement broker Integration, credential-version, health-observation, discovered-account, and reconciliation-checkpoint models for `MT5_TERMINAL_BRIDGE` in `src/traderx/integrations/broker_model.py`
 - [X] T066 [US1] Add broker integration, selected-account binding, encrypted credential, health, and append-only reconciliation-checkpoint tables in `migrations/versions/0013_broker_account_truth.py`
-- [ ] T067 [US1] Implement the OANDA v20 GET-only adapter with environment host selection, complete bootstrap, account-change cursor validation, `NAV` evidence, bounded backoff, and no generic request escape hatch in `src/traderx/integrations/oanda_v20.py`
+- [X] T067 [US1] Enforce the MT5-only broker-provider allowlist in `migrations/versions/0015_mt5_only_broker_integrations.py`
 - [ ] T068 [US1] Implement the TraderX mTLS client for the narrow MT5 bridge health/snapshot/positions/deals/instruments contract and reject unverified or incomplete responses in `src/traderx/integrations/mt5_bridge.py`
 - [ ] T069 [US1] Implement the isolated MT5 bridge and its `MetaTrader5`-only dependency manifest with local investor-password storage, terminal/account verification, read-only allowlist, and explicit trade-method denylist in `apps/mt5_bridge/traderx_mt5_bridge/app.py` and `apps/mt5_bridge/pyproject.toml`
-- [ ] T070 [US1] Implement atomic normalized broker snapshot/checkpoint commits, OANDA full-bootstrap recovery, MT5 overlapping-deal reconciliation, and integration-scoped fail-closed outcomes in `src/traderx/integrations/reconciliation.py`
+- [X] T070 [US1] Implement atomic normalized broker snapshot/checkpoint commits, MT5 overlapping-deal reconciliation, and integration-scoped fail-closed outcomes in `src/traderx/integrations/reconciliation.py`
 - [ ] T071 [US1] Implement authorized create/test/discover/select/bind/disable/reconnect broker integration commands with audit, step-up assurance, and one-primary-account enforcement in `src/traderx/integrations/broker_service.py`
 - [X] T072 [P] [US1] Implement the broker integration, test, discovered-account, credential, and primary-account binding operations from `contracts/http-api.yaml` in `apps/api/traderx_api/routes/integrations.py`
-- [ ] T073 [P] [US1] Implement single-flight OANDA/MT5 account-sync jobs with 15-second target cadence, bounded retry/backoff, health updates, breaker activation, and risk-projection handoff in `apps/worker/traderx_worker/tasks/broker_account_sync.py`
-- [X] T074 [P] [US1] Implement OANDA practice/live choice, write-only PAT, discovered-account selection, MT5 bridge registration, verification status, and LOCKDOWN guidance in `apps/web/src/features/integrations/BrokerAccountIntegration.tsx`
+- [X] T073 [P] [US1] Implement MT5 account-sync jobs with 15-second target cadence, bounded retry/backoff, health updates, breaker activation, and risk-projection handoff in `apps/worker/traderx_worker/tasks/broker_account_sync.py`
+- [X] T074 [P] [US1] Implement MT5 bridge registration, verification status, removal, and LOCKDOWN guidance in `apps/web/src/features/integrations/BrokerAccountIntegration.tsx`
 
 **Checkpoint**: User Story 1 passes independently and is the secure control-plane MVP.
 
@@ -312,7 +312,7 @@ reduced/blocked, every third is blocked, and missing critical data produces no r
 
 ## Phase 8: User Story 6 — Manually Execute and Monitor a Trade (Priority: P1)
 
-**Goal**: Consume verified OANDA/MT5 account truth to detect manually created broker positions,
+**Goal**: Consume verified MT5 account truth to detect manually created broker positions,
 classify and include them in shared risk, freeze recommended trade theses, and monitor evidence
 without executing orders.
 
@@ -322,7 +322,7 @@ code/contract to prove no live-order operation exists.
 
 ### Tests for User Story 6
 
-- [ ] T164 [P] [US6] Write OANDA account-change and MT5 poll reconciliation tests for duplicate, out-of-order, cursor/window gap, partial-fill, correction, and contradiction cases in `tests/integration/test_broker_reconciliation.py`
+- [ ] T164 [P] [US6] Write MT5 poll reconciliation tests for duplicate, out-of-order, overlapping-deal window gap, partial-fill, correction, and contradiction cases in `tests/integration/test_broker_reconciliation.py`
 - [ ] T165 [P] [US6] Write matching, discretionary classification, correction, and immediate shared-risk tests in `tests/integration/test_position_classification.py`
 - [ ] T166 [P] [US6] Write frozen thesis immutability and thesis-based health/guidance tests in `tests/safety/test_trade_monitoring.py`
 - [ ] T167 [P] [US6] Write static and runtime tests proving broker ports, routes, workers, and adapters expose no live-order submission path in `tests/safety/test_no_live_execution.py`
@@ -334,13 +334,13 @@ code/contract to prove no live-order operation exists.
 - [ ] T170 [P] [US6] Implement Position, TradeExecution, reconciliation state, classification, and provider revision models in `src/traderx/monitoring/position_model.py`
 - [ ] T171 [P] [US6] Implement immutable TradeThesis and append-only MonitoringObservation models in `src/traderx/monitoring/thesis_model.py`
 - [ ] T172 [US6] Add live position, fill/deal, classification history, thesis, and monitoring observation tables in `migrations/versions/0007_monitoring.py`
-- [ ] T173 [US6] Implement normalized OANDA account-change and MT5 poll consumption, authoritative reconciliation, cursor/window handling, deduplication, and contradiction detection in `src/traderx/monitoring/reconciliation.py`
+- [ ] T173 [US6] Implement normalized MT5 poll consumption, authoritative reconciliation, overlapping-deal window handling, deduplication, and contradiction detection in `src/traderx/monitoring/reconciliation.py`
 - [ ] T174 [US6] Implement recommendation matching, confidence, discretionary fallback, and audited user correction in `src/traderx/monitoring/matching.py`
 - [ ] T175 [US6] Wire every live position and fill projection into transactional account/risk recalculation in `src/traderx/monitoring/risk_projection.py`
 - [ ] T176 [US6] Implement one-time frozen thesis creation from matched recommendation evidence in `src/traderx/monitoring/thesis.py`
 - [ ] T177 [US6] Implement thesis-versus-market evaluation and `STRONG/HEALTHY/WATCH/WEAKENING/INVALIDATED` guidance in `src/traderx/monitoring/monitor.py`
 - [ ] T178 [P] [US6] Implement position list, classification correction, thesis, and monitoring routes in `apps/api/traderx_api/routes/positions.py`
-- [ ] T179 [P] [US6] Implement priority consumption of OANDA/MT5 account-sync results and live-monitoring worker loops in `apps/worker/traderx_worker/tasks/monitoring.py`
+- [ ] T179 [P] [US6] Implement priority consumption of MT5 account-sync results and live-monitoring worker loops in `apps/worker/traderx_worker/tasks/monitoring.py`
 - [ ] T180 [P] [US6] Implement open/history position views, match confidence, and classification correction UI in `apps/web/src/features/trades/Positions.tsx`
 - [ ] T181 [US6] Implement immutable original-thesis and append-only health timeline UI in `apps/web/src/features/trades/TradeMonitor.tsx`
 
@@ -465,7 +465,7 @@ and audit are available through authenticated UI workflows.
 **Purpose**: Prove full-system constitutional compliance, resilience, performance, usability,
 security, deployment safety, and recoverability.
 
-- [ ] T234 [P] Add static source and contract guards against real-money order operations, scraping providers, unapproved integration capabilities, OANDA non-GET calls, and MT5 trade-method imports in `tests/safety/test_constitutional_negative_capabilities.py`
+- [ ] T234 [P] Add static source and contract guards against real-money order operations, scraping providers, unapproved integration capabilities, and MT5 trade-method imports in `tests/safety/test_constitutional_negative_capabilities.py`
 - [ ] T235 [P] Add end-to-end constitutional invariant scenarios for eligibility order, three categories, dynamic capacity, Risk Manager veto, lifecycle gates, manual execution, and retained knowledge in `tests/e2e/test_constitutional_invariants.py`
 - [ ] T236 [P] Add cross-module property/state-machine tests for concurrent high-risk commands, stale ETags, duplicate events, and aggregate ordering in `tests/safety/test_concurrency_invariants.py`
 - [ ] T237 [P] Add migration forward/rollback rehearsal and governed-evidence preservation checks in `tests/integration/test_migrations.py`
@@ -494,7 +494,7 @@ deliberate production review only when every constitutional gate passes.
 - **Phase 1 — Setup**: No dependencies; starts immediately.
 - **Phase 2 — Foundational**: Depends on Setup and blocks every user story.
 - **US1 — Safe Trading Account**: Starts after Foundational and establishes production account/risk
-  truth through a verified OANDA v20 or MT5 terminal-bridge account used by later live workflows.
+  truth through a verified MT5 terminal-bridge account used by later live workflows.
 - **US2 — Active Markets**: Starts after Foundational; uses account/prop fixtures independently,
   then uses the verified US1 broker account for production eligibility.
 - **US3 — Strategy Validation**: Starts after Foundational; uses instrument/account fixtures
@@ -503,7 +503,7 @@ deliberate production review only when every constitutional gate passes.
   authorization and risk in production.
 - **US5 — Recommendations**: Depends on US1 risk, US2 active markets, US3 live strategy runtime,
   and US4 human approval.
-- **US6 — Manual Monitoring**: Depends on US1 account/risk and its OANDA/MT5 account-truth slice,
+- **US6 — Manual Monitoring**: Depends on US1 account/risk and its MT5 account-truth slice,
   plus US5 recommendation structures; its discretionary-position path remains independently
   testable with broker fixtures.
 - **US7 — Journal and Learning**: Depends on trade/paper outputs from US4 and US6; journal projection
@@ -518,7 +518,7 @@ deliberate production review only when every constitutional gate passes.
 
 ```text
 Setup -> Foundation
-Foundation -> US1 (OANDA v20 / MT5 bridge account truth)
+Foundation -> US1 (MT5 bridge account truth)
 Foundation -> US2
 Foundation -> US3
 US3 -> US4
@@ -632,7 +632,7 @@ Parallel routes/adapters/UI after services: T224, T225, T226, T227, T228, T229, 
 
 1. Complete Phase 1 Setup.
 2. Complete Phase 2 Foundational prerequisites.
-3. Complete US1 through T074, including one OANDA practice or MT5 demo account-truth path.
+3. Complete US1 through T074, including one MT5 demo account-truth path.
 4. Stop and run every US1 test and the account/risk and broker portions of `quickstart.md`.
 5. Demonstrate authenticated UI-only account/risk control with verified snapshots; do not describe
    it as trading-ready.
@@ -669,3 +669,24 @@ web application or an integration adapter.
 - Do not add automatic real-money execution, a third live position, a fourth active category,
   strategy auto-promotion, AI risk authority, scraping, or evidence deletion without a formal
   constitutional amendment.
+
+---
+
+## Phase 13: Convergence
+
+**Purpose**: Close the verified gaps between the governed TraderX design and the current working
+identity/account/MT5 slice. The existing user-story tasks remain the detailed implementation
+breakdown; these tasks establish the required convergence order and prevent the present route and
+UI scaffolding from being mistaken for complete product functionality.
+
+- [X] T250 [Convergence] Reconcile the MT5-only broker product decision across the specification, plan, provider contract, task references, and traceability. Remove stale retired-broker scope without adding another broker; preserve the MT5 investor-mode, read-only, fail-closed, and manual-execution constraints. [Source: product decision; Plan: Selected Broker-Account Adapters; Tasks: T060-T073]
+- [X] T251 [Convergence] Protect every operational API router with the established authenticated-session dependency, deny-by-default role authorization, required MFA/reauthentication for high-risk commands, and append-only denied-attempt audit records. Add coverage proving anonymous and unauthorized callers cannot read or mutate market, research, validation, paper, opportunity, position, journal, job, notification, or operations data. [Source: Constitution VI and VIII; Spec: FR-001, FR-004-FR-006, FR-089-FR-092]
+- [X] T252 [Convergence] Complete the shared authenticated application shell and Command Center as the current TraderX UI: mount navigation and live dashboard projections for account/risk, integration health, active markets, opportunities, alerts, and every existing feature area. Keep broker connection and all new workflows inside this UI; do not create a separate product surface. [Source: Constitution VI; Spec: FR-007, FR-092; Tasks: T035, T058, T230-T233]
+- [ ] T253 [Convergence] Complete the market-intelligence flow from durable provider ingestion through quality/eligibility gates, reproducible suitability reports, explicit Commodity/Forex/Cryptocurrency selection, and no-silent-replacement UI/API/worker behavior. Replace the current static market responses and disconnected components with persisted, authorized operations and the US2 acceptance evidence. [Source: Constitution IV, VII, IX; Spec: FR-015-FR-029; Tasks: T075-T096]
+- [ ] T254 [Convergence] Complete the no-code strategy, immutable-version, reproducible backtest, unseen-data, walk-forward, robustness, and portfolio-validation flow with durable jobs, reports, authorization, and the US3 browser journey. Replace static strategy and validation route responses with persisted lifecycle operations. [Source: Constitution II, VII, VIII; Spec: FR-030-FR-042; Tasks: T097-T127]
+- [ ] T255 [Convergence] Complete current-data paper execution, evidence comparison, required `AWAITING_APPROVAL` state, and step-up human approval/reject/return-to-research operations in the current UI. Prove no automatic promotion and replace static paper/approval route responses with durable, audited lifecycle decisions. [Source: Constitution II, III, VIII; Spec: FR-043-FR-052; Tasks: T128-T144]
+- [ ] T256 [Convergence] Complete opportunity evaluation, deterministic shared-account Risk Manager, correlation/exposure checks, conservative sizing, complete expiring recommendations, and visible `NO TRADE`/`BLOCKED` outcomes in the current UI. Prove a score cannot override risk and no code path submits a real-money order. [Source: Constitution I, III, V, VIII; Spec: FR-053-FR-066; Tasks: T145-T163]
+- [ ] T257 [Convergence] Complete read-only MT5 position reconciliation, recommendation matching/discretionary classification, immediate risk projection, frozen-thesis monitoring, and user correction flow. Replace static position/thesis responses with persisted observations while retaining the no-live-order boundary. [Source: Constitution III, V, X; Spec: FR-067-FR-073; Tasks: T164-T181]
+- [ ] T258 [Convergence] Complete automatic journaling, protected annotations/attachments, multidimensional R and financial analytics, non-mutating research hypotheses, retained market knowledge, and controlled market reactivation/replacement in the current UI. [Source: Constitution VII and X; Spec: FR-074-FR-078; Tasks: T182-T208]
+- [ ] T259 [Convergence] Complete authorized operations: durable jobs and progress, integration lifecycle/health, notification preferences and delivery, strategy health controls, redacted audit search, and system-health UI/API/worker flows. Replace fixed empty operations responses and prove routine management needs no technical interface. [Source: Constitution VI, VIII, IX; Spec: FR-079-FR-093; Tasks: T209-T233]
+- [ ] T260 [Convergence] Execute and record the cross-cutting production-readiness evidence: constitutional negative-capability and concurrency tests, migration/backup/restore rehearsal, performance and browser accessibility tests, full acceptance flows, OpenAPI/event/provider compatibility, requirement traceability, and final Constitution Check. Resolve the current Vitest configuration deprecation warning during this work. [Source: Constitution Engineering and Delivery Quality Gates; Spec: SC-001-SC-018; Tasks: T234-T249]

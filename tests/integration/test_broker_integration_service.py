@@ -2,23 +2,32 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
+from uuid import UUID
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from traderx.accounts.model import PropProfileVersion, RiskPolicyVersion, TradingAccount
+from traderx.accounts.model import (
+    AccountStatus,
+    PropProfileVersion,
+    RiskPolicyVersion,
+    TradingAccount,
+)
 from traderx.identity.authorization import Actor, Role
 from traderx.integrations.broker_model import BrokerIntegrationProfile, BrokerProvider
 from traderx.integrations.broker_service import (
-    BrokerIntegrationCommand,
+    begin_managed_mt5_enrollment,
     bind_selected_account,
-    create_broker_integration,
     discovered_account_payload,
-    record_discovered_accounts,
-    rotate_broker_credential,
+    enroll_managed_mt5_agent,
+    ingest_managed_mt5_snapshot,
+    managed_mt5_enrollment_configuration,
+    remove_managed_mt5_integration,
+    renew_managed_mt5_enrollment,
     sync_selected_broker_account,
 )
+from traderx.integrations.broker_service import test_broker_integration as discover_broker_accounts
 from traderx.integrations.model import CredentialVersion
 from traderx.risk.model import AccountSnapshot, RiskSnapshot
 from traderx.shared.db import Base, load_model_metadata
@@ -35,113 +44,146 @@ def _session() -> tuple[Session, object]:
     return sessionmaker(bind=engine, expire_on_commit=False)(), engine
 
 
-def test_oanda_credential_is_write_only_and_discovered_account_requires_explicit_binding() -> None:
+def _send_mt5_snapshot(session: Session, *, enrollment_token: str, agent_id: UUID) -> str:
+    agent_token = enroll_managed_mt5_agent(
+        session,
+        agent_id,
+        enrollment_token=enrollment_token,
+        login="123456",
+        server="Demo-Server",
+        connected=True,
+        trading_disabled=True,
+        terminal_version="5.0.1",
+    )
+    ingest_managed_mt5_snapshot(
+        session,
+        agent_id,
+        agent_token=agent_token,
+        login="123456",
+        server="Demo-Server",
+        connected=True,
+        trading_disabled=True,
+        terminal_version="5.0.1",
+        balance="10000.00",
+        equity="10005.00",
+        currency="USD",
+        positions=[],
+        deals=[],
+        instruments=[],
+    )
+    return agent_token
+
+
+def test_managed_mt5_enrollment_hides_bridge_transport_details_and_can_be_renewed() -> None:
     session, engine = _session()
     try:
         actor = Actor(Role.OWNER, "MFA")
-        integration = create_broker_integration(
+        enrollment = begin_managed_mt5_enrollment(
             session,
             actor,
-            BrokerIntegrationCommand(
-                provider=BrokerProvider.OANDA_V20,
-                configuration={"environment": "PRACTICE"},
-                credentials={"personal_access_token": "not-returned-token"},
-            ),
+            account_login="123456",
+            server="Demo-Server",
         )
+        integration = enrollment.integration
         session.commit()
 
         profile = session.scalar(select(BrokerIntegrationProfile))
-        stored = session.scalar(select(CredentialVersion))
-        assert integration.provider == BrokerProvider.OANDA_V20
-        assert profile.environment == "PRACTICE"
-        assert profile.selected_provider_account_id is None
-        assert "not-returned-token" not in stored.encrypted_value
-
-        record_discovered_accounts(
-            session,
-            integration,
-            [
-                {
-                    "provider_account_id": "001-001-123",
-                    "display_name": "Practice",
-                    "currency": "USD",
-                    "account_mode": "PRACTICE",
-                }
-            ],
+        assert integration.provider == BrokerProvider.MT5_TERMINAL_BRIDGE
+        assert profile.bridge_url is None
+        assert profile.bridge_id == str(enrollment.agent_id)
+        assert (
+            session.scalars(
+                select(CredentialVersion).where(CredentialVersion.integration_id == integration.id)
+            ).all()
+            == []
         )
-        session.commit()
-        candidate = discovered_account_payload(session, integration.id)[0]
-        assert candidate == {
-            "provider_account_id": "001-001-123",
-            "provider": "OANDA_V20",
-            "display_name": "Practice",
-            "currency": "USD",
-            "account_mode": "PRACTICE",
-            "verification_status": "VERIFIED",
-            "verified_at": candidate["verified_at"],
-        }
 
-        bind_selected_account(session, actor, integration, "001-001-123")
-        session.commit()
-        assert profile.selected_provider_account_id == "001-001-123"
+        renewed = renew_managed_mt5_enrollment(session, actor, integration)
+        assert renewed.agent_id == enrollment.agent_id
+        assert renewed.enrollment_token != enrollment.enrollment_token
+        assert renewed.account_login == "123456"
+        assert renewed.server == "Demo-Server"
+
+        account = TradingAccount(
+            name="Primary evaluation",
+            mode="DEMO",
+            currency="USD",
+            starting_balance=Decimal("10000"),
+            status=AccountStatus.ACTIVE,
+            broker_integration_id=integration.id,
+            provider_account_id="123456",
+        )
+        session.add(account)
+        session.flush()
+        assert remove_managed_mt5_integration(session, actor, integration) == 1
+        assert integration.state == "REMOVED"
+        assert account.status == AccountStatus.BLOCKED
+        assert account.broker_integration_id is None
+        assert account.provider_account_id is None
+
+        reactivated = begin_managed_mt5_enrollment(
+            session, actor, account_login="123456", server="Demo-Server"
+        )
+        assert reactivated.integration.id == integration.id
+        assert reactivated.enrollment_token != renewed.enrollment_token
+        assert reactivated.integration.state == "DISABLED"
     finally:
         session.close()
         engine.dispose()
 
 
-def test_rotating_a_broker_credential_supersedes_previous_version() -> None:
+def test_managed_mt5_bridge_enrolls_outbound_and_discovers_only_a_verified_snapshot() -> None:
     session, engine = _session()
     try:
         actor = Actor(Role.OWNER, "MFA")
-        integration = create_broker_integration(
-            session,
-            actor,
-            BrokerIntegrationCommand(
-                provider=BrokerProvider.MT5_TERMINAL_BRIDGE,
-                configuration={
-                    "bridge_url": "https://bridge.example.test",
-                    "bridge_id": "bridge-1",
-                    "account_login": "123456",
-                    "server": "Demo-Server",
-                },
-                credentials={"bridge_client_secret": "initial-secret"},
-            ),
+        enrollment = begin_managed_mt5_enrollment(
+            session, actor, account_login="123456", server="Demo-Server"
         )
-        rotate_broker_credential(
-            session,
-            actor,
-            integration,
-            {"bridge_client_secret": "rotated-secret"},
+        identity = managed_mt5_enrollment_configuration(
+            session, enrollment.agent_id, enrollment_token=enrollment.enrollment_token
         )
+        assert identity == {"login": "123456", "server": "Demo-Server"}
+        _send_mt5_snapshot(
+            session,
+            enrollment_token=enrollment.enrollment_token,
+            agent_id=enrollment.agent_id,
+        )
+        candidates = discover_broker_accounts(session, enrollment.integration)
         session.commit()
 
-        credentials = session.scalars(
-            select(CredentialVersion).where(CredentialVersion.integration_id == integration.id)
-        ).all()
-        assert len(credentials) == 2
-        assert sum(credential.active for credential in credentials) == 1
-        assert all("secret" not in credential.encrypted_value for credential in credentials)
+        assert candidates == [
+            {
+                "provider_account_id": "123456",
+                "display_name": "Demo-Server 123456",
+                "currency": "USD",
+                "account_mode": "READ_ONLY",
+            }
+        ]
+        assert (
+            discovered_account_payload(session, enrollment.integration.id)[0]["verification_status"]
+            == "VERIFIED"
+        )
     finally:
         session.close()
         engine.dispose()
 
 
-def test_syncing_a_selected_oanda_account_commits_verified_account_and_risk_snapshot(monkeypatch) -> None:
+def test_syncing_a_selected_mt5_account_commits_verified_account_and_risk_snapshot() -> None:
     session, engine = _session()
     try:
         actor = Actor(Role.OWNER, "MFA")
-        integration = create_broker_integration(
-            session,
-            actor,
-            BrokerIntegrationCommand(
-                provider=BrokerProvider.OANDA_V20,
-                configuration={"environment": "PRACTICE"},
-                credentials={"personal_access_token": "practice-token"},
-            ),
+        enrollment = begin_managed_mt5_enrollment(
+            session, actor, account_login="123456", server="Demo-Server"
         )
+        _send_mt5_snapshot(
+            session,
+            enrollment_token=enrollment.enrollment_token,
+            agent_id=enrollment.agent_id,
+        )
+        discover_broker_accounts(session, enrollment.integration)
         account = TradingAccount(
             name="Primary",
-            mode="LIVE",
+            mode="DEMO",
             currency="USD",
             starting_balance=Decimal("10000"),
             status="DRAFT",
@@ -179,45 +221,15 @@ def test_syncing_a_selected_oanda_account_commits_verified_account_and_risk_snap
         session.flush()
         account.prop_profile_id = prop.id
         account.risk_policy_id = policy.id
-        record_discovered_accounts(
-            session,
-            integration,
-            [{"provider_account_id": "001-001-123", "currency": "USD", "account_mode": "PRACTICE"}],
-        )
-        bind_selected_account(session, actor, integration, "001-001-123")
-        account.broker_integration_id = integration.id
-        account.provider_account_id = "001-001-123"
+        bind_selected_account(session, actor, enrollment.integration, "123456")
+        account.broker_integration_id = enrollment.integration.id
+        account.provider_account_id = "123456"
 
-        class FakeOanda:
-            def __init__(self, **_: object) -> None:
-                pass
-
-            def close(self) -> None:
-                pass
-
-            def bootstrap_account(self, account_id: str):  # type: ignore[no-untyped-def]
-                from traderx.integrations.oanda_v20 import OandaAccountSnapshot
-
-                return OandaAccountSnapshot(
-                    provider_account_id=account_id,
-                    balance="10000.00",
-                    equity="10020.00",
-                    equity_source="NAV",
-                    realized_pl="20.00",
-                    floating_pl="0.00",
-                    margin_available="9000.00",
-                    open_position_count=0,
-                    cursor="77",
-                    observed_at=datetime(2026, 8, 13, tzinfo=UTC),
-                    raw={},
-                )
-
-        monkeypatch.setattr("traderx.integrations.broker_service.OandaV20Adapter", FakeOanda)
-        result = sync_selected_broker_account(session, integration, account)
+        result = sync_selected_broker_account(session, enrollment.integration, account)
         session.commit()
 
         assert result["quality"] == "VERIFIED"
-        assert session.scalar(select(AccountSnapshot)).equity == Decimal("10020")
+        assert session.scalar(select(AccountSnapshot)).equity == Decimal("10005")
         risk = session.scalar(select(RiskSnapshot))
         assert risk is not None
         assert risk.state == "NORMAL"

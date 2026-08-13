@@ -29,7 +29,7 @@ def _mfa_headers(client: TestClient) -> dict[str, str]:
     return {"Cookie": f"{SESSION_COOKIE}={verification.cookies[SESSION_COOKIE]}"}
 
 
-def test_broker_integration_api_keeps_credential_write_only_and_requires_discovery_before_binding() -> None:
+def test_broker_integration_api_exposes_only_the_managed_mt5_enrollment_flow() -> None:
     engine = create_engine(
         "sqlite+pysqlite://",
         connect_args={"check_same_thread": False},
@@ -50,7 +50,7 @@ def test_broker_integration_api_keeps_credential_write_only_and_requires_discove
         client = TestClient(app)
         assert client.get("/api/v1/integrations").status_code == 401
         headers = _mfa_headers(client)
-        created = client.post(
+        unsupported = client.post(
             "/api/v1/integrations",
             headers={**headers, "Idempotency-Key": "oanda-integration-request-0001"},
             json={
@@ -60,32 +60,122 @@ def test_broker_integration_api_keeps_credential_write_only_and_requires_discove
                 "credentials": {"personal_access_token": "must-never-appear-in-response"},
             },
         )
+        assert unsupported.status_code == 405
+        assert "must-never-appear-in-response" not in unsupported.text
+        assert "OANDA_V20" not in client.get("/api/v1/openapi.json").text
+    finally:
+        app.dependency_overrides.clear()
+        engine.dispose()
+
+
+def test_managed_mt5_enrollment_accepts_outbound_read_only_evidence_without_bridge_fields() -> None:
+    engine = create_engine(
+        "sqlite+pysqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    def database_override() -> Generator[Session]:
+        session = factory()
+        try:
+            yield session
+        finally:
+            session.close()
+
+    app.dependency_overrides[get_database_session] = database_override
+    try:
+        client = TestClient(app)
+        headers = _mfa_headers(client)
+        created = client.post(
+            "/api/v1/integrations/mt5/enrollments",
+            headers={**headers, "Idempotency-Key": "managed-mt5-enrollment-request-0001"},
+            json={"account_login": "123456", "server": "Demo-Server"},
+        )
         assert created.status_code == 201
-        assert created.json()["provider"] == "OANDA_V20"
-        assert created.json()["status"] == "DISABLED"
-        assert "must-never-appear-in-response" not in created.text
-        integration_id = created.json()["id"]
+        assert created.json()["provider"] == "MT5_TERMINAL_BRIDGE"
+        assert created.json()["name"] == "MT5 Demo-Server 123456"
+        assert created.json()["mt5_account_login"] == "123456"
+        assert created.json()["mt5_server"] == "Demo-Server"
+        assert "bridge_url" not in created.text
+        assert "bridge_client_secret" not in created.text
+        enrollment = created.json()["enrollment"]
+        agent_id = enrollment["agent_id"]
+        code = enrollment["code"]
 
-        listed = client.get("/api/v1/integrations", headers=headers)
-        assert listed.status_code == 200
-        assert listed.json()[0]["id"] == integration_id
-        assert client.get(f"/api/v1/integrations/{integration_id}/accounts", headers=headers).json() == []
+        configuration = client.post(
+            f"/api/v1/integrations/mt5/agents/{agent_id}/configuration",
+            json={"enrollment_code": code},
+        )
+        assert configuration.status_code == 200
+        assert configuration.json() == {"login": "123456", "server": "Demo-Server"}
 
-        rotate = client.put(
-            f"/api/v1/integrations/{integration_id}/credentials",
-            headers={
-                **headers,
-                "If-Match": created.headers["etag"],
-                "Idempotency-Key": "oanda-credential-rotation-0001",
-            },
+        enrolled = client.post(
+            f"/api/v1/integrations/mt5/agents/{agent_id}/enroll",
             json={
-                "reason": "Rotate the practice credential safely",
-                "confirmation": "CONFIRMED",
-                "credentials": {"personal_access_token": "also-not-returned"},
+                "enrollment_code": code,
+                "login": "123456",
+                "server": "Demo-Server",
+                "connected": True,
+                "trading_disabled": True,
+                "terminal_version": "5.0.1",
             },
         )
-        assert rotate.status_code == 200
-        assert "also-not-returned" not in rotate.text
+        assert enrolled.status_code == 200
+        assert "agent_token" in enrolled.json()
+
+        received = client.post(
+            f"/api/v1/integrations/mt5/agents/{agent_id}/snapshots",
+            headers={"Authorization": f"Bearer {enrolled.json()['agent_token']}"},
+            json={
+                "login": "123456",
+                "server": "Demo-Server",
+                "connected": True,
+                "trading_disabled": True,
+                "terminal_version": "5.0.1",
+                "balance": "10000.00",
+                "equity": "10005.00",
+                "currency": "USD",
+                "positions": [],
+                "deals": [],
+                "instruments": [],
+            },
+        )
+        assert received.status_code == 202
+        assert received.json() == {"status": "ACCEPTED"}
+
+        discovered = client.post(
+            f"/api/v1/integrations/{created.json()['id']}/test", headers=headers
+        )
+        assert discovered.status_code == 202
+        accounts = client.get(
+            f"/api/v1/integrations/{created.json()['id']}/accounts", headers=headers
+        )
+        assert accounts.status_code == 200
+        assert accounts.json()[0]["provider_account_id"] == "123456"
+
+        removed = client.delete(f"/api/v1/integrations/{created.json()['id']}", headers=headers)
+        assert removed.status_code == 200
+        assert removed.json()["status"] == "REMOVED"
+        assert removed.json()["unbound_account_count"] == 0
+        assert client.get("/api/v1/integrations", headers=headers).json() == []
+        assert (
+            client.post(
+                f"/api/v1/integrations/mt5/agents/{agent_id}/configuration",
+                json={"enrollment_code": code},
+            ).status_code
+            == 409
+        )
+
+        reactivated = client.post(
+            "/api/v1/integrations/mt5/enrollments",
+            headers={**headers, "Idempotency-Key": "managed-mt5-reactivation-request-0001"},
+            json={"account_login": "123456", "server": "Demo-Server"},
+        )
+        assert reactivated.status_code == 201
+        assert reactivated.json()["id"] == created.json()["id"]
+        assert reactivated.json()["enrollment"]["code"] != code
     finally:
         app.dependency_overrides.clear()
         engine.dispose()

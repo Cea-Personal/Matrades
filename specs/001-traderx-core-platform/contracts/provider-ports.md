@@ -60,33 +60,6 @@ close_live_position
 Adapters that require broad provider credentials MUST still enforce the read-only capability
 allowlist inside TraderX. Connection testing fails if the configured use cannot be limited safely.
 
-### OANDA v20 Adapter Profile
-
-The OANDA adapter uses only the official v20 REST host selected by integration environment:
-`https://api-fxpractice.oanda.com` for `PRACTICE` and `https://api-fxtrade.oanda.com` for `LIVE`.
-It accepts a write-only Personal Access Token and first calls `GET /v3/accounts` to discover the
-accounts accessible to that credential. A TraderX account cannot bind until its owner selects one
-returned `accountID`.
-
-- Bootstrap with `GET /v3/accounts/{accountID}`. Normalize its account, open positions, and open
-  trades as one coherent snapshot; map OANDA `NAV` to TraderX `equity`; save `lastTransactionID`.
-- Increment with `GET /v3/accounts/{accountID}/changes?sinceTransactionID={cursor}`. Apply both
-  transaction-derived `changes` and price-dependent `state`; advance the cursor only with a
-  complete successful normalization.
-- Cross-check current risk with `GET /v3/accounts/{accountID}/openPositions` and, when needed,
-  `GET /v3/accounts/{accountID}/openTrades`. Use documented transaction history pages/ranges for
-  audit recovery; transaction identities are immutable source IDs.
-- Allow only reviewed GET methods for account, position, trade, transaction, and instrument reads.
-  The adapter has no generic HTTP method/path escape hatch. On invalid cursor, selected-account
-  mismatch, unsuccessful validation, 401/403/404, exhausted 429 retry, TLS/network failure, or
-  stale data, it records evidence and demands a new complete bootstrap.
-
-The provider credential may be capable of more than reading. Its scope is therefore not an
-authorization claim made by TraderX; the endpoint/method allowlist, secret handling, and outbound
-egress restriction are mandatory compensating controls. See OANDA's
-[account model](https://developer.oanda.com/rest-live-v20/account-ep/) and
-[account-change guidance](https://developer.oanda.com/rest-live-v20/best-practices/).
-
 ### MetaTrader 5 Terminal-Bridge Profile
 
 The MT5 adapter communicates only with a registered bridge over mutually authenticated HTTPS. The
@@ -201,8 +174,6 @@ Every adapter MUST pass contract tests for:
 - rate limits, retry-after behavior, timeouts, and ambiguous outcomes;
 - canonical instrument alias/specification mapping;
 - incremental historical synchronization without overwriting evidence; and
-- absence of callable real-money order methods in broker implementations.
-- OANDA practice/live host selection, selected-account binding, GET-only allowlist, transaction
-  cursor recovery, and `NAV`-to-equity evidence;
+- absence of callable real-money order methods in broker implementations; and
 - MT5 bridge mTLS identity, investor-password/trading-disabled checks, rejected null responses,
   account/server match, overlapping-deal reconciliation, and denied terminal API surface.

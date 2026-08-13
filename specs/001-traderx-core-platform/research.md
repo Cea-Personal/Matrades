@@ -364,50 +364,6 @@ providing a practical, bounded operating session.
 **Alternatives considered**: Client-only timers, rolling unlimited sessions, eight-hour idle
 sessions, and explicit-logout-only sessions are rejected.
 
-## 22. OANDA v20 Read-Only Account Adapter
-
-**Decision**: Use the official OANDA v20 REST API directly for account truth. The UI creates a
-broker integration with an explicit `PRACTICE` or `LIVE` environment (defaulting to `PRACTICE`) and
-a write-only Personal Access Token (PAT), then tests the token with the account-discovery endpoint.
-The owner must select exactly one returned OANDA account before it can bind to TraderX. A PAT grants
-access to all of its account holder's sub-accounts, so it is treated as a password and is never
-returned, logged, or copied into jobs.
-
-Bootstrap each selected account with the complete account endpoint, which supplies a self-consistent
-account/position/trade snapshot and `lastTransactionID`. Map OANDA `NAV` explicitly to TraderX
-`equity`, retain the source field name as evidence, and use `openPositions`/`openTrades` as
-diagnostic cross-checks rather than racing independent projections. Thereafter poll account changes
-from the saved transaction cursor, apply returned `changes` plus the authoritative price-dependent
-`state`, and commit the returned cursor only when normalized validation succeeds. An invalid cursor,
-gap, account mismatch, bad required number, or freshness breach requires a complete bootstrap;
-the prior snapshot remains audit evidence but cannot authorize risk. History uses immutable
-transaction identifiers and documented pagination/ranges.
-
-The implementation owns a strict GET-only endpoint allowlist, egress allowlist for the chosen OANDA
-host, redacted request correlation, bounded retry/backoff for rate limits, and credential revocation
-on disconnect. It never exposes a generic OANDA client or an order/configuration endpoint. OANDA
-documents practice and live REST hosts separately, its account/change endpoints, and a REST limit
-of 120 requests per second per IP; the 15-second TraderX poll target is deliberately much more
-conservative. See [OANDA authentication](https://developer.oanda.com/rest-live-v20/authentication/),
-[account endpoints](https://developer.oanda.com/rest-live-v20/account-ep/),
-[transaction endpoints](https://developer.oanda.com/rest-live-v20/transaction-ep/),
-[best practices](https://developer.oanda.com/rest-live-v20/best-practices/), and the
-[development guide](https://developer.oanda.com/rest-live-v20/development-guide/).
-
-**Rationale**: OANDA's documented complete snapshot plus transaction-cursor changes provide a
-coherent, recoverable account-truth protocol. Independent calls may be useful for diagnosis but
-are not safe as an unversioned merge source. An adapter-level GET allowlist protects the TraderX
-product boundary even where the provider credential is broader than needed.
-
-**Alternatives considered**: polling account summary alone, treating a missing response as zero
-positions, consuming only a transaction stream, storing one cursor before validating the resulting
-projection, or enabling a live connection by default are rejected.
-
-**Release-gating unknown**: the public v20 material does not establish a customer-usable read-only
-PAT or OAuth scope for this use case. Production distribution requires provider confirmation of a
-least-privilege credential or a documented security exception with compensating controls; the
-adapter's own read-only allowlist is mandatory in either case.
-
 ## 23. MetaTrader 5 Read-Only Terminal Bridge
 
 **Decision**: Integrate MT5 through an isolated terminal bridge, not a direct core-service API
@@ -458,7 +414,7 @@ headless terminal operation a supported deployment assumption.
 
 ## 24. Provider Selection, Freshness, and Account Authority
 
-**Decision**: V1 supports only `OANDA_V20` and `MT5_TERMINAL_BRIDGE` for broker account truth. An
+**Decision**: V1 supports only `MT5_TERMINAL_BRIDGE` for broker account truth. An
 authenticated owner creates/tests an integration, sees only discovered/verified provider accounts,
 then binds one account as TraderX's primary live account. The risk service accepts account truth
 only from the bound integration after a complete, fresh reconciliation. Configured but unbound,
@@ -482,7 +438,6 @@ cursor outside the snapshot transaction, and automatic provider failover are rej
 
 ## Resolution Status
 
-The core Technical Context is resolved. Provider-specific release gates are explicit: OANDA
-least-privilege credential confirmation and an MT5 Windows bridge proof with a target broker's
-investor-password account. They do not permit a constitutional exception; until resolved, affected
-accounts stay unavailable for risk authority.
+The core Technical Context is resolved. The provider-specific release gate is an MT5 Windows bridge
+proof with a target broker's investor-password account. It does not permit a constitutional
+exception; until resolved, affected accounts stay unavailable for risk authority.

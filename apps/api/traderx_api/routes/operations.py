@@ -1,15 +1,25 @@
 from __future__ import annotations
 
-from fastapi import APIRouter
+from typing import Annotated
 
-router = APIRouter(prefix="/operations", tags=["Operations"])
+from fastapi import APIRouter, Depends
+
+from traderx_api.routes.access import authenticated_operation_context
+from traderx_api.routes.identity import AuthenticationContext
+
+router = APIRouter(
+    prefix="/operations",
+    tags=["Operations"],
+    dependencies=[Depends(authenticated_operation_context)],
+)
+Viewer = Annotated[AuthenticationContext, Depends(authenticated_operation_context)]
 
 
 @router.get("/health")
-def health() -> dict[str, object]:
+def health(_: Viewer) -> dict[str, object]:
     return {"status": "UNKNOWN", "secrets_redacted": True}
 
 
 @router.get("/audit")
-def audit() -> dict[str, object]:
+def audit(_: Viewer) -> dict[str, object]:
     return {"items": [], "append_only": True, "redacted": True}

@@ -1,4 +1,5 @@
 import { AccountRiskSetup, type AccountSummary } from "@/features/risk/AccountRiskSetup";
+import { CommandCenterWorkspace } from "./CommandCenterWorkspace";
 
 export type Dashboard = {
   account: AccountSummary | null;
@@ -24,6 +25,10 @@ export type Dashboard = {
     risk_policy_configured: boolean;
     account_data_verified: boolean;
   };
+  active_markets: Array<{ category: string; symbol: string }>;
+  opportunities: Array<{ id: string; state: string; score: string | null }>;
+  critical_alerts: Array<{ kind: string; title: string; state: string; reason: string | null }>;
+  integration_health: Array<{ id: string; name: string; status: string; observed_at: string | null }>;
 };
 
 function valueOrPending(value: string | undefined): string {
@@ -31,7 +36,7 @@ function valueOrPending(value: string | undefined): string {
 }
 
 export function CommandCenter({ dashboard, onAccountChanged }: { dashboard: Dashboard; onAccountChanged: () => Promise<void> }) {
-  const { account, metrics, onboarding, risk } = dashboard;
+  const { account, metrics, onboarding, risk, active_markets, opportunities, critical_alerts, integration_health } = dashboard;
   const stateClass = risk.state.toLowerCase();
   const steps: Array<[string, boolean]> = [
     ["Account identity", onboarding.account_configured],
@@ -39,6 +44,7 @@ export function CommandCenter({ dashboard, onAccountChanged }: { dashboard: Dash
     ["Internal guardrails", onboarding.risk_policy_configured],
     ["Verified account data", onboarding.account_data_verified]
   ];
+  const readyForMarkets = steps.every(([, complete]) => complete);
 
   return (
     <section className="command-center" aria-label="Command Center">
@@ -61,10 +67,21 @@ export function CommandCenter({ dashboard, onAccountChanged }: { dashboard: Dash
 
       <section className="readiness-card" aria-labelledby="readiness-heading">
         <div><p className="section-kicker">Safe activation checklist</p><h2 id="readiness-heading">What TraderX still needs</h2></div>
-        <ol>{steps.map(([label, complete]) => <li className={complete ? "complete" : "pending"} key={label}><span aria-hidden="true">{complete ? "✓" : "○"}</span>{label}<small>{complete ? "Recorded" : "Required"}</small></li>)}</ol>
+        <div className="readiness-actions">
+          <ol>{steps.map(([label, complete]) => <li className={complete ? "complete" : "pending"} key={label}><span aria-hidden="true">{complete ? "✓" : "○"}</span>{label}<small>{complete ? "Recorded" : "Required"}</small></li>)}</ol>
+          {readyForMarkets ? <a className="workspace-launch" href="#traderx-workspace">Continue to market selection <span aria-hidden="true">→</span></a> : null}
+        </div>
       </section>
 
-      <AccountRiskSetup account={account} onAccountChanged={onAccountChanged} />
+      <section className="activity-summary" aria-label="Current TraderX evidence">
+        <article><span>Active markets</span><strong>{active_markets.length} / 3</strong><small>{active_markets.length ? active_markets.map((market) => market.symbol).join(" · ") : "No market has been approved"}</small></article>
+        <article><span>Opportunities</span><strong>{opportunities.length}</strong><small>{opportunities.length ? `${opportunities.filter((opportunity) => opportunity.state === "CANDIDATE").length} candidates awaiting risk review` : "No current opportunity evidence"}</small></article>
+        <article><span>Critical alerts</span><strong>{critical_alerts.length}</strong><small>{critical_alerts.length ? critical_alerts[0].title : "No critical alert recorded"}</small></article>
+        <article><span>Integration health</span><strong>{integration_health.length}</strong><small>{integration_health.length ? integration_health.map((integration) => `${integration.name}: ${integration.status}`).join(" · ") : "No account connection recorded"}</small></article>
+      </section>
+
+      {!readyForMarkets ? <AccountRiskSetup account={account} onAccountChanged={onAccountChanged} /> : null}
+      <CommandCenterWorkspace account={account} key={readyForMarkets ? "markets" : "account-connection"} onAccountChanged={onAccountChanged} startAtMarkets={readyForMarkets} />
     </section>
   );
 }

@@ -1,9 +1,17 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Header
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Header
 from pydantic import BaseModel
 
-router = APIRouter(prefix="/validation", tags=["Validation"])
+from traderx_api.routes.access import authenticated_operation_context, operator_context
+from traderx_api.routes.identity import AuthenticationContext
+
+router = APIRouter(
+    prefix="/validation", tags=["Validation"], dependencies=[Depends(authenticated_operation_context)]
+)
+Operator = Annotated[AuthenticationContext, Depends(operator_context)]
 
 
 class RunCommand(BaseModel):
@@ -13,7 +21,9 @@ class RunCommand(BaseModel):
 
 @router.post("/backtests", status_code=202)
 def start_backtest(
-    payload: RunCommand, idempotency_key: str = Header(alias="Idempotency-Key")
+    payload: RunCommand,
+    _: Operator,
+    idempotency_key: str = Header(alias="Idempotency-Key"),
 ) -> dict[str, object]:
     return {
         "job_type": "backtest",
@@ -25,7 +35,9 @@ def start_backtest(
 
 @router.post("/runs", status_code=202)
 def start_validation(
-    payload: RunCommand, idempotency_key: str = Header(alias="Idempotency-Key")
+    payload: RunCommand,
+    _: Operator,
+    idempotency_key: str = Header(alias="Idempotency-Key"),
 ) -> dict[str, object]:
     return {
         "job_type": "validation",

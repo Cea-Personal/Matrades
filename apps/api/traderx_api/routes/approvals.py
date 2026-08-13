@@ -1,9 +1,17 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Header
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Header
 from pydantic import BaseModel, Field
 
-router = APIRouter(prefix="/approvals", tags=["Approvals"])
+from traderx_api.routes.access import authenticated_operation_context, operator_context
+from traderx_api.routes.identity import AuthenticationContext
+
+router = APIRouter(
+    prefix="/approvals", tags=["Approvals"], dependencies=[Depends(authenticated_operation_context)]
+)
+Operator = Annotated[AuthenticationContext, Depends(operator_context)]
 
 
 class ApprovalCommand(BaseModel):
@@ -15,6 +23,7 @@ class ApprovalCommand(BaseModel):
 def decide_strategy(
     strategy_version_id: str,
     payload: ApprovalCommand,
+    _: Operator,
     if_match: str = Header(alias="If-Match"),
     idempotency_key: str = Header(alias="Idempotency-Key"),
 ) -> dict[str, object]:

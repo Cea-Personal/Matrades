@@ -1,6 +1,14 @@
-# The development proxy is intentionally addressed through localhost. Naming the
-# host lets Caddy issue its internal development certificate for the TLS handshake.
-localhost:443 {
+# IP-address TLS clients, including MT5 on macOS/Wine, generally omit SNI. Use
+# the locally-issued IP certificate as the default only for that no-SNI case.
+{
+  default_sni 127.0.0.1
+}
+
+# The local proxy supports both hostnames. MetaTrader 5 on macOS/Wine may accept
+# the numeric loopback address in its WebRequest allow-list but reject localhost.
+# Naming both lets Caddy issue its internal development certificate for either TLS
+# handshake without weakening the EA's HTTPS-only transport requirement.
+localhost:443, 127.0.0.1:443 {
   tls internal
   encode zstd gzip
   header {

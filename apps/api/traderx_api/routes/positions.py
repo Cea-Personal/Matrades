@@ -1,12 +1,21 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Header
+from typing import Annotated
 
-router = APIRouter(prefix="/positions", tags=["Trade Monitoring"])
+from fastapi import APIRouter, Depends, Header
+
+from traderx_api.routes.access import authenticated_operation_context, operator_context
+from traderx_api.routes.identity import AuthenticationContext
+
+router = APIRouter(
+    prefix="/positions", tags=["Trade Monitoring"], dependencies=[Depends(authenticated_operation_context)]
+)
+Viewer = Annotated[AuthenticationContext, Depends(authenticated_operation_context)]
+Operator = Annotated[AuthenticationContext, Depends(operator_context)]
 
 
 @router.get("")
-def positions() -> dict[str, object]:
+def positions(_: Viewer) -> dict[str, object]:
     return {"items": [], "broker_mode": "READ_ONLY"}
 
 
@@ -14,6 +23,7 @@ def positions() -> dict[str, object]:
 def correct_classification(
     position_id: str,
     payload: dict[str, object],
+    _: Operator,
     if_match: str = Header(alias="If-Match"),
     idempotency_key: str = Header(alias="Idempotency-Key"),
 ) -> dict[str, object]:
@@ -27,5 +37,5 @@ def correct_classification(
 
 
 @router.get("/{position_id}/thesis")
-def position_thesis(position_id: str) -> dict[str, object]:
+def position_thesis(position_id: str, _: Viewer) -> dict[str, object]:
     return {"position_id": position_id, "immutable": True, "observations": []}

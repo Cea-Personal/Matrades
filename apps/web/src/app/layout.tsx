@@ -1,7 +1,8 @@
-import Link from "next/link";
 import { connection } from "next/server";
 import { ReactNode } from "react";
 
+import Link from "next/link";
+import { SessionNavigation } from "@/features/identity/SessionNavigation";
 import { Providers } from "./providers";
 import "./globals.css";
 
@@ -15,7 +16,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
     <html lang="en">
       <body>
         <Providers>
-          <header className="site-header"><Link className="brand" href="/">TraderX</Link><nav aria-label="Primary navigation" /></header>
+          <header className="site-header"><Link className="brand" href="/">TraderX</Link><SessionNavigation /></header>
           <main>{children}</main>
         </Providers>
       </body>

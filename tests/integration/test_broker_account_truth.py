@@ -37,8 +37,8 @@ def _session() -> tuple[Session, object]:
 
 def _fixtures(session: Session) -> tuple[Integration, TradingAccount]:
     integration = Integration(
-        name="OANDA practice",
-        provider=BrokerProvider.OANDA_V20,
+        name="MT5 Demo-Server 123456",
+        provider=BrokerProvider.MT5_TERMINAL_BRIDGE,
         state="DISABLED",
         capabilities=["ACCOUNT_READ", "POSITION_READ", "DEAL_READ", "INSTRUMENT_READ"],
     )
@@ -54,19 +54,20 @@ def _fixtures(session: Session) -> tuple[Integration, TradingAccount]:
     session.add(
         BrokerIntegrationProfile(
             integration_id=integration.id,
-            provider=BrokerProvider.OANDA_V20,
-            environment="PRACTICE",
-            selected_provider_account_id="001-001-123",
+            provider=BrokerProvider.MT5_TERMINAL_BRIDGE,
+            account_login="123456",
+            server="Demo-Server",
+            selected_provider_account_id="123456",
             configuration={},
         )
     )
     session.add(
         BrokerDiscoveredAccount(
             integration_id=integration.id,
-            provider_account_id="001-001-123",
-            display_name="Practice",
+            provider_account_id="123456",
+            display_name="Demo-Server 123456",
             currency="USD",
-            account_mode="PRACTICE",
+            account_mode="DEMO",
             verification_status="VERIFIED",
             verified_at=datetime(2026, 8, 13, tzinfo=UTC),
         )
@@ -77,16 +78,16 @@ def _fixtures(session: Session) -> tuple[Integration, TradingAccount]:
 
 def _truth() -> NormalizedBrokerSnapshot:
     return NormalizedBrokerSnapshot(
-        provider_account_id="001-001-123",
-        provider_event_id="73",
+        provider_account_id="123456",
+        provider_event_id="mt5-73",
         balance=Decimal("10000.00"),
         equity=Decimal("10020.50"),
         realized_pl=Decimal("20.50"),
         floating_pl=Decimal("5.50"),
         observed_at=datetime(2026, 8, 13, tzinfo=UTC),
-        source_cursor="73",
-        source_window={},
-        raw_evidence={"equity_source": "NAV"},
+        source_cursor=None,
+        source_window={"lookback_days": 2},
+        raw_evidence={"provider": "MT5_TERMINAL_BRIDGE"},
         open_position_count=1,
     )
 
@@ -103,7 +104,7 @@ def test_authoritative_snapshot_and_checkpoint_commit_together() -> None:
         checkpoint = session.scalar(select(BrokerReconciliationCheckpoint))
         assert checkpoint is not None
         assert checkpoint.account_snapshot_id == snapshot.id
-        assert checkpoint.source_cursor == "73"
+        assert checkpoint.source_cursor is None
         assert session.get(TradingAccount, account.id).status == AccountStatus.ACTIVE
         assert session.get(Integration, integration.id).state == "HEALTHY"
         assert session.scalar(select(IntegrationHealthObservation)).status == "HEALTHY"

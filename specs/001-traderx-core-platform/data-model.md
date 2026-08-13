@@ -98,7 +98,7 @@ creates a target-user operational session.
 | `mode` | `LIVE`, `PAPER`, or `DEMO` |
 | `currency` | ISO currency code |
 | `broker_integration_id` | The tested, enabled broker connection that is the only risk-authoritative source |
-| `provider_account_id` | Explicitly selected external account identifier; OANDA account ID or the verified MT5 login/server pair, encrypted or masked as appropriate |
+| `provider_account_id` | Explicitly selected external account identifier: the verified MT5 login/server pair, masked as appropriate |
 | `starting_balance` | Positive decimal |
 | `prop_profile_id` | Current external rule version |
 | `risk_policy_id` | Current internal rule version |
@@ -123,8 +123,8 @@ author, and reason.
 Append-only observation containing integration/account identity, provider sequence/time,
 observed/received time, balance, equity, realized and floating profit/loss, margin and free
 margin, broker-reported daily values, data quality/freshness, reconciliation checkpoint reference,
-and raw-payload reference. OANDA records the source `NAV` used for equity; MT5 records the verified
-login/server and terminal observation. Unique on integration plus provider observation identity to
+and raw-payload reference. MT5 records the verified login/server and terminal observation. Unique
+on integration plus provider observation identity to
 prevent double counting. A snapshot becomes risk-authoritative only when its linked reconciliation
 outcome is complete, coherent, and within the configured freshness SLO.
 
@@ -172,12 +172,9 @@ Fields: `id`, category (`BROKER`, `MARKET_DATA`, `ECONOMIC`, `MACRO`, `CRYPTO`, 
 `MESSAGING`), provider type, display name, enabled state, capability allowlist, configuration
 without secrets, credential version reference, created/updated by, and concurrency version.
 
-For V1 broker connections, `provider_type` is exactly one of:
+For V1 broker connections, `provider_type` is exactly:
 
-- `OANDA_V20`: configuration contains environment (`PRACTICE` or explicit `LIVE`) and the selected
-  account only after discovery. Its credential version contains an encrypted Personal Access Token.
-  `PRACTICE` is the default for a new integration.
-- `MT5_TERMINAL_BRIDGE`: configuration contains the registered HTTPS bridge identity/URL, MT5
+- `MT5_TERMINAL_BRIDGE`: configuration contains the registered bridge identity, MT5
   account login, and broker server. Its credential version contains only the TraderX-to-bridge
   client credential. The investor password exists only in the bridge's separate secret boundary.
 
@@ -198,9 +195,9 @@ Fields: integration, state (`HEALTHY`, `DEGRADED`, `FAILED`, `DISABLED`), observ
 last success, latency, freshness, error category and redacted detail, and affected capabilities.
 
 For a broker connection, include verified provider-account identity, reconciliation completeness,
-and provider-safe diagnostics: OANDA environment/last transaction cursor fingerprint or MT5 bridge
-identity, terminal version, connection state, and trading-permitted flags. Credentials, full
-cursors, MT5 password, and raw provider errors are not exposed in health responses.
+and provider-safe diagnostics: MT5 bridge identity, terminal version, connection state, and
+trading-permitted flags. Credentials, MT5 password, and raw provider errors are not exposed in
+health responses.
 
 ### BrokerReconciliationCheckpoint
 
@@ -209,8 +206,7 @@ type, opaque source cursor or overlapping-history window fingerprint, authoritat
 identity, source/observed/committed times, completeness, validation outcome, raw-evidence hash,
 and superseded checkpoint reference.
 
-For OANDA, the cursor is `lastTransactionID` from a complete snapshot or accepted account-changes
-response. For MT5, the checkpoint is a bounded, overlapping deal-history window plus the terminal
+For MT5, the checkpoint is a bounded, overlapping deal-history window plus the terminal
 account/server identity; it is not a fabricated sequence cursor. A successful checkpoint and its
 normalized account snapshot commit in one transaction. Invalid, partial, stale, or contradictory
 results create evidence and health/breaker state but never advance the last usable checkpoint.

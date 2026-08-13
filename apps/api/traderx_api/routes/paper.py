@@ -1,9 +1,17 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Header
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Header
 from pydantic import BaseModel
 
-router = APIRouter(prefix="/paper", tags=["Paper Trading"])
+from traderx_api.routes.access import authenticated_operation_context, operator_context
+from traderx_api.routes.identity import AuthenticationContext
+
+router = APIRouter(
+    prefix="/paper", tags=["Paper Trading"], dependencies=[Depends(authenticated_operation_context)]
+)
+Operator = Annotated[AuthenticationContext, Depends(operator_context)]
 
 
 class PaperRunCommand(BaseModel):
@@ -13,7 +21,9 @@ class PaperRunCommand(BaseModel):
 
 @router.post("/runs", status_code=202)
 def start_paper_run(
-    payload: PaperRunCommand, idempotency_key: str = Header(alias="Idempotency-Key")
+    payload: PaperRunCommand,
+    _: Operator,
+    idempotency_key: str = Header(alias="Idempotency-Key"),
 ) -> dict[str, object]:
     return {
         "job_type": "paper_run",

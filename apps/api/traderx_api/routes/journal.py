@@ -1,12 +1,21 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Header
+from typing import Annotated
 
-router = APIRouter(prefix="/journal", tags=["Journal"])
+from fastapi import APIRouter, Depends, Header
+
+from traderx_api.routes.access import authenticated_operation_context, operator_context
+from traderx_api.routes.identity import AuthenticationContext
+
+router = APIRouter(
+    prefix="/journal", tags=["Journal"], dependencies=[Depends(authenticated_operation_context)]
+)
+Viewer = Annotated[AuthenticationContext, Depends(authenticated_operation_context)]
+Operator = Annotated[AuthenticationContext, Depends(operator_context)]
 
 
 @router.get("/entries")
-def entries() -> dict[str, object]:
+def entries(_: Viewer) -> dict[str, object]:
     return {"items": []}
 
 
@@ -14,6 +23,7 @@ def entries() -> dict[str, object]:
 def annotate(
     entry_id: str,
     payload: dict[str, object],
+    _: Operator,
     idempotency_key: str = Header(alias="Idempotency-Key"),
 ) -> dict[str, object]:
     return {
@@ -25,12 +35,14 @@ def annotate(
 
 
 @router.get("/analytics")
-def analytics(dimension: str = "instrument") -> dict[str, object]:
+def analytics(_: Viewer, dimension: str = "instrument") -> dict[str, object]:
     return {"dimension": dimension, "groups": {}}
 
 
 @router.post("/proposals", status_code=201)
 def proposal(
-    payload: dict[str, object], idempotency_key: str = Header(alias="Idempotency-Key")
+    payload: dict[str, object],
+    _: Operator,
+    idempotency_key: str = Header(alias="Idempotency-Key"),
 ) -> dict[str, object]:
     return {"proposal": payload, "state": "PROPOSED", "idempotency_key": idempotency_key}

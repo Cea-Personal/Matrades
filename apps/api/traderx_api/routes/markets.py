@@ -1,9 +1,17 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Header, Response
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Header, Response
 from pydantic import BaseModel, Field
 
-router = APIRouter(prefix="/markets", tags=["Markets"])
+from traderx_api.routes.access import authenticated_operation_context, operator_context
+from traderx_api.routes.identity import AuthenticationContext
+
+router = APIRouter(
+    prefix="/markets", tags=["Markets"], dependencies=[Depends(authenticated_operation_context)]
+)
+Operator = Annotated[AuthenticationContext, Depends(operator_context)]
 
 
 class ResearchCommand(BaseModel):
@@ -18,7 +26,9 @@ def instrument_library(category: str | None = None) -> dict[str, object]:
 
 @router.post("/research", status_code=202)
 def start_research(
-    payload: ResearchCommand, idempotency_key: str = Header(alias="Idempotency-Key")
+    payload: ResearchCommand,
+    _: Operator,
+    idempotency_key: str = Header(alias="Idempotency-Key"),
 ) -> dict[str, object]:
     return {
         "job_type": "market_research",
@@ -38,6 +48,7 @@ def research_report(run_id: str, response: Response) -> dict[str, object]:
 def approve_active_market(
     category: str,
     payload: dict[str, object],
+    _: Operator,
     if_match: str = Header(alias="If-Match"),
     idempotency_key: str = Header(alias="Idempotency-Key"),
 ) -> dict[str, object]:

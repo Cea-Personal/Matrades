@@ -11,7 +11,6 @@ from traderx.shared.db import Base, IdentifiedMixin
 
 
 class BrokerProvider(StrEnum):
-    OANDA_V20 = "OANDA_V20"
     MT5_TERMINAL_BRIDGE = "MT5_TERMINAL_BRIDGE"
 
 
@@ -49,6 +48,27 @@ class BrokerDiscoveredAccount(IdentifiedMixin, Base):
         String(24), nullable=False, default="DISCOVERED"
     )
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class Mt5BridgeAgent(IdentifiedMixin, Base):
+    """A TraderX-managed outbound MT5 bridge enrollment.
+
+    The bridge runs beside an MT5 terminal and pushes verified read-only snapshots to TraderX.
+    It never exposes a broker-facing endpoint to the core application. Only digests of the
+    short-lived enrollment code and the long-lived agent credential are retained.
+    """
+
+    __tablename__ = "mt5_bridge_agents"
+    __table_args__ = (UniqueConstraint("integration_id", name="uq_mt5_bridge_agent_integration"),)
+
+    integration_id: Mapped[UUID] = mapped_column(ForeignKey("integrations.id"), nullable=False)
+    enrollment_token_digest: Mapped[str] = mapped_column(String(128), nullable=False)
+    agent_token_digest: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    enrollment_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    enrolled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_snapshot_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    latest_snapshot: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
 
 
 class BrokerReconciliationCheckpoint(IdentifiedMixin, Base):

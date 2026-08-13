@@ -350,23 +350,51 @@ paths:
               schema:
                 type: array
                 items: {$ref: '#/components/schemas/Integration'}
+  /integrations/mt5/enrollments:
     post:
       tags: [Integrations]
-      operationId: createIntegration
+      operationId: beginManagedMt5Enrollment
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
-            schema: {$ref: '#/components/schemas/IntegrationCommand'}
+            schema: {$ref: '#/components/schemas/ManagedMt5EnrollmentCommand'}
       responses:
         '201':
-          description: Integration created with secrets write-only
+          description: MT5 bridge enrollment created with a one-time setup code
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/Integration'}
+              schema: {$ref: '#/components/schemas/ManagedMt5Enrollment'}
         '422': {$ref: '#/components/responses/Problem'}
+  /integrations/{integration_id}/mt5/enrollment:
+    post:
+      tags: [Integrations]
+      operationId: renewManagedMt5Enrollment
+      parameters:
+        - $ref: '#/components/parameters/IntegrationId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: Prior MT5 bridge credential revoked and a new one-time setup code issued
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ManagedMt5Enrollment'}
+  /integrations/{integration_id}:
+    delete:
+      tags: [Integrations]
+      operationId: removeManagedMt5Integration
+      description: Revokes the managed MT5 bridge, unbinds any TraderX account, and removes the connection from the active UI while retaining audit evidence.
+      parameters:
+        - $ref: '#/components/parameters/IntegrationId'
+      responses:
+        '200':
+          description: MT5 integration removed and bridge credential revoked
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RemovedManagedMt5Integration'}
+        '409': {$ref: '#/components/responses/Problem'}
   /integrations/{integration_id}/test:
     post:
       tags: [Integrations]
@@ -390,21 +418,6 @@ paths:
                 type: array
                 items: {$ref: '#/components/schemas/ProviderAccountCandidate'}
         '409': {$ref: '#/components/responses/Problem'}
-  /integrations/{integration_id}/credentials:
-    put:
-      tags: [Integrations]
-      operationId: rotateIntegrationCredential
-      parameters:
-        - $ref: '#/components/parameters/IntegrationId'
-        - $ref: '#/components/parameters/IdempotencyKey'
-        - $ref: '#/components/parameters/IfMatch'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: '#/components/schemas/SecretRotationCommand'}
-      responses:
-        '200': {$ref: '#/components/responses/VersionedResource'}
   /instruments:
     get:
       tags: [Markets]
@@ -942,101 +955,58 @@ components:
         state: {type: string, enum: [ARMED, TRIPPED, ACKNOWLEDGED, CLEARED]}
     Integration:
       type: object
-      required: [id, version, category, provider, status]
+      required: [id, version, category, provider, name, mt5_account_login, mt5_server, status]
       properties:
         id: {$ref: '#/components/schemas/Id'}
         version: {type: integer}
         category: {type: string}
+        name: {type: string}
+        mt5_account_login: {type: string, description: MT5 account login selected for this managed bridge.}
+        mt5_server: {type: string, description: Broker server selected for this managed bridge.}
         provider:
-          type: string
-          description: Broker V1 providers are OANDA_V20 and MT5_TERMINAL_BRIDGE. Other categories define their own provider values.
+          const: MT5_TERMINAL_BRIDGE
+          description: TraderX supports MetaTrader 5 account truth through its managed read-only EA bridge.
         status: {type: string, enum: [HEALTHY, DEGRADED, FAILED, DISABLED]}
         credential_hint: {type: string, description: Masked value only}
-    IntegrationCommand:
-      oneOf:
-        - $ref: '#/components/schemas/OandaV20IntegrationCommand'
-        - $ref: '#/components/schemas/Mt5TerminalBridgeIntegrationCommand'
-        - $ref: '#/components/schemas/NonBrokerIntegrationCommand'
-    OandaV20IntegrationCommand:
+    ManagedMt5EnrollmentCommand:
       type: object
-      required: [category, provider, configuration, credentials]
+      required: [account_login, server]
       additionalProperties: false
       properties:
-        category: {const: BROKER}
-        provider: {const: OANDA_V20}
-        configuration: {$ref: '#/components/schemas/OandaV20Configuration'}
-        credentials: {$ref: '#/components/schemas/OandaV20Credentials'}
-    OandaV20Configuration:
+        account_login: {type: string, minLength: 1, maxLength: 256}
+        server: {type: string, minLength: 1, maxLength: 256}
+        display_name: {type: string, minLength: 1, maxLength: 128}
+    ManagedMt5Enrollment:
+      allOf:
+        - $ref: '#/components/schemas/Integration'
+        - type: object
+          required: [enrollment]
+          properties:
+            enrollment:
+              type: object
+              required: [agent_id, code, expires_at]
+              properties:
+                agent_id: {$ref: '#/components/schemas/Id'}
+                code: {type: string, writeOnly: true}
+                expires_at: {$ref: '#/components/schemas/Instant'}
+    RemovedManagedMt5Integration:
       type: object
-      required: [environment]
-      additionalProperties: false
+      required: [integration_id, status, unbound_account_count]
       properties:
-        environment: {type: string, enum: [PRACTICE, LIVE], default: PRACTICE}
-        account_id:
-          type: string
-          description: Optional until test succeeds; the owner must select a discovered account before it is bound to a TradingAccount.
-    OandaV20Credentials:
-      type: object
-      required: [personal_access_token]
-      additionalProperties: false
-      properties:
-        personal_access_token: {type: string, minLength: 1, writeOnly: true}
-    Mt5TerminalBridgeIntegrationCommand:
-      type: object
-      required: [category, provider, configuration, credentials]
-      additionalProperties: false
-      properties:
-        category: {const: BROKER}
-        provider: {const: MT5_TERMINAL_BRIDGE}
-        configuration: {$ref: '#/components/schemas/Mt5TerminalBridgeConfiguration'}
-        credentials: {$ref: '#/components/schemas/Mt5TerminalBridgeCredentials'}
-    Mt5TerminalBridgeConfiguration:
-      type: object
-      required: [bridge_url, bridge_id, account_login, server]
-      additionalProperties: false
-      properties:
-        bridge_url: {type: string, format: uri, pattern: '^https://'}
-        bridge_id: {type: string, minLength: 1}
-        account_login: {type: string, minLength: 1}
-        server: {type: string, minLength: 1}
-    Mt5TerminalBridgeCredentials:
-      type: object
-      required: [bridge_client_secret]
-      additionalProperties: false
-      properties:
-        bridge_client_secret:
-          type: string
-          minLength: 1
-          writeOnly: true
-          description: Authenticates TraderX to the registered bridge. It is not an MT5 trading or investor password.
-    NonBrokerIntegrationCommand:
-      type: object
-      required: [category, provider, configuration, credentials]
-      properties:
-        category:
-          type: string
-          not: {const: BROKER}
-        provider: {type: string}
-        configuration: {type: object, additionalProperties: true}
-        credentials: {type: object, writeOnly: true, additionalProperties: true}
+        integration_id: {$ref: '#/components/schemas/Id'}
+        status: {const: REMOVED}
+        unbound_account_count: {type: integer, minimum: 0}
     ProviderAccountCandidate:
       type: object
       required: [provider_account_id, provider, verification_status]
       properties:
         provider_account_id: {type: string}
-        provider: {type: string, enum: [OANDA_V20, MT5_TERMINAL_BRIDGE]}
+        provider: {const: MT5_TERMINAL_BRIDGE}
         display_name: {type: string}
         currency: {type: string, minLength: 3, maxLength: 3}
         account_mode: {type: string, enum: [PRACTICE, DEMO, LIVE, UNKNOWN]}
         verification_status: {type: string, enum: [DISCOVERED, VERIFIED, UNAVAILABLE]}
         verified_at: {$ref: '#/components/schemas/Instant'}
-    SecretRotationCommand:
-      type: object
-      required: [reason, confirmation, credentials]
-      properties:
-        reason: {type: string, minLength: 8}
-        confirmation: {const: CONFIRMED}
-        credentials: {type: object, writeOnly: true, additionalProperties: true}
     Instrument:
       type: object
       required: [id, symbol, category, status, specification_quality]
