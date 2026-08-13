@@ -13,6 +13,7 @@ dependencies = [
   "cryptography>=46,<47",
   "email-validator>=2.2,<3",
   "fastapi>=0.141,<0.142",
+  "httpx>=0.28,<1",
   "itsdangerous>=2.2,<3",
   "numpy>=2.3,<3",
   "pandas>=2.3,<3",
@@ -31,7 +32,6 @@ dependencies = [
 [dependency-groups]
 dev = [
   "hypothesis>=6.139,<7",
-  "httpx>=0.28,<1",
   "mypy>=1.18,<2",
   "pytest>=9,<10",
   "pytest-asyncio>=1.2,<2",
@@ -45,6 +45,7 @@ packages = ["src/traderx", "apps/api/traderx_api", "apps/worker/traderx_worker"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src", "apps/api", "apps/worker", "apps/mt5_bridge"]
 addopts = "-ra --strict-markers"
 markers = [
   "contract: API and provider contract tests",

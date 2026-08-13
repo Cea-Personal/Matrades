@@ -8,7 +8,9 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 from sqlalchemy.engine import make_url
 
-from traderx.shared.db import Base
+from traderx.shared.db import Base, load_model_metadata
+
+load_model_metadata()
 
 config = context.config
 if config.config_file_name:

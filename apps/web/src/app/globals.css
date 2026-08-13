@@ -193,6 +193,36 @@ main { margin: 0 auto; max-width: 76rem; padding: 0 1.25rem 2rem; }
 .check-grid input { flex: 0 0 auto; min-height: 1rem; width: 1rem; }
 .setup-complete { background: #f2f9f5; border-color: #b9ddc9; }
 
+.integration-panel { background: rgba(255, 255, 255, 0.9); border: 1px solid var(--line); border-radius: 0.85rem; box-shadow: 0 10px 24px rgba(11, 38, 65, 0.06); margin-top: 1.25rem; max-width: 54rem; padding: clamp(1.25rem, 3vw, 2rem); }
+.setup-complete .integration-panel { background: transparent; border: 0; border-radius: 0; border-top: 1px solid #b9ddc9; box-shadow: none; margin: 1.35rem 0 0; max-width: none; padding: 1.35rem 0 0; }
+.integration-heading { align-items: start; display: flex; gap: 1rem; justify-content: space-between; }
+.integration-heading .section-kicker { color: #176db1; margin: 0 0 0.4rem; }
+.integration-heading h2 { font-family: Georgia, "Times New Roman", serif; font-size: clamp(1.55rem, 3vw, 2.1rem); letter-spacing: -0.028em; margin: 0; }
+.integration-heading p:not(.section-kicker) { color: var(--ink-soft); margin-bottom: 0; max-width: 43rem; }
+.integration-form { display: grid; gap: 1rem; margin-top: 1.25rem; }
+.integration-form fieldset { border: 1px solid var(--line); border-radius: 0.65rem; display: grid; gap: 0.6rem; padding: 0.85rem; }
+.integration-form legend, .discovered-accounts h4 { color: var(--ink-soft); font-size: 0.85rem; font-weight: 750; padding: 0 0.3rem; }
+.provider-choice { align-items: start; border: 1px solid var(--line); border-radius: 0.55rem; cursor: pointer; display: flex; gap: 0.65rem; padding: 0.75rem; }
+.provider-choice input { flex: 0 0 auto; margin-top: 0.25rem; min-height: 1rem; width: 1rem; }
+.provider-choice span { display: grid; gap: 0.1rem; }
+.provider-choice small, .integration-card p, .provider-account small { color: var(--ink-soft); }
+.integration-fields { display: grid; gap: 0.7rem; max-width: 44rem; }
+.integration-fields > label { display: grid; font-size: 0.9rem; font-weight: 750; gap: 0.35rem; }
+.integration-form > button { justify-self: start; }
+.secondary-button { background: #edf4f9; border: 1px solid #acc4d8; color: #15517a; }
+.secondary-button:hover:not(:disabled) { background: #dcebf5; }
+.integration-list { display: grid; gap: 0.85rem; margin-top: 1.25rem; }
+.empty-integrations { color: var(--ink-soft); margin: 0; }
+.integration-card { background: #f8fbfd; border: 1px solid var(--line); border-radius: 0.65rem; display: grid; gap: 0.85rem; padding: 1rem; }
+.integration-card h3 { font-size: 1.1rem; margin: 0.15rem 0; }
+.integration-card p { margin: 0; }
+.integration-actions { display: flex; flex-wrap: wrap; gap: 0.65rem; }
+.discovered-accounts { border-top: 1px solid var(--line); display: grid; gap: 0.55rem; padding-top: 0.85rem; }
+.discovered-accounts h4 { margin: 0; }
+.provider-account { align-items: center; background: #fff; border: 1px solid var(--line); border-radius: 0.5rem; display: flex; gap: 0.75rem; justify-content: space-between; padding: 0.65rem 0.75rem; }
+.provider-account span { display: grid; gap: 0.12rem; overflow-wrap: anywhere; }
+.provider-account button { flex: 0 0 auto; }
+
 @media (max-width: 760px) {
   .landing, .auth-layout { grid-template-columns: 1fr; }
   .auth-aside { border-radius: 1rem 1rem 0 0; }
@@ -204,4 +234,5 @@ main { margin: 0 auto; max-width: 76rem; padding: 0 1.25rem 2rem; }
   .risk-gate .gate-detail { border-left: 0; border-top: 1px solid rgba(198, 221, 236, 0.35); max-width: none; padding: 1rem 0 0; }
   .metric-grid, .readiness-card { grid-template-columns: 1fr; }
   .setup-form .form-row { grid-template-columns: 1fr; }
+  .integration-heading, .provider-account { align-items: stretch; flex-direction: column; }
 }

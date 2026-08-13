@@ -1,0 +1,10 @@
+[project]
+name = "traderx-mt5-bridge"
+version = "0.1.0"
+description = "Read-only MetaTrader 5 terminal bridge for TraderX"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+  "fastapi>=0.141,<0.142",
+  "uvicorn[standard]>=0.35,<1",
+  "MetaTrader5>=5.0.45",
+]

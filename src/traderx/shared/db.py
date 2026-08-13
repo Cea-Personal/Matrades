@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
+from importlib import import_module
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -19,6 +20,35 @@ NAMING_CONVENTION = {
 
 class Base(DeclarativeBase):
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
+
+
+def load_model_metadata() -> None:
+    """Register every model before schema creation or Alembic metadata inspection."""
+
+    for module_name in (
+        "traderx.identity.model",
+        "traderx.accounts.model",
+        "traderx.risk.model",
+        "traderx.integrations.model",
+        "traderx.integrations.broker_model",
+        "traderx.jobs.model",
+        "traderx.market_data.model",
+        "traderx.market_research.model",
+        "traderx.research.model",
+        "traderx.strategies.model",
+        "traderx.strategies.approval_model",
+        "traderx.strategies.health_model",
+        "traderx.validation.model",
+        "traderx.paper.model",
+        "traderx.opportunities.model",
+        "traderx.opportunities.recommendation_model",
+        "traderx.monitoring.position_model",
+        "traderx.monitoring.thesis_model",
+        "traderx.journal.model",
+        "traderx.notifications.model",
+        "traderx.audit.model",
+    ):
+        import_module(module_name)
 
 
 class CreatedAtMixin:

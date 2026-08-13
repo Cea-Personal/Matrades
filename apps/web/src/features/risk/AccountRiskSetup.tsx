@@ -2,6 +2,8 @@
 
 import { FormEvent, useState } from "react";
 
+import { BrokerAccountIntegration } from "@/features/integrations/BrokerAccountIntegration";
+
 export type AccountSummary = {
   id: string;
   name: string;
@@ -11,6 +13,8 @@ export type AccountSummary = {
   status: string;
   version: number;
   etag: string;
+  broker_integration_id?: string | null;
+  provider_account_id?: string | null;
   prop_profile_configured: boolean;
   risk_policy_configured: boolean;
 };
@@ -210,6 +214,7 @@ export function AccountRiskSetup({
       <h2 id="verification-heading">Awaiting verified account data</h2>
       <p>Your account and risk limits are recorded. TraderX stays in LOCKDOWN until a permitted account integration supplies a verified balance, equity, and position snapshot.</p>
       {message ? <p className="status-message" data-tone="success" role="status">{message}</p> : null}
+      <BrokerAccountIntegration account={account} onAccountChanged={onAccountChanged} />
     </section>
   );
 }

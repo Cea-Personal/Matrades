@@ -1111,6 +1111,7 @@ dependencies = [
     { name = "cryptography" },
     { name = "email-validator" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "itsdangerous" },
     { name = "numpy" },
     { name = "pandas" },
@@ -1128,7 +1129,6 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "httpx" },
     { name = "hypothesis" },
     { name = "mypy" },
     { name = "pytest" },
@@ -1145,6 +1145,7 @@ requires-dist = [
     { name = "cryptography", specifier = ">=46,<47" },
     { name = "email-validator", specifier = ">=2.2,<3" },
     { name = "fastapi", specifier = ">=0.141,<0.142" },
+    { name = "httpx", specifier = ">=0.28,<1" },
     { name = "itsdangerous", specifier = ">=2.2,<3" },
     { name = "numpy", specifier = ">=2.3,<3" },
     { name = "pandas", specifier = ">=2.3,<3" },
@@ -1162,7 +1163,6 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "httpx", specifier = ">=0.28,<1" },
     { name = "hypothesis", specifier = ">=6.139,<7" },
     { name = "mypy", specifier = ">=1.18,<2" },
     { name = "pytest", specifier = ">=9,<10" },

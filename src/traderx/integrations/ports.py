@@ -16,6 +16,11 @@ class BrokerReadPort(Protocol):
     def get_deals(
         self, account_ref: str, cursor_or_range: str | None
     ) -> list[dict[str, object]]: ...
+    def get_account_changes(
+        self, account_ref: str, cursor: str
+    ) -> dict[str, object] | None:
+        """Return a documented delta response, or None when the provider has no cursor protocol."""
+        ...
 
 
 class MarketDataPort(Protocol):

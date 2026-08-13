@@ -65,6 +65,8 @@ def dashboard(
         "status": account.status,
         "version": account.version,
         "etag": f'"account-{account.version}"',
+        "broker_integration_id": str(account.broker_integration_id) if account.broker_integration_id else None,
+        "provider_account_id": account.provider_account_id,
         "prop_profile_configured": account.prop_profile_id is not None,
         "risk_policy_configured": account.risk_policy_id is not None,
     }

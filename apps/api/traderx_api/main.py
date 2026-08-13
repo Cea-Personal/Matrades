@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from traderx.shared.config import get_settings
+from traderx.shared.db import load_model_metadata
 from traderx.shared.types import DomainError
 from traderx_api.middleware.context import ContextMiddleware
 from traderx_api.middleware.problems import domain_error_handler
@@ -13,7 +14,8 @@ from traderx_api.routes.accounts import router as accounts_router
 from traderx_api.routes.approvals import router as approvals_router
 from traderx_api.routes.dashboard import router as dashboard_router
 from traderx_api.routes.health import router as health_router
-from traderx_api.routes.identity import router as identity_router, user_router as identity_user_router
+from traderx_api.routes.identity import router as identity_router
+from traderx_api.routes.identity import user_router as identity_user_router
 from traderx_api.routes.integrations import router as integrations_router
 from traderx_api.routes.jobs import router as jobs_router
 from traderx_api.routes.journal import router as journal_router
@@ -26,6 +28,8 @@ from traderx_api.routes.paper import router as paper_router
 from traderx_api.routes.positions import router as positions_router
 from traderx_api.routes.strategies import router as strategies_router
 from traderx_api.routes.validation import router as validation_router
+
+load_model_metadata()
 
 
 @asynccontextmanager

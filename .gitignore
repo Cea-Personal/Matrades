@@ -19,6 +19,8 @@ out/
 coverage/
 *.tsbuildinfo
 npm-debug.log*
+*.log
+build/
 
 # Runtime, data, and secrets
 .env
