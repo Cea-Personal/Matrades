@@ -90,12 +90,15 @@ services:
     volumes:
       - ./proxy/Caddyfile:/etc/caddy/Caddyfile:ro
     depends_on: [web, api]
-    networks: [private]
+    # The proxy needs an egress-capable attachment for Docker Desktop to publish its host port.
+    # Its API and web upstreams remain reachable only on the private network.
+    networks: [ingress, private]
 
 secrets:
   postgres_password:
     file: ./secrets/postgres_password
 
 networks:
+  ingress:
   private:
     internal: true

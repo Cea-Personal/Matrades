@@ -17,7 +17,7 @@ export function AuthenticatedCommandCenter() {
   useEffect(() => {
     void fetch("/api/v1/dashboard", { credentials: "same-origin" }).then(async (response) => {
       if (response.status === 401) {
-        router.replace("/");
+        router.replace("/sign-in?reason=session-expired");
         return;
       }
       if (!response.ok) {

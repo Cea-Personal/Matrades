@@ -26,20 +26,20 @@ and story-level validation.
 **Purpose**: Create the modular-monolith repository, toolchains, deployment skeleton, and test
 layout described in `plan.md`.
 
-- [X] T001 Create the planned Python domain, API, worker, web, migration, test, and deploy directory skeleton with package markers in `src/traderx/__init__.py`
-- [X] T002 Initialize the Python 3.13 project and pin FastAPI, Pydantic, SQLAlchemy, Alembic, Celery, Polars, NumPy, SciPy, testing, linting, and typing dependencies in `pyproject.toml`
-- [X] T003 [P] Initialize the Node.js 24, Next.js 16, React 19, TypeScript 5.9, TanStack Query, Zod, Tailwind, Vitest, and Playwright workspace in `apps/web/package.json`
-- [X] T004 [P] Configure strict TypeScript, module aliases, generated contract types, and test compilation in `apps/web/tsconfig.json`
-- [X] T005 [P] Configure Ruff, mypy strict safety-module overrides, pytest markers, coverage, and Hypothesis profiles in `pyproject.toml`
-- [X] T006 Configure Alembic to import TraderX metadata and use transaction-safe migrations in `migrations/env.py`
-- [X] T007 [P] Define non-secret typed runtime settings and startup validation in `src/traderx/shared/config.py`
-- [X] T008 [P] Create the test package layout, shared markers, frozen clocks, and deterministic seeds in `tests/conftest.py`
-- [X] T009 [P] Create reusable PostgreSQL, Redis, API, and non-eager Celery test fixtures in `tests/integration/conftest.py`
-- [X] T010 [P] Define private-network local services for web, API, worker groups, scheduler, PostgreSQL, Redis, migration, and proxy roles in `deploy/compose.yaml`
-- [X] T011 [P] Add non-root immutable container builds for the Python runtime roles in `deploy/containers/python.Dockerfile`
-- [X] T012 [P] Add the production Next.js container build in `deploy/containers/web.Dockerfile`
-- [X] T013 [P] Configure the single-origin HTTPS proxy for `/`, `/api/v1`, and `/events` in `deploy/proxy/Caddyfile`
-- [X] T014 Configure CI jobs for static checks, migration checks, contract tests, safety tests, integration tests, web tests, and secret scanning in `.github/workflows/ci.yml`
+- [ ] T001 Create the planned Python domain, API, worker, web, migration, test, and deploy directory skeleton with package markers in `src/traderx/__init__.py`
+- [ ] T002 Initialize the Python 3.13 project and pin FastAPI, Pydantic, SQLAlchemy, Alembic, Celery, Polars, NumPy, SciPy, testing, linting, and typing dependencies in `pyproject.toml`
+- [ ] T003 [P] Initialize the Node.js 24, Next.js 16, React 19, TypeScript 5.9, TanStack Query, Zod, Tailwind, Vitest, and Playwright workspace in `apps/web/package.json`
+- [ ] T004 [P] Configure strict TypeScript, module aliases, generated contract types, and test compilation in `apps/web/tsconfig.json`
+- [ ] T005 [P] Configure Ruff, mypy strict safety-module overrides, pytest markers, coverage, and Hypothesis profiles in `pyproject.toml`
+- [ ] T006 Configure Alembic to import TraderX metadata and use transaction-safe migrations in `migrations/env.py`
+- [ ] T007 [P] Define non-secret typed runtime settings and startup validation in `src/traderx/shared/config.py`
+- [ ] T008 [P] Create the test package layout, shared markers, frozen clocks, and deterministic seeds in `tests/conftest.py`
+- [ ] T009 [P] Create reusable PostgreSQL, Redis, API, and non-eager Celery test fixtures in `tests/integration/conftest.py`
+- [ ] T010 [P] Define private-network local services for web, API, worker groups, scheduler, PostgreSQL, Redis, migration, and proxy roles in `deploy/compose.yaml`
+- [ ] T011 [P] Add non-root immutable container builds for the Python runtime roles in `deploy/containers/python.Dockerfile`
+- [ ] T012 [P] Add the production Next.js container build in `deploy/containers/web.Dockerfile`
+- [ ] T013 [P] Configure the single-origin HTTPS proxy for `/`, `/api/v1`, and `/events` in `deploy/proxy/Caddyfile`
+- [ ] T014 Configure CI jobs for static checks, migration checks, contract tests, safety tests, integration tests, web tests, and secret scanning in `.github/workflows/ci.yml`
 
 **Checkpoint**: Both toolchains install reproducibly, containers build, migrations initialize, and
 the empty test suites execute.
@@ -53,28 +53,28 @@ primitives required by every story.
 
 **CRITICAL**: No user-story implementation starts until this phase is complete.
 
-- [X] T015 [P] Write unit tests for exact decimal conversion, conservative volume rounding, UTC instants, nanosecond event ordering, and IANA reset zones in `tests/unit/shared/test_primitives.py`
-- [X] T016 [P] Write integration tests for atomic aggregate, audit, idempotency, and outbox persistence plus consumer deduplication in `tests/integration/test_transactional_outbox.py`
-- [X] T017 [P] Write contract tests for RFC 9457 errors, correlation IDs, ETags, `If-Match`, and `Idempotency-Key` semantics in `tests/contract/test_http_common.py`
-- [X] T018 [P] Write integration tests for durable job leases, checkpoints, cooperative pause/cancel, bounded retries, and crash redelivery in `tests/integration/test_job_runtime.py`
-- [X] T019 Implement opaque identifiers, exact decimal value objects, UTC/nanosecond time types, reason codes, and domain errors in `src/traderx/shared/types.py`
-- [X] T020 Implement SQLAlchemy declarative bases, append-only mixins, optimistic versions, naming conventions, and UTC persistence types in `src/traderx/shared/db.py`
-- [X] T021 Implement request/task-scoped units of work with explicit transactions and fixed lock-order helpers in `src/traderx/shared/unit_of_work.py`
-- [X] T022 [P] Implement RFC 9457 problem mapping and stable domain error codes in `apps/api/traderx_api/middleware/problems.py`
-- [X] T023 [P] Implement request, correlation, causation, trace, actor, and idempotency context propagation in `apps/api/traderx_api/middleware/context.py`
-- [X] T024 Implement durable idempotency records, canonical request hashing, replay, and conflict handling in `src/traderx/shared/idempotency.py`
-- [X] T025 Implement append-only audit records with redacted changes, actor assurance, outcome, reason, and integrity metadata in `src/traderx/audit/model.py`
-- [X] T026 Implement CloudEvents-compatible domain envelopes, transactional outbox records, inbox receipts, and per-aggregate ordering in `src/traderx/shared/events.py`
-- [X] T027 Implement outbox claiming, dispatch, failure visibility, and idempotent consumer helpers in `apps/worker/traderx_worker/runtime/outbox.py`
-- [X] T028 Implement durable background jobs, attempts, leases, checkpoints, progress, and guarded state transitions in `src/traderx/jobs/model.py`
-- [X] T029 Implement cooperative worker execution, fencing, cancellation, pause/resume, and retry policy in `apps/worker/traderx_worker/runtime/jobs.py`
-- [X] T030 [P] Define broker, market-data, notification, artifact, clock, and calendar protocols from the provider contract in `src/traderx/integrations/ports.py`
-- [X] T031 [P] Implement AES-256-GCM envelope encryption, key versioning, rotation hooks, and central secret redaction in `src/traderx/integrations/crypto.py`
-- [X] T032 Create the foundational idempotency, audit, outbox/inbox, background-job, and artifact-reference schema in `migrations/versions/0001_foundation.py`
-- [X] T033 [P] Configure FastAPI application startup, middleware, dependency wiring, OpenAPI metadata, and versioned router registration in `apps/api/traderx_api/main.py`
-- [X] T034 [P] Configure Celery queues for monitoring, data, research, paper, notification, and maintenance work with one scheduler in `apps/worker/traderx_worker/runtime/celery_app.py`
-- [X] T035 [P] Implement the authenticated application shell, navigation, query provider, error boundary, and accessibility landmarks in `apps/web/src/app/layout.tsx`
-- [X] T036 Generate and compile the TypeScript client/types from `specs/001-traderx-core-platform/contracts/http-api.yaml` into `apps/web/src/lib/api/generated.ts`
+- [ ] T015 [P] Write unit tests for exact decimal conversion, conservative volume rounding, UTC instants, nanosecond event ordering, and IANA reset zones in `tests/unit/shared/test_primitives.py`
+- [ ] T016 [P] Write integration tests for atomic aggregate, audit, idempotency, and outbox persistence plus consumer deduplication in `tests/integration/test_transactional_outbox.py`
+- [ ] T017 [P] Write contract tests for RFC 9457 errors, correlation IDs, ETags, `If-Match`, and `Idempotency-Key` semantics in `tests/contract/test_http_common.py`
+- [ ] T018 [P] Write integration tests for durable job leases, checkpoints, cooperative pause/cancel, bounded retries, and crash redelivery in `tests/integration/test_job_runtime.py`
+- [ ] T019 Implement opaque identifiers, exact decimal value objects, UTC/nanosecond time types, reason codes, and domain errors in `src/traderx/shared/types.py`
+- [ ] T020 Implement SQLAlchemy declarative bases, append-only mixins, optimistic versions, naming conventions, and UTC persistence types in `src/traderx/shared/db.py`
+- [ ] T021 Implement request/task-scoped units of work with explicit transactions and fixed lock-order helpers in `src/traderx/shared/unit_of_work.py`
+- [ ] T022 [P] Implement RFC 9457 problem mapping and stable domain error codes in `apps/api/traderx_api/middleware/problems.py`
+- [ ] T023 [P] Implement request, correlation, causation, trace, actor, and idempotency context propagation in `apps/api/traderx_api/middleware/context.py`
+- [ ] T024 Implement durable idempotency records, canonical request hashing, replay, and conflict handling in `src/traderx/shared/idempotency.py`
+- [ ] T025 Implement append-only audit records with redacted changes, actor assurance, outcome, reason, and integrity metadata in `src/traderx/audit/model.py`
+- [ ] T026 Implement CloudEvents-compatible domain envelopes, transactional outbox records, inbox receipts, and per-aggregate ordering in `src/traderx/shared/events.py`
+- [ ] T027 Implement outbox claiming, dispatch, failure visibility, and idempotent consumer helpers in `apps/worker/traderx_worker/runtime/outbox.py`
+- [ ] T028 Implement durable background jobs, attempts, leases, checkpoints, progress, and guarded state transitions in `src/traderx/jobs/model.py`
+- [ ] T029 Implement cooperative worker execution, fencing, cancellation, pause/resume, and retry policy in `apps/worker/traderx_worker/runtime/jobs.py`
+- [ ] T030 [P] Define broker, market-data, notification, artifact, clock, and calendar protocols from the provider contract in `src/traderx/integrations/ports.py`
+- [ ] T031 [P] Implement AES-256-GCM envelope encryption, key versioning, rotation hooks, and central secret redaction in `src/traderx/integrations/crypto.py`
+- [ ] T032 Create the foundational idempotency, audit, outbox/inbox, background-job, and artifact-reference schema in `migrations/versions/0001_foundation.py`
+- [ ] T033 [P] Configure FastAPI application startup, middleware, dependency wiring, OpenAPI metadata, and versioned router registration in `apps/api/traderx_api/main.py`
+- [ ] T034 [P] Configure Celery queues for monitoring, data, research, paper, notification, and maintenance work with one scheduler in `apps/worker/traderx_worker/runtime/celery_app.py`
+- [ ] T035 [P] Implement the authenticated application shell, navigation, query provider, error boundary, and accessibility landmarks in `apps/web/src/app/layout.tsx`
+- [ ] T036 Generate and compile the TypeScript client/types from `specs/001-traderx-core-platform/contracts/http-api.yaml` into `apps/web/src/lib/api/generated.ts`
 
 **Checkpoint**: Foundation is ready; PostgreSQL is the durable truth, asynchronous delivery is
 idempotent, the common HTTP contract works, and all user stories may now be developed.
@@ -92,32 +92,32 @@ fails, and stricter internal limits block before prop limits.
 
 ### Tests for User Story 1
 
-- [X] T037 [P] [US1] Write authentication, password recovery, session rotation/revocation, CSRF, TOTP replay, and step-up tests in `tests/security/test_identity_security.py`
-- [X] T038 [P] [US1] Write OWNER/ADMIN/VIEWER authorization-matrix and denied-attempt audit tests in `tests/security/test_rbac_matrix.py`
-- [X] T039 [P] [US1] Write account, prop-profile, risk-policy, and Command Center HTTP contract tests in `tests/contract/test_accounts_risk_api.py`
-- [X] T040 [P] [US1] Write property tests for stricter-rule precedence, loss monotonicity, reset semantics, and `NORMAL/CAUTION/DEFENSIVE/LOCKDOWN` transitions in `tests/safety/test_risk_properties.py`
-- [X] T041 [P] [US1] Write integration tests for account snapshots, exact risk calculations, dynamic `2 -> 1 -> 0` capacity, and circuit-breaker persistence in `tests/integration/test_account_risk_flow.py`
-- [X] T042 [P] [US1] Write the owner login, MFA, account setup, rule configuration, and Command Center browser journey in `apps/web/tests/e2e/safe_account.spec.ts`
+- [ ] T037 [P] [US1] Write one-time owner-bootstrap concurrency, password-reset second-proof, recovery-code single-use, assisted-reset authorization, CSRF, TOTP replay, session rotation/revocation, and 30-minute idle/12-hour absolute-expiry tests in `tests/security/test_identity_security.py`
+- [ ] T038 [P] [US1] Write OWNER/ADMIN/VIEWER authorization-matrix and denied-attempt audit tests in `tests/security/test_rbac_matrix.py`
+- [ ] T039 [P] [US1] Write account, prop-profile, risk-policy, and Command Center HTTP contract tests in `tests/contract/test_accounts_risk_api.py`
+- [ ] T040 [P] [US1] Write property tests for stricter-rule precedence, loss monotonicity, reset semantics, and `NORMAL/CAUTION/DEFENSIVE/LOCKDOWN` transitions in `tests/safety/test_risk_properties.py`
+- [ ] T041 [P] [US1] Write integration tests for account snapshots, exact risk calculations, dynamic `2 -> 1 -> 0` capacity, and circuit-breaker persistence in `tests/integration/test_account_risk_flow.py`
+- [ ] T042 [P] [US1] Write keyboard-accessible deep-link journeys for `/setup`, `/sign-in`, `/mfa/enroll`, `/mfa/verify`, `/mfa-recovery`, `/password-reset`, session-expiry redirect, account setup, and Command Center access in `apps/web/tests/e2e/safe_account.spec.ts`
 
 ### Implementation for User Story 1
 
-- [X] T043 [P] [US1] Implement User, AuthSession, MFA factor, recovery challenge, and recovery-code models in `src/traderx/identity/model.py`
-- [X] T044 [P] [US1] Implement TradingAccount, versioned PropProfile, and versioned RiskPolicy models in `src/traderx/accounts/model.py`
-- [X] T045 [P] [US1] Implement AccountSnapshot, RiskSnapshot, RiskDecision, and CircuitBreaker models and state enums in `src/traderx/risk/model.py`
-- [X] T046 [US1] Add identity, session, MFA, account, prop-profile, risk-policy, snapshot, decision, and circuit-breaker tables and constraints in `migrations/versions/0002_identity_accounts_risk.py`
-- [X] T047 [US1] Implement Argon2id password hashing, opaque session issuance, rotation, idle/absolute expiry, revocation, and password recovery in `src/traderx/identity/authentication.py`
-- [X] T048 [US1] Implement RFC 6238 TOTP enrollment/verification, timestep replay prevention, recovery codes, and recent-assurance checks in `src/traderx/identity/mfa.py`
-- [X] T049 [US1] Implement deny-by-default RBAC policies and high-risk command authorization at the domain boundary in `src/traderx/identity/authorization.py`
-- [X] T050 [US1] Implement account setup, one-live-account enforcement, prop-profile versioning, and risk-policy versioning with audit/outbox writes in `src/traderx/accounts/service.py`
-- [X] T051 [US1] Implement exact shared-equity loss, drawdown, remaining margin, open risk, risk-state, and capacity calculations in `src/traderx/risk/calculator.py`
-- [X] T052 [US1] Implement deterministic circuit-breaker activation, acknowledgement, clearing, and fail-closed capability rules in `src/traderx/risk/circuit_breakers.py`
-- [X] T053 [US1] Implement account-snapshot ingestion and transactional risk-snapshot projection in `src/traderx/risk/projection.py`
-- [X] T054 [P] [US1] Implement login, logout, password recovery, MFA, session-list, and revocation routes in `apps/api/traderx_api/routes/identity.py`
-- [X] T055 [P] [US1] Implement account, prop-profile, risk-policy, risk-snapshot, and circuit-breaker routes with ETags and idempotency in `apps/api/traderx_api/routes/accounts.py`
-- [X] T056 [P] [US1] Implement the login, recovery, MFA enrollment, and challenge UI in `apps/web/src/features/identity/AuthFlow.tsx`
-- [X] T057 [P] [US1] Implement trading-account, prop-rule, and internal-risk setup forms with deliberate confirmation in `apps/web/src/features/risk/AccountRiskSetup.tsx`
-- [X] T058 [US1] Implement the Command Center account, equity, loss-margin, risk-state, capacity, alert, and freshness panels in `apps/web/src/features/dashboard/CommandCenter.tsx`
-- [X] T059 [US1] Wire account snapshots to risk recalculation, dashboard projection, circuit breakers, audit, and outbox consumers in `apps/worker/traderx_worker/tasks/risk.py`
+- [X] T043 [P] [US1] Implement User, singleton IdentityBootstrapState, AuthSession, MfaFactor, MfaRecoveryCode, PasswordResetChallenge, and AssistedMfaResetRequest models in `src/traderx/identity/model.py`
+- [ ] T044 [P] [US1] Implement TradingAccount, versioned PropProfile, and versioned RiskPolicy models in `src/traderx/accounts/model.py`
+- [ ] T045 [P] [US1] Implement AccountSnapshot, RiskSnapshot, RiskDecision, and CircuitBreaker models and state enums in `src/traderx/risk/model.py`
+- [X] T046 [US1] Add singleton owner-bootstrap, identity, session, MFA/recovery/reset, account, prop-profile, risk-policy, snapshot, decision, and circuit-breaker tables with concurrency and single-use constraints in `migrations/versions/0002_identity_accounts_risk.py`
+- [X] T047 [US1] Implement atomic initial-owner bootstrap, Argon2id passwords, short-lived authentication challenges, opaque MFA-assured sessions, 30-minute idle/12-hour absolute expiry, revocation, and reset-token password replacement without automatic login in `src/traderx/identity/authentication.py`
+- [X] T048 [US1] Implement RFC 6238 TOTP enrollment/verification, timestep replay prevention, one-time recovery-code handoff/redemption, authorized assisted reset, fresh-enrollment enforcement, session revocation, and recent-assurance checks in `src/traderx/identity/mfa.py`
+- [ ] T049 [US1] Implement deny-by-default RBAC policies and high-risk command authorization at the domain boundary in `src/traderx/identity/authorization.py`
+- [ ] T050 [US1] Implement account setup, one-live-account enforcement, prop-profile versioning, and risk-policy versioning with audit/outbox writes in `src/traderx/accounts/service.py`
+- [ ] T051 [US1] Implement exact shared-equity loss, drawdown, remaining margin, open risk, risk-state, and capacity calculations in `src/traderx/risk/calculator.py`
+- [ ] T052 [US1] Implement deterministic circuit-breaker activation, acknowledgement, clearing, and fail-closed capability rules in `src/traderx/risk/circuit_breakers.py`
+- [ ] T053 [US1] Implement account-snapshot ingestion and transactional risk-snapshot projection in `src/traderx/risk/projection.py`
+- [X] T054 [P] [US1] Implement bootstrap-status/bootstrap, login/logout, password-reset request/completion with second proof, MFA enrollment/verification/recovery, assisted-reset, session-list, and revocation routes from `contracts/http-api.yaml` in `apps/api/traderx_api/routes/identity.py`
+- [ ] T055 [P] [US1] Implement account, prop-profile, risk-policy, risk-snapshot, and circuit-breaker routes with ETags and idempotency in `apps/api/traderx_api/routes/accounts.py`
+- [X] T056 [P] [US1] Implement route-specific, state-guarded authentication screens and redirects in `apps/web/src/app/setup/page.tsx`, `apps/web/src/app/sign-in/page.tsx`, `apps/web/src/app/mfa/enroll/page.tsx`, `apps/web/src/app/mfa/verify/page.tsx`, `apps/web/src/app/mfa-recovery/page.tsx`, and `apps/web/src/app/password-reset/page.tsx`
+- [ ] T057 [P] [US1] Implement trading-account, prop-rule, and internal-risk setup forms with deliberate confirmation in `apps/web/src/features/risk/AccountRiskSetup.tsx`
+- [ ] T058 [US1] Implement the Command Center account, equity, loss-margin, risk-state, capacity, alert, and freshness panels in `apps/web/src/features/dashboard/CommandCenter.tsx`
+- [ ] T059 [US1] Wire account snapshots to risk recalculation, dashboard projection, circuit breakers, audit, and outbox consumers in `apps/worker/traderx_worker/tasks/risk.py`
 
 **Checkpoint**: User Story 1 passes independently and is the secure control-plane MVP.
 
@@ -134,31 +134,31 @@ ranking cannot silently replace it.
 
 ### Tests for User Story 2
 
-- [X] T060 [P] [US2] Write broker and market-data adapter contract tests for aliases, specifications, timestamps, duplicate/revision handling, and prohibited live-order capabilities in `tests/contract/test_market_provider_ports.py`
-- [X] T061 [P] [US2] Write data-quality tests for freshness, gaps, OHLC invariants, spread, tick/step alignment, contradictory revisions, and quarantine behavior in `tests/data_quality/test_market_quality.py`
-- [X] T062 [P] [US2] Write deterministic multi-window volatility, liquidity, cost, eligibility, suitability, and explanation tests in `tests/unit/market_research/test_suitability.py`
-- [X] T063 [P] [US2] Write safety tests proving every gate precedes ranking and category/cardinality constraints require human approval in `tests/safety/test_active_market_selection.py`
-- [X] T064 [P] [US2] Write market research, Instrument Library, report, and active-market HTTP contract tests in `tests/contract/test_markets_api.py`
-- [X] T065 [P] [US2] Write the three-category research, exclusion review, approval, and no-silent-replacement browser journey in `apps/web/tests/e2e/market_selection.spec.ts`
+- [ ] T060 [P] [US2] Write broker and market-data adapter contract tests for aliases, specifications, timestamps, duplicate/revision handling, and prohibited live-order capabilities in `tests/contract/test_market_provider_ports.py`
+- [ ] T061 [P] [US2] Write data-quality tests for freshness, gaps, OHLC invariants, spread, tick/step alignment, contradictory revisions, and quarantine behavior in `tests/data_quality/test_market_quality.py`
+- [ ] T062 [P] [US2] Write deterministic multi-window volatility, liquidity, cost, eligibility, suitability, and explanation tests in `tests/unit/market_research/test_suitability.py`
+- [ ] T063 [P] [US2] Write safety tests proving every gate precedes ranking and category/cardinality constraints require human approval in `tests/safety/test_active_market_selection.py`
+- [ ] T064 [P] [US2] Write market research, Instrument Library, report, and active-market HTTP contract tests in `tests/contract/test_markets_api.py`
+- [ ] T065 [P] [US2] Write the three-category research, exclusion review, approval, and no-silent-replacement browser journey in `apps/web/tests/e2e/market_selection.spec.ts`
 
 ### Implementation for User Story 2
 
-- [X] T066 [P] [US2] Implement Instrument, InstrumentAlias, DataSetManifest, MarketObservation, EconomicEvent, and DataQualityObservation models in `src/traderx/market_data/model.py`
-- [X] T067 [P] [US2] Implement MarketResearchRun, CandidateAssessment, suitability-method version, and ActiveMarketAssignment models in `src/traderx/market_research/model.py`
-- [X] T068 [US2] Add instrument, alias, dataset, observation, quality, research, assessment, and effective active-assignment tables with one-per-category constraints in `migrations/versions/0003_markets.py`
-- [X] T069 [US2] Implement provider-native batch retention, canonical normalization, revisioning, incremental sync, and Parquet manifest hashing in `src/traderx/market_data/ingestion.py`
-- [X] T070 [US2] Implement purpose-aware freshness, quality checks, quarantine, and fail-closed status projection in `src/traderx/market_data/quality.py`
-- [X] T071 [P] [US2] Implement versioned short/medium/long-window volatility metrics in `src/traderx/market_research/volatility.py`
-- [X] T072 [P] [US2] Implement asset-class-aware liquidity, spread, depth, turnover, slippage, and execution metrics in `src/traderx/market_research/liquidity.py`
-- [X] T073 [US2] Implement broker, data, liquidity, execution, sizing, gap, hours, and prop-firm eligibility gates in `src/traderx/market_research/eligibility.py`
-- [X] T074 [US2] Implement versioned suitability component normalization, weights, score, rank, confidence, and explanation generation in `src/traderx/market_research/suitability.py`
-- [X] T075 [US2] Implement category research orchestration and immutable report construction in `src/traderx/market_research/service.py`
-- [X] T076 [US2] Implement human-approved activate, deactivate, and replace commands with concurrency, audit, and outbox guarantees in `src/traderx/instruments/active_markets.py`
-- [X] T077 [P] [US2] Implement Instrument Library, market research run/report, and active-market routes in `apps/api/traderx_api/routes/markets.py`
-- [X] T078 [P] [US2] Implement data synchronization and market research worker tasks with durable progress/cancellation in `apps/worker/traderx_worker/tasks/market_research.py`
-- [X] T079 [P] [US2] Implement Instrument Library filters, data status, counts, history, and inactive research affordances in `apps/web/src/features/markets/InstrumentLibrary.tsx`
-- [X] T080 [P] [US2] Implement candidate gate evidence, comparable metrics, methodology, ranking, and approval UI in `apps/web/src/features/markets/MarketResearchReport.tsx`
-- [X] T081 [US2] Implement active Commodity, Forex, and Cryptocurrency cards with explicit replacement review in `apps/web/src/features/markets/ActiveMarkets.tsx`
+- [ ] T066 [P] [US2] Implement Instrument, InstrumentAlias, DataSetManifest, MarketObservation, EconomicEvent, and DataQualityObservation models in `src/traderx/market_data/model.py`
+- [ ] T067 [P] [US2] Implement MarketResearchRun, CandidateAssessment, suitability-method version, and ActiveMarketAssignment models in `src/traderx/market_research/model.py`
+- [ ] T068 [US2] Add instrument, alias, dataset, observation, quality, research, assessment, and effective active-assignment tables with one-per-category constraints in `migrations/versions/0003_markets.py`
+- [ ] T069 [US2] Implement provider-native batch retention, canonical normalization, revisioning, incremental sync, and Parquet manifest hashing in `src/traderx/market_data/ingestion.py`
+- [ ] T070 [US2] Implement purpose-aware freshness, quality checks, quarantine, and fail-closed status projection in `src/traderx/market_data/quality.py`
+- [ ] T071 [P] [US2] Implement versioned short/medium/long-window volatility metrics in `src/traderx/market_research/volatility.py`
+- [ ] T072 [P] [US2] Implement asset-class-aware liquidity, spread, depth, turnover, slippage, and execution metrics in `src/traderx/market_research/liquidity.py`
+- [ ] T073 [US2] Implement broker, data, liquidity, execution, sizing, gap, hours, and prop-firm eligibility gates in `src/traderx/market_research/eligibility.py`
+- [ ] T074 [US2] Implement versioned suitability component normalization, weights, score, rank, confidence, and explanation generation in `src/traderx/market_research/suitability.py`
+- [ ] T075 [US2] Implement category research orchestration and immutable report construction in `src/traderx/market_research/service.py`
+- [ ] T076 [US2] Implement human-approved activate, deactivate, and replace commands with concurrency, audit, and outbox guarantees in `src/traderx/instruments/active_markets.py`
+- [ ] T077 [P] [US2] Implement Instrument Library, market research run/report, and active-market routes in `apps/api/traderx_api/routes/markets.py`
+- [ ] T078 [P] [US2] Implement data synchronization and market research worker tasks with durable progress/cancellation in `apps/worker/traderx_worker/tasks/market_research.py`
+- [ ] T079 [P] [US2] Implement Instrument Library filters, data status, counts, history, and inactive research affordances in `apps/web/src/features/markets/InstrumentLibrary.tsx`
+- [ ] T080 [P] [US2] Implement candidate gate evidence, comparable metrics, methodology, ranking, and approval UI in `apps/web/src/features/markets/MarketResearchReport.tsx`
+- [ ] T081 [US2] Implement active Commodity, Forex, and Cryptocurrency cards with explicit replacement review in `apps/web/src/features/markets/ActiveMarkets.tsx`
 
 **Checkpoint**: User Story 2 independently produces explainable, reproducible, human-approved
 active markets without weakening eligibility.
@@ -176,40 +176,40 @@ version, and reject invalid lifecycle transitions.
 
 ### Tests for User Story 3
 
-- [X] T082 [P] [US3] Write canonical strategy schema, semantic validation, deterministic interpreter, and golden-trace tests in `tests/unit/strategies/test_strategy_runtime.py`
-- [X] T083 [P] [US3] Write immutable version and legal/illegal lifecycle property tests in `tests/safety/test_strategy_lifecycle.py`
-- [X] T084 [P] [US3] Write chronological fills, gaps, same-bar ambiguity, costs, exact sizing, stops, targets, and shared-equity backtest tests in `tests/reproducibility/test_backtest_engine.py`
-- [X] T085 [P] [US3] Write out-of-sample, walk-forward, parameter-stability, Monte Carlo, and tail-distribution tests in `tests/reproducibility/test_validation_engine.py`
-- [X] T086 [P] [US3] Write portfolio signal-competition, correlation, prop breach, and two-position simulation tests in `tests/safety/test_portfolio_simulation.py`
-- [X] T087 [P] [US3] Write research, strategy/version, backtest, and validation HTTP contract tests in `tests/contract/test_strategy_validation_api.py`
-- [X] T088 [P] [US3] Write the visual strategy, backtest, report, validation, comparison, and immutable-edit browser journey in `apps/web/tests/e2e/strategy_validation.spec.ts`
+- [ ] T082 [P] [US3] Write canonical strategy schema, semantic validation, deterministic interpreter, and golden-trace tests in `tests/unit/strategies/test_strategy_runtime.py`
+- [ ] T083 [P] [US3] Write immutable version and legal/illegal lifecycle property tests in `tests/safety/test_strategy_lifecycle.py`
+- [ ] T084 [P] [US3] Write chronological fills, gaps, same-bar ambiguity, costs, exact sizing, stops, targets, and shared-equity backtest tests in `tests/reproducibility/test_backtest_engine.py`
+- [ ] T085 [P] [US3] Write out-of-sample, walk-forward, parameter-stability, Monte Carlo, and tail-distribution tests in `tests/reproducibility/test_validation_engine.py`
+- [ ] T086 [P] [US3] Write portfolio signal-competition, correlation, prop breach, and two-position simulation tests in `tests/safety/test_portfolio_simulation.py`
+- [ ] T087 [P] [US3] Write research, strategy/version, backtest, and validation HTTP contract tests in `tests/contract/test_strategy_validation_api.py`
+- [ ] T088 [P] [US3] Write the visual strategy, backtest, report, validation, comparison, and immutable-edit browser journey in `apps/web/tests/e2e/strategy_validation.spec.ts`
 
 ### Implementation for User Story 3
 
-- [X] T089 [P] [US3] Implement ResearchJobDetail and immutable ResearchExperiment models and manifests in `src/traderx/research/model.py`
-- [X] T090 [P] [US3] Implement Strategy and immutable StrategyVersion models with definition hashes and lifecycle state in `src/traderx/strategies/model.py`
-- [X] T091 [P] [US3] Implement BacktestRun and ValidationRun evidence models with artifact and reproducibility references in `src/traderx/validation/model.py`
-- [X] T092 [US3] Add research, experiment, strategy/version, backtest, validation, metrics, breakdown, and artifact-reference tables in `migrations/versions/0004_strategy_validation.py`
-- [X] T093 [US3] Define the versioned canonical strategy schema for regime, timeframes, conditions, filters, stops, targets, invalidation, expiration, and risk in `src/traderx/strategies/schema.py`
-- [X] T094 [US3] Implement strategy structural/semantic validation and deterministic compilation in `src/traderx/strategies/compiler.py`
-- [X] T095 [US3] Implement the pure strategy state machine with injected clock, calendar, data, portfolio, and execution adapters in `src/traderx/strategies/runtime.py`
-- [X] T096 [US3] Implement immutable version creation and evidence-gated lifecycle transition service in `src/traderx/strategies/lifecycle.py`
-- [X] T097 [US3] Implement research-job creation, reproducible manifests, candidate/rejection persistence, and result summaries in `src/traderx/research/service.py`
-- [X] T098 [P] [US3] Implement chronological event replay, deterministic ordering, signal handling, and portfolio state in `src/traderx/backtesting/engine.py`
-- [X] T099 [P] [US3] Implement versioned spread, commission, slippage, gap, partial-fill, session, and ambiguous-bar policies in `src/traderx/backtesting/execution.py`
-- [X] T100 [US3] Implement exact sizing/risk integration, stops/targets, trades, equity curves, R, MAE/MFE, and required metrics in `src/traderx/backtesting/report.py`
-- [X] T101 [P] [US3] Implement development/validation/out-of-sample splits and rolling walk-forward evaluation in `src/traderx/validation/out_of_sample.py`
-- [X] T102 [P] [US3] Implement parameter-neighborhood stability, sensitivity classes, and multiple-trial evidence in `src/traderx/validation/stability.py`
-- [X] T103 [P] [US3] Implement deterministic sequence, block/regime bootstrap, cost/gap stress, and tail-risk simulation in `src/traderx/validation/monte_carlo.py`
-- [X] T104 [US3] Implement shared-account chronological portfolio simulation with prop rules, risk states, correlation, signal competition, and maximum-two enforcement in `src/traderx/validation/portfolio.py`
-- [X] T105 [US3] Implement validation aggregation, `PASS/WARNING/FAIL` evidence, and lifecycle gate decisions in `src/traderx/validation/service.py`
-- [X] T106 [P] [US3] Implement research and strategy/version routes with ETags and idempotency in `apps/api/traderx_api/routes/strategies.py`
-- [X] T107 [P] [US3] Implement backtest and validation run/report routes returning durable jobs in `apps/api/traderx_api/routes/validation.py`
-- [X] T108 [P] [US3] Implement research, backtest, walk-forward, Monte Carlo, and portfolio worker tasks with checkpoints in `apps/worker/traderx_worker/tasks/validation.py`
-- [X] T109 [P] [US3] Implement no-code rule groups, condition editors, filters, stops, targets, invalidation, expiry, and risk controls in `apps/web/src/features/strategies/StrategyBuilder.tsx`
-- [X] T110 [P] [US3] Implement immutable version history, comparison, lifecycle status, and unmet-prerequisite UI in `apps/web/src/features/strategies/StrategyVersions.tsx`
-- [X] T111 [P] [US3] Implement research/backtest configuration, durable job progress, cancel/retry, and results UI in `apps/web/src/features/strategies/ResearchBacktest.tsx`
-- [X] T112 [US3] Implement metrics, breakdowns, equity/trade evidence, validation windows, distributions, and portfolio report UI in `apps/web/src/features/strategies/ValidationReport.tsx`
+- [ ] T089 [P] [US3] Implement ResearchJobDetail and immutable ResearchExperiment models and manifests in `src/traderx/research/model.py`
+- [ ] T090 [P] [US3] Implement Strategy and immutable StrategyVersion models with definition hashes and lifecycle state in `src/traderx/strategies/model.py`
+- [ ] T091 [P] [US3] Implement BacktestRun and ValidationRun evidence models with artifact and reproducibility references in `src/traderx/validation/model.py`
+- [ ] T092 [US3] Add research, experiment, strategy/version, backtest, validation, metrics, breakdown, and artifact-reference tables in `migrations/versions/0004_strategy_validation.py`
+- [ ] T093 [US3] Define the versioned canonical strategy schema for regime, timeframes, conditions, filters, stops, targets, invalidation, expiration, and risk in `src/traderx/strategies/schema.py`
+- [ ] T094 [US3] Implement strategy structural/semantic validation and deterministic compilation in `src/traderx/strategies/compiler.py`
+- [ ] T095 [US3] Implement the pure strategy state machine with injected clock, calendar, data, portfolio, and execution adapters in `src/traderx/strategies/runtime.py`
+- [ ] T096 [US3] Implement immutable version creation and evidence-gated lifecycle transition service in `src/traderx/strategies/lifecycle.py`
+- [ ] T097 [US3] Implement research-job creation, reproducible manifests, candidate/rejection persistence, and result summaries in `src/traderx/research/service.py`
+- [ ] T098 [P] [US3] Implement chronological event replay, deterministic ordering, signal handling, and portfolio state in `src/traderx/backtesting/engine.py`
+- [ ] T099 [P] [US3] Implement versioned spread, commission, slippage, gap, partial-fill, session, and ambiguous-bar policies in `src/traderx/backtesting/execution.py`
+- [ ] T100 [US3] Implement exact sizing/risk integration, stops/targets, trades, equity curves, R, MAE/MFE, and required metrics in `src/traderx/backtesting/report.py`
+- [ ] T101 [P] [US3] Implement development/validation/out-of-sample splits and rolling walk-forward evaluation in `src/traderx/validation/out_of_sample.py`
+- [ ] T102 [P] [US3] Implement parameter-neighborhood stability, sensitivity classes, and multiple-trial evidence in `src/traderx/validation/stability.py`
+- [ ] T103 [P] [US3] Implement deterministic sequence, block/regime bootstrap, cost/gap stress, and tail-risk simulation in `src/traderx/validation/monte_carlo.py`
+- [ ] T104 [US3] Implement shared-account chronological portfolio simulation with prop rules, risk states, correlation, signal competition, and maximum-two enforcement in `src/traderx/validation/portfolio.py`
+- [ ] T105 [US3] Implement validation aggregation, `PASS/WARNING/FAIL` evidence, and lifecycle gate decisions in `src/traderx/validation/service.py`
+- [ ] T106 [P] [US3] Implement research and strategy/version routes with ETags and idempotency in `apps/api/traderx_api/routes/strategies.py`
+- [ ] T107 [P] [US3] Implement backtest and validation run/report routes returning durable jobs in `apps/api/traderx_api/routes/validation.py`
+- [ ] T108 [P] [US3] Implement research, backtest, walk-forward, Monte Carlo, and portfolio worker tasks with checkpoints in `apps/worker/traderx_worker/tasks/validation.py`
+- [ ] T109 [P] [US3] Implement no-code rule groups, condition editors, filters, stops, targets, invalidation, expiry, and risk controls in `apps/web/src/features/strategies/StrategyBuilder.tsx`
+- [ ] T110 [P] [US3] Implement immutable version history, comparison, lifecycle status, and unmet-prerequisite UI in `apps/web/src/features/strategies/StrategyVersions.tsx`
+- [ ] T111 [P] [US3] Implement research/backtest configuration, durable job progress, cancel/retry, and results UI in `apps/web/src/features/strategies/ResearchBacktest.tsx`
+- [ ] T112 [US3] Implement metrics, breakdowns, equity/trade evidence, validation windows, distributions, and portfolio report UI in `apps/web/src/features/strategies/ValidationReport.tsx`
 
 **Checkpoint**: User Story 3 independently delivers reproducible strategy evidence; no fragile,
 failed, mutable, or portfolio-unsafe version progresses.
@@ -227,26 +227,26 @@ current evidence and recent authorized MFA.
 
 ### Tests for User Story 4
 
-- [X] T113 [P] [US4] Write historical/paper/live-adapter golden-trace parity and simulated-fill tests in `tests/reproducibility/test_runtime_parity.py`
-- [X] T114 [P] [US4] Write paper eligibility, combined evidence threshold, divergence, and no-auto-promotion safety tests in `tests/safety/test_paper_promotion.py`
-- [X] T115 [P] [US4] Write approval authorization, step-up MFA, stale evidence, idempotency, concurrency, and audit tests in `tests/security/test_strategy_approval.py`
-- [X] T116 [P] [US4] Write paper run, comparison, and strategy approval HTTP contract tests in `tests/contract/test_paper_approval_api.py`
-- [X] T117 [P] [US4] Write the paper portfolio, evidence comparison, and deliberate approval browser journey in `apps/web/tests/e2e/paper_approval.spec.ts`
+- [ ] T113 [P] [US4] Write historical/paper/live-adapter golden-trace parity and simulated-fill tests in `tests/reproducibility/test_runtime_parity.py`
+- [ ] T114 [P] [US4] Write paper eligibility, combined evidence threshold, divergence, and no-auto-promotion safety tests in `tests/safety/test_paper_promotion.py`
+- [ ] T115 [P] [US4] Write approval authorization, step-up MFA, stale evidence, idempotency, concurrency, and audit tests in `tests/security/test_strategy_approval.py`
+- [ ] T116 [P] [US4] Write paper run, comparison, and strategy approval HTTP contract tests in `tests/contract/test_paper_approval_api.py`
+- [ ] T117 [P] [US4] Write the paper portfolio, evidence comparison, and deliberate approval browser journey in `apps/web/tests/e2e/paper_approval.spec.ts`
 
 ### Implementation for User Story 4
 
-- [X] T118 [P] [US4] Implement PaperRun, simulated Position/Execution references, comparison, criteria, and disposition models in `src/traderx/paper/model.py`
-- [X] T119 [P] [US4] Implement append-only StrategyApproval decision and assurance snapshot model in `src/traderx/strategies/approval_model.py`
-- [X] T120 [US4] Add paper run, simulated trade, promotion criteria, comparison, and strategy approval tables in `migrations/versions/0005_paper_approval.py`
-- [X] T121 [US4] Implement current-data simulated entry, exit, stop, target, cost, and exact risk behavior using the canonical runtime in `src/traderx/paper/engine.py`
-- [X] T122 [US4] Implement multi-factor paper eligibility and historical-versus-paper divergence evaluation in `src/traderx/paper/evidence.py`
-- [X] T123 [US4] Implement paper orchestration, portfolio projection, journaling, checkpoints, and terminal disposition in `src/traderx/paper/service.py`
-- [X] T124 [US4] Implement audited `APPROVE_LIVE`, `REJECT`, and `RETURN_TO_RESEARCH` commands with fresh-evidence and recent-MFA checks in `src/traderx/strategies/approval.py`
-- [X] T125 [P] [US4] Implement paper run, position, history, performance, comparison, and promotion routes in `apps/api/traderx_api/routes/paper.py`
-- [X] T126 [P] [US4] Implement strategy approval review/decision route with ETag and idempotency preconditions in `apps/api/traderx_api/routes/approvals.py`
-- [X] T127 [P] [US4] Implement current-data paper evaluation and checkpointed lifecycle worker tasks in `apps/worker/traderx_worker/tasks/paper.py`
-- [X] T128 [P] [US4] Implement paper strategies, positions, history, and performance UI in `apps/web/src/features/paper/PaperTrading.tsx`
-- [X] T129 [US4] Implement backtest-versus-paper evidence, promotion eligibility, and step-up approval UI in `apps/web/src/features/paper/ApprovalReview.tsx`
+- [ ] T118 [P] [US4] Implement PaperRun, simulated Position/Execution references, comparison, criteria, and disposition models in `src/traderx/paper/model.py`
+- [ ] T119 [P] [US4] Implement append-only StrategyApproval decision and assurance snapshot model in `src/traderx/strategies/approval_model.py`
+- [ ] T120 [US4] Add paper run, simulated trade, promotion criteria, comparison, and strategy approval tables in `migrations/versions/0005_paper_approval.py`
+- [ ] T121 [US4] Implement current-data simulated entry, exit, stop, target, cost, and exact risk behavior using the canonical runtime in `src/traderx/paper/engine.py`
+- [ ] T122 [US4] Implement multi-factor paper eligibility and historical-versus-paper divergence evaluation in `src/traderx/paper/evidence.py`
+- [ ] T123 [US4] Implement paper orchestration, portfolio projection, journaling, checkpoints, and terminal disposition in `src/traderx/paper/service.py`
+- [ ] T124 [US4] Implement audited `APPROVE_LIVE`, `REJECT`, and `RETURN_TO_RESEARCH` commands with fresh-evidence and recent-MFA checks in `src/traderx/strategies/approval.py`
+- [ ] T125 [P] [US4] Implement paper run, position, history, performance, comparison, and promotion routes in `apps/api/traderx_api/routes/paper.py`
+- [ ] T126 [P] [US4] Implement strategy approval review/decision route with ETag and idempotency preconditions in `apps/api/traderx_api/routes/approvals.py`
+- [ ] T127 [P] [US4] Implement current-data paper evaluation and checkpointed lifecycle worker tasks in `apps/worker/traderx_worker/tasks/paper.py`
+- [ ] T128 [P] [US4] Implement paper strategies, positions, history, and performance UI in `apps/web/src/features/paper/PaperTrading.tsx`
+- [ ] T129 [US4] Implement backtest-versus-paper evidence, promotion eligibility, and step-up approval UI in `apps/web/src/features/paper/ApprovalReview.tsx`
 
 **Checkpoint**: User Story 4 independently proves paper evidence cannot promote itself and only an
 authorized human can grant current live eligibility.
@@ -264,28 +264,28 @@ reduced/blocked, every third is blocked, and missing critical data produces no r
 
 ### Tests for User Story 5
 
-- [X] T130 [P] [US5] Write opportunity score, state, ranking, and live-eligibility tests in `tests/unit/opportunities/test_opportunity_engine.py`
-- [X] T131 [P] [US5] Write exact volume, tick/step rounding, cross-currency conversion, and never-increase-risk property tests in `tests/safety/test_position_sizing.py`
-- [X] T132 [P] [US5] Write zero/one/two/third-position, correlation, common exposure, loss margin, Risk Manager veto, and lockdown tests in `tests/safety/test_live_capacity.py`
-- [X] T133 [P] [US5] Write missing/stale/contradictory data and failed dependency no-recommendation tests in `tests/safety/test_recommendation_fail_closed.py`
-- [X] T134 [P] [US5] Write opportunity and complete/expired recommendation HTTP contract tests in `tests/contract/test_opportunities_api.py`
-- [X] T135 [P] [US5] Write the ranking, pass/reduce/block reasons, complete recommendation, and expiration browser journey in `apps/web/tests/e2e/opportunities.spec.ts`
+- [ ] T130 [P] [US5] Write opportunity score, state, ranking, and live-eligibility tests in `tests/unit/opportunities/test_opportunity_engine.py`
+- [ ] T131 [P] [US5] Write exact volume, tick/step rounding, cross-currency conversion, and never-increase-risk property tests in `tests/safety/test_position_sizing.py`
+- [ ] T132 [P] [US5] Write zero/one/two/third-position, correlation, common exposure, loss margin, Risk Manager veto, and lockdown tests in `tests/safety/test_live_capacity.py`
+- [ ] T133 [P] [US5] Write missing/stale/contradictory data and failed dependency no-recommendation tests in `tests/safety/test_recommendation_fail_closed.py`
+- [ ] T134 [P] [US5] Write opportunity and complete/expired recommendation HTTP contract tests in `tests/contract/test_opportunities_api.py`
+- [ ] T135 [P] [US5] Write the ranking, pass/reduce/block reasons, complete recommendation, and expiration browser journey in `apps/web/tests/e2e/opportunities.spec.ts`
 
 ### Implementation for User Story 5
 
-- [X] T136 [P] [US5] Implement immutable Opportunity, score components, evidence, state, and expiry models in `src/traderx/opportunities/model.py`
-- [X] T137 [P] [US5] Implement immutable Recommendation, exact levels/risk/volume, invalidation, and lifecycle models in `src/traderx/opportunities/recommendation_model.py`
-- [X] T138 [US5] Add opportunity, score component, risk decision link, recommendation, target, and expiry tables in `migrations/versions/0006_opportunities.py`
-- [X] T139 [US5] Implement live strategy eligibility, current regime/signal evaluation, evidence construction, and first-class no-trade states in `src/traderx/opportunities/evaluator.py`
-- [X] T140 [US5] Implement explainable opportunity components and ranking independent of risk authorization in `src/traderx/opportunities/ranking.py`
-- [X] T141 [US5] Implement rolling correlation, currency/macro common-factor exposure, marginal risk, and second-position assessment in `src/traderx/portfolio/exposure.py`
-- [X] T142 [US5] Implement exact account/instrument-aware sizing with conservative minimum/step rounding and conversion-quality checks in `src/traderx/risk/sizing.py`
-- [X] T143 [US5] Implement transactional Risk Manager `PASS/PASS_REDUCED/BLOCKED` decisions with server-side recomputation and hard capacity limit in `src/traderx/risk/manager.py`
-- [X] T144 [US5] Implement complete recommendation issuance, reason traces, invalidation, expiry, and withdrawal without any order capability in `src/traderx/opportunities/recommendations.py`
-- [X] T145 [P] [US5] Implement ranked opportunity and recommendation routes in `apps/api/traderx_api/routes/opportunities.py`
-- [X] T146 [P] [US5] Implement scheduled live-strategy evaluation, expiry, and risk-decision worker tasks in `apps/worker/traderx_worker/tasks/opportunities.py`
-- [X] T147 [P] [US5] Implement the three-category ranked opportunity board with score/risk separation and no-trade states in `apps/web/src/features/opportunities/OpportunityBoard.tsx`
-- [X] T148 [US5] Implement complete recommendation detail, sizing evidence, rationale, invalidation, freshness, and expiry UI in `apps/web/src/features/opportunities/RecommendationPanel.tsx`
+- [ ] T136 [P] [US5] Implement immutable Opportunity, score components, evidence, state, and expiry models in `src/traderx/opportunities/model.py`
+- [ ] T137 [P] [US5] Implement immutable Recommendation, exact levels/risk/volume, invalidation, and lifecycle models in `src/traderx/opportunities/recommendation_model.py`
+- [ ] T138 [US5] Add opportunity, score component, risk decision link, recommendation, target, and expiry tables in `migrations/versions/0006_opportunities.py`
+- [ ] T139 [US5] Implement live strategy eligibility, current regime/signal evaluation, evidence construction, and first-class no-trade states in `src/traderx/opportunities/evaluator.py`
+- [ ] T140 [US5] Implement explainable opportunity components and ranking independent of risk authorization in `src/traderx/opportunities/ranking.py`
+- [ ] T141 [US5] Implement rolling correlation, currency/macro common-factor exposure, marginal risk, and second-position assessment in `src/traderx/portfolio/exposure.py`
+- [ ] T142 [US5] Implement exact account/instrument-aware sizing with conservative minimum/step rounding and conversion-quality checks in `src/traderx/risk/sizing.py`
+- [ ] T143 [US5] Implement transactional Risk Manager `PASS/PASS_REDUCED/BLOCKED` decisions with server-side recomputation and hard capacity limit in `src/traderx/risk/manager.py`
+- [ ] T144 [US5] Implement complete recommendation issuance, reason traces, invalidation, expiry, and withdrawal without any order capability in `src/traderx/opportunities/recommendations.py`
+- [ ] T145 [P] [US5] Implement ranked opportunity and recommendation routes in `apps/api/traderx_api/routes/opportunities.py`
+- [ ] T146 [P] [US5] Implement scheduled live-strategy evaluation, expiry, and risk-decision worker tasks in `apps/worker/traderx_worker/tasks/opportunities.py`
+- [ ] T147 [P] [US5] Implement the three-category ranked opportunity board with score/risk separation and no-trade states in `apps/web/src/features/opportunities/OpportunityBoard.tsx`
+- [ ] T148 [US5] Implement complete recommendation detail, sizing evidence, rationale, invalidation, freshness, and expiry UI in `apps/web/src/features/opportunities/RecommendationPanel.tsx`
 
 **Checkpoint**: User Story 5 independently delivers safe decision support, never an execution path.
 
@@ -302,27 +302,27 @@ code/contract to prove no live-order operation exists.
 
 ### Tests for User Story 6
 
-- [X] T149 [P] [US6] Write broker stream/poll reconciliation tests for duplicate, out-of-order, sequence-gap, partial-fill, correction, and contradiction cases in `tests/integration/test_broker_reconciliation.py`
-- [X] T150 [P] [US6] Write matching, discretionary classification, correction, and immediate shared-risk tests in `tests/integration/test_position_classification.py`
-- [X] T151 [P] [US6] Write frozen thesis immutability and thesis-based health/guidance tests in `tests/safety/test_trade_monitoring.py`
-- [X] T152 [P] [US6] Write static and runtime tests proving broker ports, routes, workers, and adapters expose no live-order submission path in `tests/safety/test_no_live_execution.py`
-- [X] T153 [P] [US6] Write position, classification, thesis, and monitoring HTTP contract tests in `tests/contract/test_positions_api.py`
-- [X] T154 [P] [US6] Write the detected recommended/discretionary position and thesis-monitoring browser journey in `apps/web/tests/e2e/live_monitoring.spec.ts`
+- [ ] T149 [P] [US6] Write broker stream/poll reconciliation tests for duplicate, out-of-order, sequence-gap, partial-fill, correction, and contradiction cases in `tests/integration/test_broker_reconciliation.py`
+- [ ] T150 [P] [US6] Write matching, discretionary classification, correction, and immediate shared-risk tests in `tests/integration/test_position_classification.py`
+- [ ] T151 [P] [US6] Write frozen thesis immutability and thesis-based health/guidance tests in `tests/safety/test_trade_monitoring.py`
+- [ ] T152 [P] [US6] Write static and runtime tests proving broker ports, routes, workers, and adapters expose no live-order submission path in `tests/safety/test_no_live_execution.py`
+- [ ] T153 [P] [US6] Write position, classification, thesis, and monitoring HTTP contract tests in `tests/contract/test_positions_api.py`
+- [ ] T154 [P] [US6] Write the detected recommended/discretionary position and thesis-monitoring browser journey in `apps/web/tests/e2e/live_monitoring.spec.ts`
 
 ### Implementation for User Story 6
 
-- [X] T155 [P] [US6] Implement Position, TradeExecution, reconciliation state, classification, and provider revision models in `src/traderx/monitoring/position_model.py`
-- [X] T156 [P] [US6] Implement immutable TradeThesis and append-only MonitoringObservation models in `src/traderx/monitoring/thesis_model.py`
-- [X] T157 [US6] Add live position, fill/deal, classification history, thesis, and monitoring observation tables in `migrations/versions/0007_monitoring.py`
-- [X] T158 [US6] Implement streaming plus authoritative polling, cursor/sequence handling, deduplication, and contradiction detection in `src/traderx/monitoring/reconciliation.py`
-- [X] T159 [US6] Implement recommendation matching, confidence, discretionary fallback, and audited user correction in `src/traderx/monitoring/matching.py`
-- [X] T160 [US6] Wire every live position and fill projection into transactional account/risk recalculation in `src/traderx/monitoring/risk_projection.py`
-- [X] T161 [US6] Implement one-time frozen thesis creation from matched recommendation evidence in `src/traderx/monitoring/thesis.py`
-- [X] T162 [US6] Implement thesis-versus-market evaluation and `STRONG/HEALTHY/WATCH/WEAKENING/INVALIDATED` guidance in `src/traderx/monitoring/monitor.py`
-- [X] T163 [P] [US6] Implement position list, classification correction, thesis, and monitoring routes in `apps/api/traderx_api/routes/positions.py`
-- [X] T164 [P] [US6] Implement priority broker reconciliation and live monitoring worker loops in `apps/worker/traderx_worker/tasks/monitoring.py`
-- [X] T165 [P] [US6] Implement open/history position views, match confidence, and classification correction UI in `apps/web/src/features/trades/Positions.tsx`
-- [X] T166 [US6] Implement immutable original-thesis and append-only health timeline UI in `apps/web/src/features/trades/TradeMonitor.tsx`
+- [ ] T155 [P] [US6] Implement Position, TradeExecution, reconciliation state, classification, and provider revision models in `src/traderx/monitoring/position_model.py`
+- [ ] T156 [P] [US6] Implement immutable TradeThesis and append-only MonitoringObservation models in `src/traderx/monitoring/thesis_model.py`
+- [ ] T157 [US6] Add live position, fill/deal, classification history, thesis, and monitoring observation tables in `migrations/versions/0007_monitoring.py`
+- [ ] T158 [US6] Implement streaming plus authoritative polling, cursor/sequence handling, deduplication, and contradiction detection in `src/traderx/monitoring/reconciliation.py`
+- [ ] T159 [US6] Implement recommendation matching, confidence, discretionary fallback, and audited user correction in `src/traderx/monitoring/matching.py`
+- [ ] T160 [US6] Wire every live position and fill projection into transactional account/risk recalculation in `src/traderx/monitoring/risk_projection.py`
+- [ ] T161 [US6] Implement one-time frozen thesis creation from matched recommendation evidence in `src/traderx/monitoring/thesis.py`
+- [ ] T162 [US6] Implement thesis-versus-market evaluation and `STRONG/HEALTHY/WATCH/WEAKENING/INVALIDATED` guidance in `src/traderx/monitoring/monitor.py`
+- [ ] T163 [P] [US6] Implement position list, classification correction, thesis, and monitoring routes in `apps/api/traderx_api/routes/positions.py`
+- [ ] T164 [P] [US6] Implement priority broker reconciliation and live monitoring worker loops in `apps/worker/traderx_worker/tasks/monitoring.py`
+- [ ] T165 [P] [US6] Implement open/history position views, match confidence, and classification correction UI in `apps/web/src/features/trades/Positions.tsx`
+- [ ] T166 [US6] Implement immutable original-thesis and append-only health timeline UI in `apps/web/src/features/trades/TradeMonitor.tsx`
 
 **Checkpoint**: User Story 6 independently detects and monitors manual execution while retaining
 the constitutional negative capability for real-money orders.
@@ -340,23 +340,23 @@ source strategy unchanged.
 
 ### Tests for User Story 7
 
-- [X] T167 [P] [US7] Write journal projection, correction provenance, financial P&L, R-multiple, and all-trade-type tests in `tests/integration/test_journal_projection.py`
-- [X] T168 [P] [US7] Write annotation, protected attachment, analytics dimension, and hypothesis non-mutation tests in `tests/integration/test_journal_learning.py`
-- [X] T169 [P] [US7] Write journal entry, annotation, attachment, analytics, and research-proposal HTTP contract tests in `tests/contract/test_journal_api.py`
-- [X] T170 [P] [US7] Write the journal annotation, screenshot, filtering, comparison, and hypothesis browser journey in `apps/web/tests/e2e/journal.spec.ts`
+- [ ] T167 [P] [US7] Write journal projection, correction provenance, financial P&L, R-multiple, and all-trade-type tests in `tests/integration/test_journal_projection.py`
+- [ ] T168 [P] [US7] Write annotation, protected attachment, analytics dimension, and hypothesis non-mutation tests in `tests/integration/test_journal_learning.py`
+- [ ] T169 [P] [US7] Write journal entry, annotation, attachment, analytics, and research-proposal HTTP contract tests in `tests/contract/test_journal_api.py`
+- [ ] T170 [P] [US7] Write the journal annotation, screenshot, filtering, comparison, and hypothesis browser journey in `apps/web/tests/e2e/journal.spec.ts`
 
 ### Implementation for User Story 7
 
-- [X] T171 [P] [US7] Implement JournalEntry, sourced correction, annotation, attachment, and review models in `src/traderx/journal/model.py`
-- [X] T172 [US7] Add journal entry, annotation version, protected attachment, review, and research-proposal tables in `migrations/versions/0008_journal.py`
-- [X] T173 [US7] Implement automatic recommended, discretionary, and paper journal projection with exact P&L and R in `src/traderx/journal/projector.py`
-- [X] T174 [US7] Implement annotation supersession, attachment authorization, checksum, and metadata service in `src/traderx/journal/service.py`
-- [X] T175 [US7] Implement performance aggregation by instrument, asset class, version, time, direction, risk, regime, entry quality, and behavior in `src/traderx/journal/analytics.py`
-- [X] T176 [US7] Implement evidence-linked research proposal creation that cannot mutate or promote a strategy in `src/traderx/journal/hypotheses.py`
-- [X] T177 [P] [US7] Implement journal entry, annotation, attachment, analytics, and proposal routes in `apps/api/traderx_api/routes/journal.py`
-- [X] T178 [P] [US7] Implement trade-close journal and rolling analytics worker consumers in `apps/worker/traderx_worker/tasks/journal.py`
-- [X] T179 [P] [US7] Implement journal list/detail, automatic evidence, annotations, and protected attachment UI in `apps/web/src/features/journal/Journal.tsx`
-- [X] T180 [US7] Implement performance filters, R/financial comparisons, behavior analysis, and research proposal UI in `apps/web/src/features/journal/JournalAnalytics.tsx`
+- [ ] T171 [P] [US7] Implement JournalEntry, sourced correction, annotation, attachment, and review models in `src/traderx/journal/model.py`
+- [ ] T172 [US7] Add journal entry, annotation version, protected attachment, review, and research-proposal tables in `migrations/versions/0008_journal.py`
+- [ ] T173 [US7] Implement automatic recommended, discretionary, and paper journal projection with exact P&L and R in `src/traderx/journal/projector.py`
+- [ ] T174 [US7] Implement annotation supersession, attachment authorization, checksum, and metadata service in `src/traderx/journal/service.py`
+- [ ] T175 [US7] Implement performance aggregation by instrument, asset class, version, time, direction, risk, regime, entry quality, and behavior in `src/traderx/journal/analytics.py`
+- [ ] T176 [US7] Implement evidence-linked research proposal creation that cannot mutate or promote a strategy in `src/traderx/journal/hypotheses.py`
+- [ ] T177 [P] [US7] Implement journal entry, annotation, attachment, analytics, and proposal routes in `apps/api/traderx_api/routes/journal.py`
+- [ ] T178 [P] [US7] Implement trade-close journal and rolling analytics worker consumers in `apps/worker/traderx_worker/tasks/journal.py`
+- [ ] T179 [P] [US7] Implement journal list/detail, automatic evidence, annotations, and protected attachment UI in `apps/web/src/features/journal/Journal.tsx`
+- [ ] T180 [US7] Implement performance filters, R/financial comparisons, behavior analysis, and research proposal UI in `apps/web/src/features/journal/JournalAnalytics.tsx`
 
 **Checkpoint**: User Story 7 independently produces durable learning without rewriting history.
 
@@ -373,22 +373,22 @@ the recommended refresh/validation/approval path completes.
 
 ### Tests for User Story 8
 
-- [X] T181 [P] [US8] Write migration and repository tests proving instrument references use preservation rules and no replacement path cascade-deletes evidence in `tests/integration/test_instrument_retention.py`
-- [X] T182 [P] [US8] Write incremental gap detection, alias continuity, staleness classification, selective revalidation, and no-auto-reactivation tests in `tests/safety/test_instrument_reactivation.py`
-- [X] T183 [P] [US8] Write replacement recommendation, history, reactivation plan, and approval HTTP contract tests in `tests/contract/test_market_rotation_api.py`
-- [X] T184 [P] [US8] Write the replacement comparison, retained knowledge, reactivation, and revalidation browser journey in `apps/web/tests/e2e/market_rotation.spec.ts`
+- [ ] T181 [P] [US8] Write migration and repository tests proving instrument references use preservation rules and no replacement path cascade-deletes evidence in `tests/integration/test_instrument_retention.py`
+- [ ] T182 [P] [US8] Write incremental gap detection, alias continuity, staleness classification, selective revalidation, and no-auto-reactivation tests in `tests/safety/test_instrument_reactivation.py`
+- [ ] T183 [P] [US8] Write replacement recommendation, history, reactivation plan, and approval HTTP contract tests in `tests/contract/test_market_rotation_api.py`
+- [ ] T184 [P] [US8] Write the replacement comparison, retained knowledge, reactivation, and revalidation browser journey in `apps/web/tests/e2e/market_rotation.spec.ts`
 
 ### Implementation for User Story 8
 
-- [X] T185 [US8] Add explicit restrictive-delete constraints and effective-history indexes for instrument knowledge in `migrations/versions/0009_instrument_retention.py`
-- [X] T186 [US8] Implement periodic current-versus-candidate suitability comparison and explainable replacement recommendation in `src/traderx/market_research/replacement.py`
-- [X] T187 [US8] Implement existing coverage lookup, alias reconciliation, missing-interval planning, and incremental refresh in `src/traderx/instruments/reactivation.py`
-- [X] T188 [US8] Implement `CURRENT/REVALIDATION_REQUIRED/STALE/LEGACY` evidence classification and selective validation plan generation in `src/traderx/strategies/staleness.py`
-- [X] T189 [US8] Implement reactivation orchestration that loads preserved knowledge and ends in human approval rather than live status in `src/traderx/instruments/reactivation_service.py`
-- [X] T190 [P] [US8] Implement replacement research, assignment history, knowledge summary, and reactivation plan routes in `apps/api/traderx_api/routes/market_rotation.py`
-- [X] T191 [P] [US8] Implement scheduled replacement research, data-gap sync, and revalidation-plan worker tasks in `apps/worker/traderx_worker/tasks/market_rotation.py`
-- [X] T192 [P] [US8] Implement current/candidate score comparison and deliberate replacement UI in `apps/web/src/features/markets/MarketReplacement.tsx`
-- [X] T193 [US8] Implement retained-knowledge inventory, data gaps, staleness, and reactivation workflow UI in `apps/web/src/features/markets/InstrumentReactivation.tsx`
+- [ ] T185 [US8] Add explicit restrictive-delete constraints and effective-history indexes for instrument knowledge in `migrations/versions/0009_instrument_retention.py`
+- [ ] T186 [US8] Implement periodic current-versus-candidate suitability comparison and explainable replacement recommendation in `src/traderx/market_research/replacement.py`
+- [ ] T187 [US8] Implement existing coverage lookup, alias reconciliation, missing-interval planning, and incremental refresh in `src/traderx/instruments/reactivation.py`
+- [ ] T188 [US8] Implement `CURRENT/REVALIDATION_REQUIRED/STALE/LEGACY` evidence classification and selective validation plan generation in `src/traderx/strategies/staleness.py`
+- [ ] T189 [US8] Implement reactivation orchestration that loads preserved knowledge and ends in human approval rather than live status in `src/traderx/instruments/reactivation_service.py`
+- [ ] T190 [P] [US8] Implement replacement research, assignment history, knowledge summary, and reactivation plan routes in `apps/api/traderx_api/routes/market_rotation.py`
+- [ ] T191 [P] [US8] Implement scheduled replacement research, data-gap sync, and revalidation-plan worker tasks in `apps/worker/traderx_worker/tasks/market_rotation.py`
+- [ ] T192 [P] [US8] Implement current/candidate score comparison and deliberate replacement UI in `apps/web/src/features/markets/MarketReplacement.tsx`
+- [ ] T193 [US8] Implement retained-knowledge inventory, data gaps, staleness, and reactivation workflow UI in `apps/web/src/features/markets/InstrumentReactivation.tsx`
 
 **Checkpoint**: User Story 8 independently proves that market rotation never destroys or silently
 reactivates governed evidence.
@@ -406,34 +406,34 @@ complete redacted audit history without direct infrastructure access.
 
 ### Tests for User Story 9
 
-- [X] T194 [P] [US9] Write envelope-encryption, rotation, write-only presentation, and log/telemetry/audit redaction tests in `tests/security/test_secret_management.py`
-- [X] T195 [P] [US9] Write integration health, capability allowlist, official-source-only, test/disable/reconnect, and failure recovery tests in `tests/integration/test_integration_operations.py`
-- [X] T196 [P] [US9] Write outbox notification routing, preference, deduplication, bounded retry, ambiguous timeout, and durable critical-web-inbox tests in `tests/integration/test_notifications.py`
-- [X] T197 [P] [US9] Write job state/action, safe checkpoint cancellation, browser independence, progress stream, and retry contract tests in `tests/integration/test_job_operations.py`
-- [X] T198 [P] [US9] Write append-only audit, mandatory audit failure, high-risk before/after, and authorized-read tests in `tests/security/test_audit_integrity.py`
-- [X] T199 [P] [US9] Write integrations, jobs, notifications, audit, event stream, and health HTTP contract tests in `tests/contract/test_operations_api.py`
-- [X] T200 [P] [US9] Write the UI-only integration, credential rotation, job control, notification preference, health, and audit browser journey in `apps/web/tests/e2e/system_operations.spec.ts`
+- [ ] T194 [P] [US9] Write envelope-encryption, rotation, write-only presentation, and log/telemetry/audit redaction tests in `tests/security/test_secret_management.py`
+- [ ] T195 [P] [US9] Write integration health, capability allowlist, official-source-only, test/disable/reconnect, and failure recovery tests in `tests/integration/test_integration_operations.py`
+- [ ] T196 [P] [US9] Write outbox notification routing, preference, deduplication, bounded retry, ambiguous timeout, and durable critical-web-inbox tests in `tests/integration/test_notifications.py`
+- [ ] T197 [P] [US9] Write job state/action, safe checkpoint cancellation, browser independence, progress stream, and retry contract tests in `tests/integration/test_job_operations.py`
+- [ ] T198 [P] [US9] Write append-only audit, mandatory audit failure, high-risk before/after, and authorized-read tests in `tests/security/test_audit_integrity.py`
+- [ ] T199 [P] [US9] Write integrations, jobs, notifications, audit, event stream, and health HTTP contract tests in `tests/contract/test_operations_api.py`
+- [ ] T200 [P] [US9] Write the UI-only integration, credential rotation, job control, notification preference, health, and audit browser journey in `apps/web/tests/e2e/system_operations.spec.ts`
 
 ### Implementation for User Story 9
 
-- [X] T201 [P] [US9] Implement Integration, credential version, capability allowlist, and health observation models in `src/traderx/integrations/model.py`
-- [X] T202 [P] [US9] Implement NotificationEvent, user preference, routed notification, and delivery-attempt models in `src/traderx/notifications/model.py`
-- [X] T203 [P] [US9] Implement StrategyHealthObservation and suspension recommendation/state models in `src/traderx/strategies/health_model.py`
-- [X] T204 [US9] Add integration, credential version, health, notification/preference/delivery, and strategy-health tables in `migrations/versions/0010_operations.py`
-- [X] T205 [US9] Implement UI-managed integration create/test/enable/disable/reconnect/rotate operations with step-up assurance and audit in `src/traderx/integrations/service.py`
-- [X] T206 [US9] Implement health aggregation for integrations, workers, queues, database, data freshness, and safety capability impact in `src/traderx/integrations/health.py`
-- [X] T207 [US9] Implement channel-independent notification routing, severity/preferences, web inbox, deduplication, and bounded delivery retries in `src/traderx/notifications/router.py`
-- [X] T208 [US9] Implement rolling live strategy health, comparison ranges, watch/suspend recommendation, and suspension enforcement in `src/traderx/strategies/health.py`
-- [X] T209 [P] [US9] Implement integration and credential-rotation routes with masked responses, ETags, and idempotency in `apps/api/traderx_api/routes/integrations.py`
-- [X] T210 [P] [US9] Implement durable job list/detail/control and authenticated SSE progress routes in `apps/api/traderx_api/routes/jobs.py`
-- [X] T211 [P] [US9] Implement notification inbox/preference and channel test routes in `apps/api/traderx_api/routes/notifications.py`
-- [X] T212 [P] [US9] Implement authorized audit search/detail and redacted system-health routes in `apps/api/traderx_api/routes/operations.py`
-- [X] T213 [P] [US9] Implement email, Telegram, and durable web delivery adapters in `src/traderx/notifications/providers.py`
-- [X] T214 [P] [US9] Implement notification delivery, health polling, strategy-health, and maintenance worker tasks in `apps/worker/traderx_worker/tasks/operations.py`
-- [X] T215 [P] [US9] Implement integration cards, write-only credential forms, test/enable/disable/reconnect/rotate actions, and health UI in `apps/web/src/features/integrations/Integrations.tsx`
-- [X] T216 [P] [US9] Implement job state, progress, valid actions, results, failures, and SSE/poll fallback UI in `apps/web/src/features/system/Jobs.tsx`
-- [X] T217 [P] [US9] Implement notification inbox, severity, channel preferences, delivery status, and channel test UI in `apps/web/src/features/notifications/Notifications.tsx`
-- [X] T218 [US9] Implement system/integration/data health, strategy health, circuit-breaker visibility, and authorized audit UI in `apps/web/src/features/system/SystemControl.tsx`
+- [ ] T201 [P] [US9] Implement Integration, credential version, capability allowlist, and health observation models in `src/traderx/integrations/model.py`
+- [ ] T202 [P] [US9] Implement NotificationEvent, user preference, routed notification, and delivery-attempt models in `src/traderx/notifications/model.py`
+- [ ] T203 [P] [US9] Implement StrategyHealthObservation and suspension recommendation/state models in `src/traderx/strategies/health_model.py`
+- [ ] T204 [US9] Add integration, credential version, health, notification/preference/delivery, and strategy-health tables in `migrations/versions/0010_operations.py`
+- [ ] T205 [US9] Implement UI-managed integration create/test/enable/disable/reconnect/rotate operations with step-up assurance and audit in `src/traderx/integrations/service.py`
+- [ ] T206 [US9] Implement health aggregation for integrations, workers, queues, database, data freshness, and safety capability impact in `src/traderx/integrations/health.py`
+- [ ] T207 [US9] Implement channel-independent notification routing, severity/preferences, web inbox, deduplication, and bounded delivery retries in `src/traderx/notifications/router.py`
+- [ ] T208 [US9] Implement rolling live strategy health, comparison ranges, watch/suspend recommendation, and suspension enforcement in `src/traderx/strategies/health.py`
+- [ ] T209 [P] [US9] Implement integration and credential-rotation routes with masked responses, ETags, and idempotency in `apps/api/traderx_api/routes/integrations.py`
+- [ ] T210 [P] [US9] Implement durable job list/detail/control and authenticated SSE progress routes in `apps/api/traderx_api/routes/jobs.py`
+- [ ] T211 [P] [US9] Implement notification inbox/preference and channel test routes in `apps/api/traderx_api/routes/notifications.py`
+- [ ] T212 [P] [US9] Implement authorized audit search/detail and redacted system-health routes in `apps/api/traderx_api/routes/operations.py`
+- [ ] T213 [P] [US9] Implement email, Telegram, and durable web delivery adapters in `src/traderx/notifications/providers.py`
+- [ ] T214 [P] [US9] Implement notification delivery, health polling, strategy-health, and maintenance worker tasks in `apps/worker/traderx_worker/tasks/operations.py`
+- [ ] T215 [P] [US9] Implement integration cards, write-only credential forms, test/enable/disable/reconnect/rotate actions, and health UI in `apps/web/src/features/integrations/Integrations.tsx`
+- [ ] T216 [P] [US9] Implement job state, progress, valid actions, results, failures, and SSE/poll fallback UI in `apps/web/src/features/system/Jobs.tsx`
+- [ ] T217 [P] [US9] Implement notification inbox, severity, channel preferences, delivery status, and channel test UI in `apps/web/src/features/notifications/Notifications.tsx`
+- [ ] T218 [US9] Implement system/integration/data health, strategy health, circuit-breaker visibility, and authorized audit UI in `apps/web/src/features/system/SystemControl.tsx`
 
 **Checkpoint**: User Story 9 independently proves ordinary operation, visibility, secret handling,
 and audit are available through authenticated UI workflows.
@@ -445,22 +445,22 @@ and audit are available through authenticated UI workflows.
 **Purpose**: Prove full-system constitutional compliance, resilience, performance, usability,
 security, deployment safety, and recoverability.
 
-- [X] T219 [P] Add static source and contract guards against real-money order operations, scraping providers, and unapproved integration capabilities in `tests/safety/test_constitutional_negative_capabilities.py`
-- [X] T220 [P] Add end-to-end constitutional invariant scenarios for eligibility order, three categories, dynamic capacity, Risk Manager veto, lifecycle gates, manual execution, and retained knowledge in `tests/e2e/test_constitutional_invariants.py`
-- [X] T221 [P] Add cross-module property/state-machine tests for concurrent high-risk commands, stale ETags, duplicate events, and aggregate ordering in `tests/safety/test_concurrency_invariants.py`
-- [X] T222 [P] Add migration forward/rollback rehearsal and governed-evidence preservation checks in `tests/integration/test_migrations.py`
-- [X] T223 [P] Add encrypted backup, restore, outbox/job recovery, and audit/evidence checksum validation in `tests/integration/test_backup_restore.py`
-- [X] T224 [P] Add performance scenarios for dashboard latency, risk decisions, broker visibility, notifications, job progress, and large market/research datasets in `tests/performance/test_success_criteria.py`
-- [X] T225 [P] Add browser accessibility, responsive layout, keyboard flow, color contrast, error recovery, and usability-success checks in `apps/web/tests/e2e/accessibility.spec.ts`
-- [X] T226 [P] Add authentication abuse, session fixation, CSRF, authorization bypass, dependency, static security, and baseline dynamic scan configuration in `tests/security/test_application_hardening.py`
-- [X] T227 Implement structured redacted logs, OpenTelemetry traces/metrics, correlation propagation, queue/data freshness metrics, and alert hooks in `src/traderx/shared/observability.py`
-- [X] T228 Harden containers with non-root users, read-only filesystems, health/readiness probes, resource limits, private networks, and Docker secrets in `deploy/compose.production.yaml`
-- [X] T229 Implement one-shot migration, encrypted off-host backup, restore verification, and key-rotation operator procedures in `deploy/operations/runbook.md`
-- [X] T230 Reconcile the generated server/client implementation with the OpenAPI, domain-event, and provider contracts and document compatibility in `specs/001-traderx-core-platform/contracts/compatibility-report.md`
-- [X] T231 Execute every scenario in the validation guide and record evidence, deviations, and outcomes in `specs/001-traderx-core-platform/quickstart-results.md`
-- [X] T232 Map all 94 functional requirements and 18 success criteria to implementation and passing evidence in `specs/001-traderx-core-platform/traceability.md`
-- [X] T233 Perform the pre-production Constitution Check and document that all governed rules and release-blocking tests pass in `specs/001-traderx-core-platform/constitution-compliance.md`
-- [X] T234 Update installation, owner bootstrap, UI-only operations, safety boundaries, and manual execution guidance in `README.md`
+- [ ] T219 [P] Add static source and contract guards against real-money order operations, scraping providers, and unapproved integration capabilities in `tests/safety/test_constitutional_negative_capabilities.py`
+- [ ] T220 [P] Add end-to-end constitutional invariant scenarios for eligibility order, three categories, dynamic capacity, Risk Manager veto, lifecycle gates, manual execution, and retained knowledge in `tests/e2e/test_constitutional_invariants.py`
+- [ ] T221 [P] Add cross-module property/state-machine tests for concurrent high-risk commands, stale ETags, duplicate events, and aggregate ordering in `tests/safety/test_concurrency_invariants.py`
+- [ ] T222 [P] Add migration forward/rollback rehearsal and governed-evidence preservation checks in `tests/integration/test_migrations.py`
+- [ ] T223 [P] Add encrypted backup, restore, outbox/job recovery, and audit/evidence checksum validation in `tests/integration/test_backup_restore.py`
+- [ ] T224 [P] Add performance scenarios for dashboard latency, risk decisions, broker visibility, notifications, job progress, and large market/research datasets in `tests/performance/test_success_criteria.py`
+- [ ] T225 [P] Add browser accessibility, responsive layout, keyboard flow, color contrast, error recovery, and usability-success checks in `apps/web/tests/e2e/accessibility.spec.ts`
+- [ ] T226 [P] Add authentication abuse, session fixation, CSRF, authorization bypass, dependency, static security, and baseline dynamic scan configuration in `tests/security/test_application_hardening.py`
+- [ ] T227 Implement structured redacted logs, OpenTelemetry traces/metrics, correlation propagation, queue/data freshness metrics, and alert hooks in `src/traderx/shared/observability.py`
+- [ ] T228 Harden containers with non-root users, read-only filesystems, health/readiness probes, resource limits, private networks, and Docker secrets in `deploy/compose.production.yaml`
+- [ ] T229 Implement one-shot migration, encrypted off-host backup, restore verification, and key-rotation operator procedures in `deploy/operations/runbook.md`
+- [ ] T230 Reconcile the generated server/client implementation with the OpenAPI, domain-event, and provider contracts and document compatibility in `specs/001-traderx-core-platform/contracts/compatibility-report.md`
+- [ ] T231 Execute every scenario in the validation guide and record evidence, deviations, and outcomes in `specs/001-traderx-core-platform/quickstart-results.md`
+- [ ] T232 Map all 94 functional requirements and 18 success criteria to implementation and passing evidence in `specs/001-traderx-core-platform/traceability.md`
+- [ ] T233 Perform the pre-production Constitution Check and document that all governed rules and release-blocking tests pass in `specs/001-traderx-core-platform/constitution-compliance.md`
+- [ ] T234 Update installation, owner bootstrap, UI-only operations, safety boundaries, and manual execution guidance in `README.md`
 
 **Checkpoint**: The full TraderX V1 design is implemented, traceable, recoverable, and eligible for
 deliberate production review only when every constitutional gate passes.

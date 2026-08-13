@@ -120,6 +120,10 @@ class PasswordRecoveryManager:
         token, digest = self._sessions.issue()
         return token, RecoveryChallengeView(digest, now + self._lifetime)
 
+    def digest(self, token: str) -> str:
+        """Return the stored digest for a presented reset token."""
+        return self._sessions.digest(token)
+
     def consume(self, challenge: RecoveryChallengeView, token: str, now: datetime) -> None:
         if challenge.consumed_at is not None or now > challenge.expires_at:
             raise AuthorizationError("password recovery challenge is unavailable")

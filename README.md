@@ -15,6 +15,11 @@ cd apps/web && npm install
 For local containers, create `deploy/secrets/postgres_password` with a local-only database
 password, then run `docker compose -f deploy/compose.yaml up --build`.
 
+When the stack is ready, open **https://localhost:3000**. Caddy creates a local development
+certificate, so the browser will show a certificate warning on first use; proceed only for this
+local TraderX instance. The API is intentionally private: use
+`https://localhost:3000/api/v1/docs` through the proxy rather than `localhost:8000`.
+
 ## Owner bootstrap and operation
 
 Create the first owner through the governed identity bootstrap path, enroll MFA, configure one

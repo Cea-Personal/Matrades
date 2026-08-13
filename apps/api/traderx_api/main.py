@@ -13,7 +13,7 @@ from traderx_api.routes.accounts import router as accounts_router
 from traderx_api.routes.approvals import router as approvals_router
 from traderx_api.routes.dashboard import router as dashboard_router
 from traderx_api.routes.health import router as health_router
-from traderx_api.routes.identity import router as identity_router
+from traderx_api.routes.identity import router as identity_router, user_router as identity_user_router
 from traderx_api.routes.integrations import router as integrations_router
 from traderx_api.routes.jobs import router as jobs_router
 from traderx_api.routes.journal import router as journal_router
@@ -45,6 +45,7 @@ app.add_middleware(ContextMiddleware)
 app.add_exception_handler(DomainError, domain_error_handler)
 app.include_router(health_router, prefix="/api/v1")
 app.include_router(identity_router, prefix="/api/v1")
+app.include_router(identity_user_router, prefix="/api/v1")
 app.include_router(accounts_router, prefix="/api/v1")
 app.include_router(dashboard_router, prefix="/api/v1")
 app.include_router(markets_router, prefix="/api/v1")

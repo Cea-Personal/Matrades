@@ -1,4 +1,6 @@
-:443 {
+# The development proxy is intentionally addressed through localhost. Naming the
+# host lets Caddy issue its internal development certificate for the TLS handshake.
+localhost:443 {
   tls internal
   encode zstd gzip
   header {
@@ -7,7 +9,13 @@
     X-Content-Type-Options "nosniff"
     X-Frame-Options "DENY"
   }
-  handle /api/v1/* { reverse_proxy api:8000 }
-  handle /events { reverse_proxy api:8000 }
-  handle { reverse_proxy web:3000 }
+  handle /api/v1/* {
+    reverse_proxy api:8000
+  }
+  handle /events {
+    reverse_proxy api:8000
+  }
+  handle {
+    reverse_proxy web:3000
+  }
 }

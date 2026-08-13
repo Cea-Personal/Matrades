@@ -81,6 +81,19 @@ class RecoveryCode(IdentifiedMixin, Base):
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class AssistedMfaResetRequest(IdentifiedMixin, Base):
+    """Auditable, authorized reset of a user's TOTP enrollment."""
+
+    __tablename__ = "assisted_mfa_reset_requests"
+
+    target_user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    initiated_by_user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    reason: Mapped[str] = mapped_column(String(2000), nullable=False)
+    confirmation: Mapped[str] = mapped_column(String(32), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    outcome: Mapped[str] = mapped_column(String(32), nullable=False)
+
+
 class BootstrapState(Base):
     """One-row guard that makes first-owner enrollment an atomic operation."""
 
