@@ -9,7 +9,17 @@ celery_app = Celery(
     "traderx",
     broker=str(settings.redis_url),
     backend=str(settings.redis_url),
-    include=["traderx_worker.tasks.broker_account_sync"],
+    include=[
+        "traderx_worker.tasks.broker_account_sync",
+        "traderx_worker.tasks.market_research",
+        "traderx_worker.tasks.validation",
+        "traderx_worker.tasks.paper",
+        "traderx_worker.tasks.opportunities",
+        "traderx_worker.tasks.monitoring",
+        "traderx_worker.tasks.journal",
+        "traderx_worker.tasks.market_rotation",
+        "traderx_worker.tasks.operations",
+    ],
 )
 celery_app.conf.update(
     task_acks_late=True,
@@ -22,12 +32,43 @@ celery_app.conf.update(
         "traderx.market_data.*": {"queue": "data"},
         "traderx.research.*": {"queue": "research"},
         "traderx.paper.*": {"queue": "paper"},
+        "traderx.validation.*": {"queue": "research"},
+        "traderx.backtest.*": {"queue": "research"},
+        "traderx.opportunities.*": {"queue": "monitoring"},
+        "traderx.journal.*": {"queue": "maintenance"},
+        "traderx.market_rotation.*": {"queue": "research"},
+        "traderx.operations.*": {"queue": "maintenance"},
         "traderx.notifications.*": {"queue": "notification"},
     },
     beat_schedule={
         "sync-broker-account-truth": {
             "task": "traderx.broker.sync_all_accounts",
             "schedule": 15.0,
+        },
+        "evaluate-current-opportunities": {
+            "task": "traderx.opportunities.evaluate",
+            "schedule": 60.0,
+        },
+        "expire-opportunities": {
+            "task": "traderx.opportunities.expire",
+            "schedule": 60.0,
+        },
+        "project-journal": {
+            "task": "traderx.journal.project_close",
+            "schedule": 60.0,
+            "args": ["all"],
+        },
+        "research-market-rotation": {
+            "task": "traderx.market_rotation.research",
+            "schedule": 86400.0,
+        },
+        "deliver-notifications": {
+            "task": "traderx.operations.notifications",
+            "schedule": 15.0,
+        },
+        "poll-operational-health": {
+            "task": "traderx.operations.health",
+            "schedule": 60.0,
         },
     },
     broker_connection_retry_on_startup=True,

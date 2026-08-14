@@ -67,7 +67,9 @@ class Mt5BridgeAgent(IdentifiedMixin, Base):
     enrollment_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     enrolled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    last_snapshot_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_snapshot_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     latest_snapshot: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
 
 

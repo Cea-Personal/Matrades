@@ -19,6 +19,16 @@ TraderX Speckit Specify v1.0.0 document."
 - Q: After a user follows a password-reset link, what proof should TraderX require before issuing a new session? → A: Require current TOTP or an unused recovery code after the verified reset link.
 - Q: What session lifetime should the authentication UI enforce before requiring the user to sign in again? → A: Expire after 30 idle minutes or 12 total hours, whichever comes first.
 
+### Session 2026-08-13
+
+- Q: How should TraderX treat a workspace tab before its underlying workflow can actually be completed? → A: Show a tab only when its workflow is functional end-to-end.
+
+### Session 2026-08-14
+
+- Q: When scheduled agent research finds a new highest-volatility, deeply liquid eligible instrument, should it only recommend the change or automatically change the active market? → A: Agent recommends; human approves.
+- Q: How should the owner configure when recurring market research runs? → A: Repeat interval plus anchored start time.
+- Q: May research agents change the market-suitability method or its volatility and liquidity weights during scheduled runs? → A: Use the approved method and propose changes for human approval.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Establish a Safe Trading Account (Priority: P1)
@@ -89,6 +99,17 @@ category, and later replace one only through explicit confirmation.
    system never silently approves it.
 4. **Given** three approved active instruments, **When** a new candidate ranks higher, **Then** the
    current instrument remains active until the user approves a replacement.
+5. **Given** recurring agent-driven market research is enabled, **When** a scheduled run completes,
+   **Then** TraderX recommends the highest-ranked eligible instrument in each category but leaves
+   every active assignment unchanged until the owner explicitly approves an activation or
+   replacement.
+6. **Given** an owner configures a repeat interval and anchored start time, **When** that time is
+   reached in the configured account time zone, **Then** TraderX starts the research server-side
+   and calculates subsequent run times from that schedule even when no browser is open.
+7. **Given** a research agent identifies a possible improvement to the suitability method or its
+   weights, **When** it completes the current run, **Then** the recorded ranking still uses the
+   approved method version and the improvement remains a separate proposal until an authorized
+   human approves a new version.
 
 ---
 
@@ -380,7 +401,9 @@ through authenticated screens.
   and prop-firm risk.
 - **FR-023**: Market Suitability methods, inputs, weights, and versions MUST be reproducible,
   explainable, and auditable; authorized users MUST be able to configure permitted weights without
-  removing mandatory eligibility gates.
+  removing mandatory eligibility gates. Research agents MUST use the approved method version for
+  each run and MAY propose method or weight changes, but a proposal MUST NOT affect any ranking
+  until an authorized human approves a new version.
 - **FR-024**: The market research report MUST show the evaluated universe, exclusions, candidate
   ranks, supporting measures, data range and freshness, methodology version, recommendation, and
   rationale.
@@ -397,6 +420,14 @@ through authenticated screens.
 - **FR-029**: Reactivation MUST locate prior knowledge, identify missing or stale data, refresh only
   required gaps where possible, assess strategy evidence staleness, and require current validation
   and human approval before live recommendations resume.
+- **FR-095**: Authorized users MUST be able to enable recurring agent-driven market-universe
+  research through the authenticated UI by choosing a repeat interval and an anchored start time.
+  TraderX MUST interpret the schedule in the configured account time zone, persist its enabled
+  state and next run time, and execute it server-side while the browser is closed. Each scheduled
+  run MUST pin and apply the currently approved method version and the complete eligibility,
+  volatility, liquidity, suitability, evidence, and audit rules independently. It MAY create an
+  activation, replacement, or future-method proposal, but MUST NOT change an active market or
+  research method without explicit authorized human approval.
 
 #### Research and Strategy Lifecycle
 
@@ -560,7 +591,9 @@ through authenticated screens.
   reason, and be eligible for reauthentication or MFA before taking effect.
 - **FR-092**: Every ordinary user and administrative workflow in this specification MUST be
   completable through the authenticated web interface without direct technical interfaces,
-  configuration files, or administrator-only operational tooling.
+  configuration files, or administrator-only operational tooling. A Command Center workspace tab
+  MUST be shown as available only when users can complete its core workflow end-to-end in that
+  interface; unfinished workflows MUST NOT appear as clickable placeholders.
 - **FR-093**: Production external information MUST come from approved official connections or
   datasets; production behavior MUST NOT depend on web scraping.
 - **FR-094**: AI assistance MAY summarize, explain, identify anomalies, and propose hypotheses, but
@@ -581,6 +614,8 @@ through authenticated screens.
   specifications, data and execution status, active state, and permanent knowledge history.
 - **Market Research Run**: A versioned evaluation of a category's candidate universe, eligibility
   gates, volatility/liquidity evidence, suitability method, rankings, recommendation, and approval.
+- **Market Research Schedule**: An owner-configured recurring interval, anchored start time,
+  account time zone, enabled state, next run time, and history of the research jobs it triggered.
 - **Strategy**: A named trading hypothesis associated with an instrument and one or more immutable
   versions.
 - **Strategy Version**: An immutable deterministic rule set with lifecycle status, ancestry,

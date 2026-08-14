@@ -25,13 +25,28 @@ def classify_evidence(
     data_gap: bool,
     max_age: timedelta = timedelta(days=90),
 ) -> RevalidationPlan:
-    if now - validated_at > max_age * 2:
+    age = now - validated_at
+    if age < timedelta(0):
+        return RevalidationPlan(
+            EvidenceFreshness.STALE,
+            ("REFRESH_DATA", "FULL_VALIDATION", "PAPER", "HUMAN_APPROVAL"),
+        )
+    if age >= max_age * 4:
         return RevalidationPlan(
             EvidenceFreshness.LEGACY, ("FULL_RESEARCH", "BACKTEST", "PAPER", "HUMAN_APPROVAL")
         )
-    if data_gap or now - validated_at > max_age:
+    if age >= max_age * 2:
+        return RevalidationPlan(
+            EvidenceFreshness.STALE,
+            ("REFRESH_DATA", "FULL_VALIDATION", "PAPER", "HUMAN_APPROVAL"),
+        )
+    if data_gap or age >= max_age:
         return RevalidationPlan(
             EvidenceFreshness.REVALIDATION_REQUIRED,
-            ("REFRESH_DATA", "SELECTIVE_VALIDATION", "HUMAN_APPROVAL"),
+            (
+                "REFRESH_MISSING_INTERVALS" if data_gap else "REFRESH_DATA",
+                "SELECTIVE_VALIDATION",
+                "HUMAN_APPROVAL",
+            ),
         )
     return RevalidationPlan(EvidenceFreshness.CURRENT, ())

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import JSON, DateTime, ForeignKey, String
+from sqlalchemy import JSON, DateTime, ForeignKey, LargeBinary, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from traderx.shared.db import Base, FinancialDecimal, IdentifiedMixin
@@ -42,6 +42,10 @@ class JournalAttachment(IdentifiedMixin, Base):
     artifact_ref: Mapped[str] = mapped_column(String(1024), nullable=False)
     checksum: Mapped[str] = mapped_column(String(64), nullable=False)
     classification: Mapped[str] = mapped_column(String(64), nullable=False)
+    original_name: Mapped[str] = mapped_column(String(512), nullable=False)
+    media_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    content: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    uploaded_by: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
     uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 

@@ -13,7 +13,12 @@ def claim_pending(session: Session, limit: int = 100) -> list[OutboxEvent]:
     statement = (
         select(OutboxEvent)
         .where(OutboxEvent.state == OutboxState.PENDING)
-        .order_by(OutboxEvent.created_at)
+        .order_by(
+            OutboxEvent.aggregate_type,
+            OutboxEvent.aggregate_id,
+            OutboxEvent.aggregate_version,
+            OutboxEvent.created_at,
+        )
         .with_for_update(skip_locked=True)
         .limit(limit)
     )

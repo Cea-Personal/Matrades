@@ -102,3 +102,14 @@ class BootstrapState(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     owner_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
     initialized_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AuthenticationThrottle(IdentifiedMixin, Base):
+    """Pseudonymous, bounded login-abuse state shared by API instances."""
+
+    __tablename__ = "authentication_throttles"
+
+    key_digest: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    window_started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    failure_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -62,36 +62,37 @@ allowlist inside TraderX. Connection testing fails if the configured use cannot 
 
 ### MetaTrader 5 Terminal-Bridge Profile
 
-The MT5 adapter communicates only with a registered bridge over mutually authenticated HTTPS. The
-bridge is co-located with one provisioned MT5 terminal and owns that terminal's investor/read-only
-password. TraderX sends no order intent and never persists or returns the MT5 password.
+TraderX V1 uses the native `TraderXReadOnlyBridge.mq5` Expert Advisor. It is attached by the user to
+one MT5 terminal/account and makes outbound HTTPS requests to TraderX; TraderX does not host a
+generic MT5 socket/REST bridge and does not connect inbound to the terminal. The investor password
+is entered only into MT5 and is never requested, persisted, or returned by TraderX.
 
-The bridge must expose only these read operations to the TraderX adapter:
+An authorized owner first records the exact MT5 login and broker server. TraderX issues a
+single-use, 24-hour enrollment code for one agent identity. The EA exchanges that code for a
+random agent credential; both are retained by TraderX only as digests, rotation invalidates the
+prior credential, and UI/API responses never return an active agent credential.
+
+The EA may send only these read-only snapshot sections:
 
 ```text
-get_health_and_terminal_state()
-get_account_snapshot()
-get_open_positions()
-get_deals(overlapping_time_range)
-list_instruments()
-get_instrument_spec(provider_symbol)
-get_quote(provider_symbol)  # optional
+terminal/account identity and health
+account balance, equity, currency, and terminal version
+open positions
+overlapping immutable deal history
+instrument metadata and contract specifications
 ```
 
-Internally, the bridge may use only terminal lifecycle/diagnostic APIs, `terminal_info`,
-`account_info`, `positions_get`, `history_deals_get`, `symbols_get`, `symbol_info`, and optional
-`symbol_info_tick`. It MUST NOT invoke `order_send`, `order_check`, `order_calc_margin`,
-`order_calc_profit`, `symbol_select`, scripts, EAs, or any other state-changing terminal function.
-Every response proves the configured login/server, terminal connectivity, and `trade_allowed =
-false` for account and terminal. A `None`/missing MT5 result, account mismatch, disconnect,
-trading-enabled flag, non-fresh response, or incomplete snapshot is a failed observation, never an
-empty portfolio.
+The EA source contains no order creation, check, modification, cancellation, closure, or terminal
+state-changing call. Every enrollment and snapshot proves the configured login/server, terminal
+connectivity, investor authorization, and disabled trading. Account mismatch, disconnect,
+trading-enabled state, expired/invalid credential, stale response, or incomplete snapshot is a
+failed observation, never an empty portfolio.
 
 There is no MT5 transaction cursor assumption. Reconciliation polls one terminal/account at a time,
 upserts positions by terminal ticket/identifier, and deduplicates deal history by immutable deal
 ticket plus account/server over an overlapping window. It retains source/observation time and runs
-periodic fuller lookbacks. The bridge validates its narrow contract and denied API surface in CI;
-the core adapter validates mTLS identity, response schema, freshness, and account binding.
+periodic fuller lookbacks. Static and contract tests validate the EA's narrow denied capability
+surface, enrollment identity, HTTPS-only transport, schema, freshness, and account binding.
 
 ### Reconciliation
 
@@ -175,5 +176,5 @@ Every adapter MUST pass contract tests for:
 - canonical instrument alias/specification mapping;
 - incremental historical synchronization without overwriting evidence; and
 - absence of callable real-money order methods in broker implementations; and
-- MT5 bridge mTLS identity, investor-password/trading-disabled checks, rejected null responses,
+- MT5 native-EA enrollment identity, investor-mode/trading-disabled checks, rejected null responses,
   account/server match, overlapping-deal reconciliation, and denied terminal API surface.

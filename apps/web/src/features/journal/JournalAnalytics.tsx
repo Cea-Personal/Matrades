@@ -1,3 +1,10 @@
-export function JournalAnalytics() {
-  return <section aria-labelledby="journal-analytics"><h2 id="journal-analytics">Performance learning</h2><p>Compare financial and R outcomes by instrument, regime, behavior, risk, and version; create research proposals only.</p></section>;
+"use client";
+
+import { useState } from "react";
+
+export type AnalyticsEvidence = { dimension: string; entry_count: number; groups: Record<string, { count: number; net_pnl: string; r: string }> };
+
+export function JournalAnalytics({ analytics, dimension, selectedCount, busy, onDimension, onPropose }: { analytics?: AnalyticsEvidence; dimension: string; selectedCount: number; busy: boolean; onDimension: (value: string) => void; onPropose: (hypothesis: string) => Promise<void> }) {
+  const [hypothesis, setHypothesis] = useState("");
+  return <section aria-labelledby="journal-analytics"><h3 id="journal-analytics">Performance learning</h3><p>Financial and R outcomes can be grouped without changing source evidence. Proposals return to research only.</p><label>Compare by<select onChange={(event) => onDimension(event.target.value)} value={dimension}><option value="instrument">Instrument</option><option value="asset_class">Asset class</option><option value="source_type">Trade type</option><option value="strategy_version">Strategy version</option><option value="time">Month</option><option value="direction">Direction</option><option value="risk">Risk band</option><option value="regime">Regime</option><option value="entry_quality">Entry quality</option><option value="behavior">Behavior</option></select></label>{analytics ? <div className="evidence-table"><div className="evidence-row evidence-header"><span>Group</span><span>Trades</span><span>Net P&amp;L</span><span>Total R</span></div>{Object.entries(analytics.groups).map(([name, values]) => <div className="evidence-row" key={name}><strong>{name}</strong><span>{values.count}</span><span>{values.net_pnl}</span><span>{values.r}</span></div>)}</div> : null}<div className="setup-form"><label>Evidence-linked research hypothesis<textarea onChange={(event) => setHypothesis(event.target.value)} placeholder="What should be tested next?" value={hypothesis} /></label><button disabled={busy || selectedCount === 0 || hypothesis.length < 8} onClick={() => onPropose(hypothesis)} type="button">Create proposal from {selectedCount} selected entr{selectedCount === 1 ? "y" : "ies"}</button></div></section>;
 }

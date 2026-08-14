@@ -110,7 +110,9 @@ def test_recovery_code_reset_requires_fresh_totp_enrollment() -> None:
             headers=password_headers,
             json={"code": code},
         )
-        reset_token, reset_view = PasswordRecoveryManager("development-only-change-me").issue(utc_now())
+        reset_token, reset_view = PasswordRecoveryManager("development-only-change-me").issue(
+            utc_now()
+        )
         session = factory()
         try:
             owner = session.query(User).filter_by(email="owner@example.com").one()
@@ -147,7 +149,9 @@ def test_recovery_code_reset_requires_fresh_totp_enrollment() -> None:
         assert new_password.status_code == 200
         assert new_password.json()["status"] == "MFA_ENROLLMENT_REQUIRED"
 
-        new_password_headers = {"Cookie": f"{SESSION_COOKIE}={new_password.cookies[SESSION_COOKIE]}"}
+        new_password_headers = {
+            "Cookie": f"{SESSION_COOKIE}={new_password.cookies[SESSION_COOKIE]}"
+        }
         fresh_enrollment = client.post("/api/v1/auth/mfa/enroll", headers=new_password_headers)
         fresh_code = pyotp.parse_uri(fresh_enrollment.json()["provisioning_uri"]).now()
         fresh_verification = client.post(
@@ -167,11 +171,14 @@ def test_recovery_code_reset_requires_fresh_totp_enrollment() -> None:
         )
         assert recovered.status_code == 200
         assert recovered.json()["status"] == "MFA_ENROLLMENT_REQUIRED"
-        assert client.post(
-            "/api/v1/auth/mfa/recovery",
-            headers={"Cookie": f"{SESSION_COOKIE}={recovered.cookies[SESSION_COOKIE]}"},
-            json={"recovery_code": recovery_code},
-        ).status_code == 401
+        assert (
+            client.post(
+                "/api/v1/auth/mfa/recovery",
+                headers={"Cookie": f"{SESSION_COOKIE}={recovered.cookies[SESSION_COOKIE]}"},
+                json={"recovery_code": recovery_code},
+            ).status_code
+            == 401
+        )
     finally:
         app.dependency_overrides.clear()
         engine.dispose()

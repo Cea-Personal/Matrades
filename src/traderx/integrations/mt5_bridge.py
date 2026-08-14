@@ -50,7 +50,10 @@ class Mt5BridgeAdapter:
         self._identity = identity
         self._client = httpx.Client(
             base_url=identity.bridge_url,
-            headers={"Authorization": f"Bearer {bridge_client_secret}", "Accept": "application/json"},
+            headers={
+                "Authorization": f"Bearer {bridge_client_secret}",
+                "Accept": "application/json",
+            },
             timeout=timeout,
             transport=transport,
         )
@@ -87,7 +90,9 @@ class Mt5BridgeAdapter:
 
     def list_instruments(self, account_ref: str) -> list[dict[str, object]]:
         self._assert_account_ref(account_ref)
-        return self._required_records(self._get_json("/v1/instruments"), "items", fallback_list=True)
+        return self._required_records(
+            self._get_json("/v1/instruments"), "items", fallback_list=True
+        )
 
     def get_instrument_spec(self, account_ref: str, provider_symbol: str) -> dict[str, object]:
         if not provider_symbol:

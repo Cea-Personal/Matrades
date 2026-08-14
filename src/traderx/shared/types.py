@@ -85,6 +85,11 @@ class AuthenticationError(DomainError):
     status_code = 401
 
 
+class AuthenticationRateLimited(DomainError):
+    code = "authentication_rate_limited"
+    status_code = 429
+
+
 class BootstrapUnavailable(DomainError):
     code = "bootstrap_unavailable"
     status_code = 409

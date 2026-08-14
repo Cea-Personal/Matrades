@@ -1,13 +1,13 @@
 """Decommission non-MT5 broker integrations without removing audit evidence.
 
-Revision ID: 0015_mt5_only_broker_integrations
+Revision ID: 0015_mt5_only_integrations
 Revises: 0014_managed_mt5_bridge_agents
 """
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0015_mt5_only_broker_integrations"
+revision = "0015_mt5_only_integrations"
 down_revision = "0014_managed_mt5_bridge_agents"
 branch_labels = None
 depends_on = None
@@ -31,4 +31,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    raise RuntimeError("decommissioned broker credentials and account evidence must remain fail-closed")
+    raise RuntimeError(
+        "decommissioned broker credentials and account evidence must remain fail-closed"
+    )

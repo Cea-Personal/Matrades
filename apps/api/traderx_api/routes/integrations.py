@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from traderx.accounts.model import AccountStatus, TradingAccount
+from traderx.audit.model import AuditEvent
 from traderx.identity.authorization import Actor, Role, require_role
 from traderx.integrations.broker_model import BrokerIntegrationProfile, BrokerProvider
 from traderx.integrations.broker_service import (
@@ -25,10 +26,25 @@ from traderx.integrations.broker_service import (
     sync_selected_broker_account,
     test_broker_integration,
 )
+from traderx.integrations.crypto import SecretBox
 from traderx.integrations.model import Integration
+from traderx.integrations.registry import approved_providers
+from traderx.integrations.service import (
+    create_non_broker_integration,
+    integration_management_payload,
+    rotate_integration_credentials,
+    transition_persisted_integration,
+)
 from traderx.jobs.model import BackgroundJob, JobState
-from traderx.shared.types import AuthenticationError, InvalidTransition
+from traderx.shared.config import get_settings
+from traderx.shared.types import (
+    AuthenticationError,
+    ConcurrentModification,
+    InvalidTransition,
+    utc_now,
+)
 from traderx_api.dependencies import get_database_session
+from traderx_api.middleware.context import correlation_id
 from traderx_api.routes.identity import AuthenticationContext, authenticated_context
 
 router = APIRouter(prefix="/integrations", tags=["Integrations"])
@@ -72,6 +88,29 @@ class Mt5BridgeSnapshotCommand(BaseModel):
     instruments: list[dict[str, object]] = Field(default_factory=list)
 
 
+class IntegrationStateCommand(BaseModel):
+    enabled: bool
+    reason: str = Field(min_length=8, max_length=2000)
+
+
+class NonBrokerIntegrationCommand(BaseModel):
+    provider: str = Field(min_length=1, max_length=128)
+    name: str = Field(min_length=1, max_length=128)
+    configuration: dict[str, object] = Field(default_factory=dict)
+    credentials: dict[str, object] = Field(default_factory=dict)
+    capabilities: set[str] = Field(default_factory=lambda: {"NOTIFICATION_SEND"})
+    official_source: bool = True
+
+
+class CredentialRotationCommand(BaseModel):
+    credentials: dict[str, object]
+
+
+class IntegrationLifecycleCommand(BaseModel):
+    action: str = Field(pattern=r"^(ENABLE|DISABLE|RECONNECT)$")
+    reason: str = Field(min_length=8, max_length=2000)
+
+
 def _actor(context: AuthenticationContext) -> Actor:
     return Actor(
         role=Role(context.user.role), assurance=context.session.assurance, id=context.user.id
@@ -94,6 +133,17 @@ def _mt5_integration_or_404(
         or (integration.state == "REMOVED" and not include_removed)
     ):
         raise InvalidTransition("the requested integration does not exist")
+    return integration
+
+
+def _non_broker_integration_or_404(database: Session, integration_id: UUID) -> Integration:
+    integration = database.get(Integration, integration_id)
+    if (
+        integration is None
+        or integration.provider == BrokerProvider.MT5_TERMINAL_BRIDGE
+        or integration.state == "REMOVED"
+    ):
+        raise InvalidTransition("the requested non-broker integration does not exist")
     return integration
 
 
@@ -136,6 +186,40 @@ def _enrollment_payload(enrollment: ManagedMt5Enrollment) -> dict[str, object]:
     }
 
 
+def _record_lifecycle_audit(
+    database: Session,
+    context: AuthenticationContext,
+    integration: Integration,
+    *,
+    action: str,
+    outcome: str,
+    reason: str,
+    previous: dict[str, object] | None,
+    current: dict[str, object] | None,
+    idempotency_key: str,
+) -> None:
+    database.add(
+        AuditEvent.create(
+            actor_type="USER",
+            actor_id=context.user.id,
+            actor_role=context.user.role,
+            action=action,
+            outcome=outcome,
+            target_type="integration",
+            target_id=integration.id,
+            target_version=integration.version,
+            reason=reason,
+            assurance=context.session.assurance,
+            correlation_id=correlation_id.get() or "unavailable",
+            causation_id=None,
+            idempotency_key=idempotency_key,
+            previous_value=previous,
+            new_value=current,
+            occurred_at=utc_now(),
+        )
+    )
+
+
 @router.get("")
 def list_integrations(
     context: Annotated[AuthenticationContext, Depends(authenticated_context)],
@@ -155,6 +239,137 @@ def list_integrations(
     ]
 
 
+@router.get("/providers")
+def provider_catalog(
+    context: Annotated[AuthenticationContext, Depends(authenticated_context)],
+) -> dict[str, object]:
+    _require_manager(context)
+    return {
+        "items": [
+            {
+                "provider": definition.provider,
+                "category": definition.category,
+                "capabilities": sorted(definition.capabilities),
+                "official_source_required": definition.official_source_required,
+                "configuration_fields": sorted(definition.configuration_fields),
+                "credential_fields": sorted(definition.credential_fields),
+                "credentials_are_write_only": True,
+            }
+            for definition in approved_providers()
+        ]
+    }
+
+
+@router.get("/non-broker")
+def list_non_broker_integrations(
+    context: Annotated[AuthenticationContext, Depends(authenticated_context)],
+    database: DatabaseSession,
+) -> dict[str, object]:
+    _require_manager(context)
+    items = database.scalars(
+        select(Integration).where(
+            Integration.provider != BrokerProvider.MT5_TERMINAL_BRIDGE,
+            Integration.state != "REMOVED",
+        )
+    ).all()
+    return {"items": [integration_management_payload(database, item) for item in items]}
+
+
+@router.post("/non-broker", status_code=201)
+def configure_non_broker_integration(
+    payload: NonBrokerIntegrationCommand,
+    response: Response,
+    context: Annotated[AuthenticationContext, Depends(authenticated_context)],
+    database: DatabaseSession,
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=16, max_length=200),
+) -> dict[str, object]:
+    try:
+        integration = create_non_broker_integration(
+            database,
+            _require_manager(context),
+            provider=payload.provider,
+            name=payload.name,
+            configuration=payload.configuration,
+            credentials=payload.credentials,
+            requested_capabilities=payload.capabilities,
+            official_source=payload.official_source,
+            secret_box=SecretBox(get_settings().encryption_key_b64.get_secret_value()),
+            now=utc_now(),
+            correlation_id=correlation_id.get() or "unavailable",
+            idempotency_key=idempotency_key,
+        )
+    except ValueError as exc:
+        raise InvalidTransition(str(exc)) from exc
+    database.commit()
+    database.refresh(integration)
+    response.headers["ETag"] = _etag(integration)
+    return integration_management_payload(database, integration)
+
+
+@router.post("/{integration_id}/credentials/rotate")
+def rotate_non_broker_credentials(
+    integration_id: UUID,
+    payload: CredentialRotationCommand,
+    response: Response,
+    context: Annotated[AuthenticationContext, Depends(authenticated_context)],
+    database: DatabaseSession,
+    if_match: str = Header(alias="If-Match"),
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=16, max_length=200),
+) -> dict[str, object]:
+    integration = _non_broker_integration_or_404(database, integration_id)
+    if if_match != _etag(integration):
+        raise ConcurrentModification("the integration changed; refresh before rotating credentials")
+    try:
+        rotate_integration_credentials(
+            database,
+            _require_manager(context),
+            integration,
+            credentials=payload.credentials,
+            secret_box=SecretBox(get_settings().encryption_key_b64.get_secret_value()),
+            now=utc_now(),
+            correlation_id=correlation_id.get() or "unavailable",
+            idempotency_key=idempotency_key,
+        )
+    except ValueError as exc:
+        raise InvalidTransition(str(exc)) from exc
+    database.commit()
+    database.refresh(integration)
+    response.headers["ETag"] = _etag(integration)
+    return integration_management_payload(database, integration)
+
+
+@router.put("/{integration_id}/non-broker/state")
+def set_non_broker_integration_state(
+    integration_id: UUID,
+    payload: IntegrationLifecycleCommand,
+    response: Response,
+    context: Annotated[AuthenticationContext, Depends(authenticated_context)],
+    database: DatabaseSession,
+    if_match: str = Header(alias="If-Match"),
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=16, max_length=200),
+) -> dict[str, object]:
+    integration = _non_broker_integration_or_404(database, integration_id)
+    if if_match != _etag(integration):
+        raise ConcurrentModification("the integration changed; refresh before updating it")
+    try:
+        transition_persisted_integration(
+            database,
+            _require_manager(context),
+            integration,
+            action=payload.action,
+            reason=payload.reason,
+            now=utc_now(),
+            correlation_id=correlation_id.get() or "unavailable",
+            idempotency_key=idempotency_key,
+        )
+    except ValueError as exc:
+        raise InvalidTransition(str(exc)) from exc
+    database.commit()
+    database.refresh(integration)
+    response.headers["ETag"] = _etag(integration)
+    return integration_management_payload(database, integration)
+
+
 @router.post("/mt5/enrollments", status_code=201)
 def begin_mt5_enrollment(
     payload: BeginManagedMt5EnrollmentCommand,
@@ -169,6 +384,17 @@ def begin_mt5_enrollment(
         account_login=payload.account_login,
         server=payload.server,
         display_name=payload.display_name,
+    )
+    _record_lifecycle_audit(
+        database,
+        context,
+        enrollment.integration,
+        action="integration.configure",
+        outcome="SUCCEEDED",
+        reason="Configure managed read-only MT5 integration",
+        previous=None,
+        current={"state": enrollment.integration.state, "provider": enrollment.integration.provider},
+        idempotency_key=idempotency_key,
     )
     database.commit()
     database.refresh(enrollment.integration)
@@ -188,6 +414,17 @@ def renew_mt5_enrollment(
     enrollment = renew_managed_mt5_enrollment(
         database, _require_manager(context), _mt5_integration_or_404(database, integration_id)
     )
+    _record_lifecycle_audit(
+        database,
+        context,
+        enrollment.integration,
+        action="integration.credential.rotate",
+        outcome="SUCCEEDED",
+        reason="Renew the one-time MT5 bridge enrollment credential",
+        previous={"credential": "REVOKED"},
+        current={"credential": "WRITE_ONLY", "agent_id": str(enrollment.agent_id)},
+        idempotency_key=idempotency_key,
+    )
     database.commit()
     database.refresh(enrollment.integration)
     response.headers["ETag"] = _etag(enrollment.integration)
@@ -200,10 +437,22 @@ def remove_mt5_integration(
     integration_id: UUID,
     context: Annotated[AuthenticationContext, Depends(authenticated_context)],
     database: DatabaseSession,
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=16, max_length=200),
 ) -> dict[str, object]:
     integration = _mt5_integration_or_404(database, integration_id, include_removed=True)
     unbound_account_count = remove_managed_mt5_integration(
         database, _require_manager(context), integration
+    )
+    _record_lifecycle_audit(
+        database,
+        context,
+        integration,
+        action="integration.remove",
+        outcome="SUCCEEDED",
+        reason="Remove and revoke the managed MT5 account integration",
+        previous={"state": "ACTIVE_OR_DISABLED"},
+        current={"state": integration.state, "unbound_account_count": unbound_account_count},
+        idempotency_key=idempotency_key,
     )
     database.commit()
     return {
@@ -211,6 +460,53 @@ def remove_mt5_integration(
         "status": "REMOVED",
         "unbound_account_count": unbound_account_count,
     }
+
+
+@router.put("/{integration_id}/state")
+def set_integration_state(
+    integration_id: UUID,
+    payload: IntegrationStateCommand,
+    response: Response,
+    context: Annotated[AuthenticationContext, Depends(authenticated_context)],
+    database: DatabaseSession,
+    if_match: str = Header(alias="If-Match"),
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=16, max_length=200),
+) -> dict[str, object]:
+    integration = _mt5_integration_or_404(database, integration_id)
+    _require_manager(context)
+    if if_match != _etag(integration):
+        raise ConcurrentModification("the integration changed; refresh before updating it")
+    previous = integration.state
+    integration.state = "DEGRADED" if payload.enabled else "DISABLED"
+    for account in database.scalars(
+        select(TradingAccount).where(TradingAccount.broker_integration_id == integration.id)
+    ):
+        account.status = AccountStatus.BLOCKED
+    now = utc_now()
+    database.add(
+        AuditEvent.create(
+            actor_type="USER",
+            actor_id=context.user.id,
+            actor_role=context.user.role,
+            action="integration.enable" if payload.enabled else "integration.disable",
+            outcome="SUCCEEDED",
+            target_type="integration",
+            target_id=integration.id,
+            target_version=integration.version,
+            reason=payload.reason,
+            assurance=context.session.assurance,
+            correlation_id=correlation_id.get() or "unavailable",
+            causation_id=None,
+            idempotency_key=idempotency_key,
+            previous_value={"state": previous},
+            new_value={"state": integration.state},
+            occurred_at=now,
+        )
+    )
+    database.commit()
+    database.refresh(integration)
+    response.headers["ETag"] = _etag(integration)
+    return _integration_payload(database, integration)
 
 
 @router.post("/mt5/agents/{agent_id}/enroll")
@@ -277,6 +573,7 @@ def test_integration(
     response: Response,
     context: Annotated[AuthenticationContext, Depends(authenticated_context)],
     database: DatabaseSession,
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=16, max_length=200),
 ) -> dict[str, object]:
     integration = _mt5_integration_or_404(database, integration_id)
     _require_manager(context)
@@ -296,10 +593,32 @@ def test_integration(
         job.state = JobState.FAILED
         job.progress = {"stage": "FAILED"}
         job.error_code = "CONNECTION_TEST_FAILED"
+        _record_lifecycle_audit(
+            database,
+            context,
+            integration,
+            action="integration.test",
+            outcome="FAILED",
+            reason="Read-only integration verification failed",
+            previous={"state": integration.state},
+            current={"state": integration.state, "credential": "REDACTED"},
+            idempotency_key=idempotency_key,
+        )
         database.commit()
         raise
     job.state = JobState.COMPLETED
     job.progress = {"stage": "COMPLETED", "discovered_account_count": len(accounts)}
+    _record_lifecycle_audit(
+        database,
+        context,
+        integration,
+        action="integration.test",
+        outcome="SUCCEEDED",
+        reason="Read-only integration verification completed",
+        previous=None,
+        current={"discovered_account_count": len(accounts), "credential": "REDACTED"},
+        idempotency_key=idempotency_key,
+    )
     database.commit()
     database.refresh(job)
     response.headers["Location"] = f"/api/v1/jobs/{job.id}"

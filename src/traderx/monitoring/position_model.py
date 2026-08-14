@@ -27,6 +27,13 @@ class Position(IdentifiedMixin, Base):
     classification: Mapped[str] = mapped_column(
         String(24), default=PositionClassification.UNRESOLVED, nullable=False
     )
+    matched_recommendation_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("recommendations.id"), nullable=True
+    )
+    match_confidence: Mapped[object] = mapped_column(FinancialDecimal, nullable=False, default=0)
+    classification_reason: Mapped[str] = mapped_column(
+        String(128), nullable=False, default="UNRESOLVED"
+    )
     provider_revision: Mapped[int] = mapped_column(nullable=False, default=1)
     opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

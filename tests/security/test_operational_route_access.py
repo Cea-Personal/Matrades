@@ -65,7 +65,9 @@ def test_operational_routes_require_mfa_session_and_audit_denials() -> None:
             assert client.get(path).status_code == 401
 
         with factory() as database:
-            denials = database.scalars(select(AuditEvent).where(AuditEvent.outcome == "DENIED")).all()
+            denials = database.scalars(
+                select(AuditEvent).where(AuditEvent.outcome == "DENIED")
+            ).all()
             assert len(denials) == 10
             assert {event.actor_type for event in denials} == {"ANONYMOUS"}
 

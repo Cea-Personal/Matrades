@@ -69,7 +69,9 @@ def operator_context(
 ) -> AuthenticationContext:
     """Restrict ordinary product mutations to an MFA-assured owner or administrator."""
 
-    actor = Actor(role=Role(context.user.role), assurance=context.session.assurance, id=context.user.id)
+    actor = Actor(
+        role=Role(context.user.role), assurance=context.session.assurance, id=context.user.id
+    )
     try:
         require_role(actor, {Role.OWNER, Role.ADMIN}, "operational.write", require_mfa=True)
     except AuthorizationError as error:

@@ -26,6 +26,7 @@ from traderx_api.routes.operations import router as operations_router
 from traderx_api.routes.opportunities import router as opportunities_router
 from traderx_api.routes.paper import router as paper_router
 from traderx_api.routes.positions import router as positions_router
+from traderx_api.routes.strategies import research_router
 from traderx_api.routes.strategies import router as strategies_router
 from traderx_api.routes.validation import router as validation_router
 
@@ -54,6 +55,7 @@ app.include_router(accounts_router, prefix="/api/v1")
 app.include_router(dashboard_router, prefix="/api/v1")
 app.include_router(markets_router, prefix="/api/v1")
 app.include_router(strategies_router, prefix="/api/v1")
+app.include_router(research_router, prefix="/api/v1")
 app.include_router(validation_router, prefix="/api/v1")
 app.include_router(paper_router, prefix="/api/v1")
 app.include_router(approvals_router, prefix="/api/v1")

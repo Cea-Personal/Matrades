@@ -24,11 +24,18 @@ def evaluate_thesis(
     )
     if invalidated:
         return HealthGuidance("INVALIDATED", ("THESIS_INVALIDATION_REACHED",))
+    if favorable_distance <= 0:
+        return HealthGuidance("WATCH", ("THESIS_DISTANCE_UNVERIFIED",))
     distance = (
         (current_price - invalidation_price)
         if direction == "LONG"
         else (invalidation_price - current_price)
     )
-    if distance < favorable_distance / Decimal("2"):
+    strength = distance / favorable_distance
+    if strength < Decimal("0.25"):
         return HealthGuidance("WEAKENING", ("NEAR_INVALIDATION",))
+    if strength < Decimal("0.75"):
+        return HealthGuidance("WATCH", ("THESIS_BUFFER_NARROWING",))
+    if strength >= Decimal("1.5"):
+        return HealthGuidance("STRONG", ("THESIS_FAVORABLY_EXTENDED",))
     return HealthGuidance("HEALTHY", ())

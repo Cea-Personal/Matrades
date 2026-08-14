@@ -16,6 +16,7 @@ config = context.config
 if config.config_file_name:
     fileConfig(config.config_file_name)
 
+
 def database_url_from_environment() -> str:
     """Inject the Docker-managed password without logging or exporting the secret."""
     raw_url = getenv("TRADERX_DATABASE_URL", config.get_main_option("sqlalchemy.url"))

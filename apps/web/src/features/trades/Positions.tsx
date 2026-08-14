@@ -1,3 +1,12 @@
-export function Positions() {
-  return <section aria-labelledby="positions"><h2 id="positions">Detected manual positions</h2><p>Positions are imported from the broker in read-only mode and classified as recommended or discretionary.</p></section>;
+"use client";
+
+import { useState } from "react";
+
+export type PositionEvidence = { id: string; provider_position_id: string; symbol: string; direction: string; volume: string; open_risk: string; classification: string; matched_recommendation_id?: string; match_confidence: string; classification_reason: string; opened_at: string; closed_at?: string; etag: string };
+
+export function Positions({ positions, selectedId, busy, onSelect, onRefresh, onCorrect }: { positions: PositionEvidence[]; selectedId: string; busy: boolean; onSelect: (id: string) => void; onRefresh: () => Promise<void>; onCorrect: (position: PositionEvidence, classification: string, reason: string) => Promise<void> }) {
+  const [classification, setClassification] = useState("DISCRETIONARY");
+  const [reason, setReason] = useState("");
+  const selected = positions.find((position) => position.id === selectedId);
+  return <section aria-labelledby="positions"><h3 id="positions">Detected manual positions</h3><p>Positions come from the complete MT5 read-only snapshot. TraderX never creates, changes, or closes them.</p><button disabled={busy} onClick={onRefresh} type="button">{busy ? "Refreshing…" : "Refresh from MT5"}</button>{positions.length ? <div className="candidate-list">{positions.map((position) => <article className="candidate-card candidate-eligible" key={position.id}><header><div><span>{position.closed_at ? "CLOSED" : "OPEN"}</span><h4>{position.symbol} · {position.direction}</h4></div><button aria-pressed={selectedId === position.id} className="secondary-button" onClick={() => onSelect(position.id)} type="button">Monitor</button></header><dl><div><dt>Volume</dt><dd>{position.volume}</dd></div><div><dt>Open risk</dt><dd>{position.open_risk}</dd></div><div><dt>Classification</dt><dd>{position.classification}</dd></div><div><dt>Match confidence</dt><dd>{position.match_confidence}</dd></div></dl></article>)}</div> : <p className="workspace-notice">No broker position is present in the latest verified snapshot.</p>}{selected ? <div className="setup-form"><h4>Correct classification</h4><label>Classification<select onChange={(event) => setClassification(event.target.value)} value={classification}><option value="DISCRETIONARY">Discretionary</option><option disabled={!selected.matched_recommendation_id} value="RECOMMENDED">Recommended (requires an existing match)</option><option value="UNRESOLVED">Unresolved</option></select></label><label>Reason<textarea onChange={(event) => setReason(event.target.value)} value={reason} /></label><button disabled={busy || reason.length < 8} onClick={() => onCorrect(selected, classification, reason)} type="button">Record audited correction</button></div> : null}</section>;
 }

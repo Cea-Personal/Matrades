@@ -36,7 +36,16 @@ function valueOrPending(value: string | undefined): string {
 }
 
 export function CommandCenter({ dashboard, onAccountChanged }: { dashboard: Dashboard; onAccountChanged: () => Promise<void> }) {
-  const { account, metrics, onboarding, risk, active_markets, opportunities, critical_alerts, integration_health } = dashboard;
+  const {
+    account,
+    metrics,
+    onboarding,
+    risk,
+    active_markets = [],
+    opportunities = [],
+    critical_alerts = [],
+    integration_health = []
+  } = dashboard;
   const stateClass = risk.state.toLowerCase();
   const steps: Array<[string, boolean]> = [
     ["Account identity", onboarding.account_configured],
@@ -80,8 +89,11 @@ export function CommandCenter({ dashboard, onAccountChanged }: { dashboard: Dash
         <article><span>Integration health</span><strong>{integration_health.length}</strong><small>{integration_health.length ? integration_health.map((integration) => `${integration.name}: ${integration.status}`).join(" · ") : "No account connection recorded"}</small></article>
       </section>
 
-      {!readyForMarkets ? <AccountRiskSetup account={account} onAccountChanged={onAccountChanged} /> : null}
-      <CommandCenterWorkspace account={account} key={readyForMarkets ? "markets" : "account-connection"} onAccountChanged={onAccountChanged} startAtMarkets={readyForMarkets} />
+      {!readyForMarkets ? (
+        <AccountRiskSetup account={account} onAccountChanged={onAccountChanged} />
+      ) : (
+        <CommandCenterWorkspace account={account} onAccountChanged={onAccountChanged} startAtMarkets />
+      )}
     </section>
   );
 }

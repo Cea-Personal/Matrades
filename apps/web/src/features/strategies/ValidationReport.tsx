@@ -1,3 +1,9 @@
-export function ValidationReport({ state = "PENDING" }: { state?: string }) {
-  return <section aria-labelledby="validation-report"><h2 id="validation-report">Validation evidence</h2><p>Status: {state}. Out-of-sample, robustness, tail-risk, and portfolio evidence are all required.</p></section>;
+import type { BacktestEvidence } from "./ResearchBacktest";
+
+export type ValidationEvidence = { id: string; state: string; manifest_hash: string; seed: number; evidence: Record<string, { state?: string; [key: string]: unknown } | string[]> };
+
+export function ValidationReport({ backtest, validation, busy, onRunValidation }: { backtest?: BacktestEvidence; validation?: ValidationEvidence; busy: boolean; onRunValidation: () => Promise<void> }) {
+  const evidence = validation?.evidence;
+  const reasons = evidence?.reason_codes;
+  return <section aria-labelledby="validation-report"><h3 id="validation-report">Validation evidence</h3><p>Out-of-sample, walk-forward, stability, tail-risk, and shared-account portfolio checks must pass together.</p><button disabled={!backtest || busy} onClick={onRunValidation} type="button">{busy ? "Validating…" : "Run required validation"}</button>{validation ? <><p className="validation-outcome"><strong>Overall: {validation.state}</strong> · deterministic seed {validation.seed}</p>{Array.isArray(reasons) && reasons.length ? <p className="workspace-notice"><strong>Gate reasons:</strong> {reasons.join(" · ")}</p> : null}<div className="validation-grid">{["out_of_sample", "walk_forward", "parameter_stability", "monte_carlo", "portfolio"].map((key) => { const item = evidence?.[key]; return <article key={key}><span>{key.replaceAll("_", " ")}</span><strong>{Array.isArray(item) ? "RECORDED" : item?.state ?? "UNKNOWN"}</strong>{!Array.isArray(item) ? <details><summary>Evidence</summary><pre>{JSON.stringify(item, null, 2)}</pre></details> : null}</article>; })}</div><p><strong>Validation manifest:</strong> <code>{validation.manifest_hash}</code></p></> : <p className="workspace-notice">Run a successful backtest before validation becomes available.</p>}</section>;
 }

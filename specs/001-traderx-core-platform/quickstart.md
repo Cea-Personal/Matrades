@@ -46,7 +46,7 @@ Expected outcomes:
 docker compose -f deploy/compose.yaml build
 docker compose -f deploy/compose.yaml up -d postgres redis
 docker compose -f deploy/compose.yaml run --rm migrate
-docker compose -f deploy/compose.yaml up -d web api worker-monitoring worker-data worker-research worker-notifications scheduler
+docker compose -f deploy/compose.yaml up -d web api worker-monitoring worker-research worker-notifications scheduler
 docker compose -f deploy/compose.yaml ps
 ```
 
@@ -247,10 +247,10 @@ Expected outcomes:
 ## 12. Validate Resilience and Recovery
 
 ```bash
-uv run pytest tests/integration/test_outbox_redelivery.py
-uv run pytest tests/integration/test_worker_crash_recovery.py
+uv run pytest tests/integration/test_transactional_outbox.py
+uv run pytest tests/integration/test_job_runtime.py tests/integration/test_job_operations.py
 uv run pytest tests/integration/test_backup_restore.py
-uv run pytest tests/e2e/test_browser_closed_jobs_continue.py
+npm --prefix apps/web run test:e2e -- system_operations.spec.ts
 ```
 
 Expected outcomes:

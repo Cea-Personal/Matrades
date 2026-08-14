@@ -39,15 +39,18 @@ int OnInit()
    g_api_url=TrimTrailingSlash(TraderXApiUrl);
    g_agent_id=AgentId;
    g_state_file="TraderXReadOnlyBridge-"+g_agent_id+".dat";
-   if(!LoadState())
+   // A newly supplied one-time code always wins over a previously saved
+   // credential. This makes renewal recover from an invalidated local token
+   // without asking the trader to find and delete an MT5 sandbox file.
+   if(StringLen(EnrollmentCode)>=32)
      {
-      if(StringLen(EnrollmentCode)<32)
-        {
-         Print("Paste the one-time enrollment code from TraderX Command Center into EA inputs.");
-         return(INIT_PARAMETERS_INCORRECT);
-        }
       if(!Enroll())
-        return(INIT_FAILED);
+         return(INIT_FAILED);
+     }
+   else if(!LoadState())
+     {
+      Print("Paste the one-time enrollment code from TraderX Command Center into EA inputs.");
+      return(INIT_PARAMETERS_INCORRECT);
      }
    EventSetTimer(PollSeconds);
    SendSnapshot();
@@ -158,6 +161,8 @@ string PositionsJson()
               "\"volume\":\""+DoubleToString(PositionGetDouble(POSITION_VOLUME),2)+"\","+
               "\"price_open\":\""+DoubleToString(PositionGetDouble(POSITION_PRICE_OPEN),Digits())+"\","+
               "\"price_current\":\""+DoubleToString(PositionGetDouble(POSITION_PRICE_CURRENT),Digits())+"\","+
+              "\"stop_loss\":\""+DoubleToString(PositionGetDouble(POSITION_SL),Digits())+"\","+
+              "\"take_profit\":\""+DoubleToString(PositionGetDouble(POSITION_TP),Digits())+"\","+
               "\"profit\":\""+DoubleToString(PositionGetDouble(POSITION_PROFIT),2)+"\","+
               "\"time_msc\":\""+IntegerToString(PositionGetInteger(POSITION_TIME_MSC))+"\"}";
      }
@@ -191,19 +196,66 @@ string DealsJson()
 string InstrumentsJson()
   {
    string result="[";
-   int total=SymbolsTotal(false);
+   // Read the terminal's visible broker universe. Historical reads are evidence-only and
+   // never select a symbol, alter Market Watch, or invoke a trading operation.
+   int total=SymbolsTotal(true);
    for(int index=0;index<total;index++)
      {
-      string symbol=SymbolName(index,false);
+      string symbol=SymbolName(index,true);
       if(StringLen(symbol)==0)
          continue;
+      int digits=(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS);
       if(StringLen(result)>1)
          result+=",";
       result+="{\"symbol\":\""+JsonString(symbol)+"\","+
-              "\"digits\":"+IntegerToString((int)SymbolInfoInteger(symbol,SYMBOL_DIGITS))+","+
+              "\"description\":\""+JsonString(SymbolInfoString(symbol,SYMBOL_DESCRIPTION))+"\","+
+              "\"path\":\""+JsonString(SymbolInfoString(symbol,SYMBOL_PATH))+"\","+
+              "\"currency_base\":\""+JsonString(SymbolInfoString(symbol,SYMBOL_CURRENCY_BASE))+"\","+
+              "\"currency_profit\":\""+JsonString(SymbolInfoString(symbol,SYMBOL_CURRENCY_PROFIT))+"\","+
+              "\"digits\":"+IntegerToString(digits)+","+
+              "\"trade_mode\":"+IntegerToString((int)SymbolInfoInteger(symbol,SYMBOL_TRADE_MODE))+","+
+              "\"bid\":\""+DoubleToString(SymbolInfoDouble(symbol,SYMBOL_BID),digits)+"\","+
+              "\"ask\":\""+DoubleToString(SymbolInfoDouble(symbol,SYMBOL_ASK),digits)+"\","+
+              "\"contract_size\":\""+DoubleToString(SymbolInfoDouble(symbol,SYMBOL_TRADE_CONTRACT_SIZE),2)+"\","+
+              "\"tick_size\":\""+DoubleToString(SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE),digits)+"\","+
+              "\"tick_value\":\""+DoubleToString(SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_VALUE),8)+"\","+
               "\"volume_min\":\""+DoubleToString(SymbolInfoDouble(symbol,SYMBOL_VOLUME_MIN),2)+"\","+
               "\"volume_max\":\""+DoubleToString(SymbolInfoDouble(symbol,SYMBOL_VOLUME_MAX),2)+"\","+
-              "\"volume_step\":\""+DoubleToString(SymbolInfoDouble(symbol,SYMBOL_VOLUME_STEP),2)+"\"}";
+              "\"volume_step\":\""+DoubleToString(SymbolInfoDouble(symbol,SYMBOL_VOLUME_STEP),2)+"\","+
+              "\"closes\":"+CloseSeriesJson(symbol,digits)+","+
+              "\"tick_volumes\":"+TickVolumeSeriesJson(symbol)+"}";
+     }
+   return(result+"]");
+  }
+
+string CloseSeriesJson(const string symbol,const int digits)
+  {
+   double values[];
+   int copied=CopyClose(symbol,PERIOD_H1,1,400,values);
+   if(copied<400)
+      return("[]");
+   string result="[";
+   for(int index=0;index<copied;index++)
+     {
+      if(index>0)
+         result+=",";
+      result+="\""+DoubleToString(values[index],digits)+"\"";
+     }
+   return(result+"]");
+  }
+
+string TickVolumeSeriesJson(const string symbol)
+  {
+   long values[];
+   int copied=CopyTickVolume(symbol,PERIOD_H1,1,400,values);
+   if(copied<400)
+      return("[]");
+   string result="[";
+   for(int index=0;index<copied;index++)
+     {
+      if(index>0)
+         result+=",";
+      result+=IntegerToString(values[index]);
      }
    return(result+"]");
   }

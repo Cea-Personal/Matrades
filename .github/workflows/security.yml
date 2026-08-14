@@ -1,0 +1,42 @@
+name: Security gates
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-and-static-analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: uv sync --all-groups --frozen
+      - run: uvx pip-audit
+      - run: uvx bandit -r src apps/api apps/worker -x tests
+      - run: npm ci
+        working-directory: apps/web
+      - run: npm audit --omit=dev --audit-level=high
+        working-directory: apps/web
+
+  baseline-dynamic-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --all-groups --frozen
+      - name: Start isolated API target
+        run: uv run uvicorn traderx_api.main:app --app-dir apps/api --host 127.0.0.1 --port 8000 &
+      - uses: zaproxy/action-baseline@v0.15.0
+        with:
+          target: http://127.0.0.1:8000/api/v1/openapi.json
+          rules_file_name: deploy/security/zap-baseline.conf
+          fail_action: true

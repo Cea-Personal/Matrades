@@ -146,7 +146,8 @@ def test_managed_mt5_enrollment_accepts_outbound_read_only_evidence_without_brid
         assert received.json() == {"status": "ACCEPTED"}
 
         discovered = client.post(
-            f"/api/v1/integrations/{created.json()['id']}/test", headers=headers
+            f"/api/v1/integrations/{created.json()['id']}/test",
+            headers={**headers, "Idempotency-Key": "managed-mt5-test-request-0001"},
         )
         assert discovered.status_code == 202
         accounts = client.get(
@@ -155,7 +156,10 @@ def test_managed_mt5_enrollment_accepts_outbound_read_only_evidence_without_brid
         assert accounts.status_code == 200
         assert accounts.json()[0]["provider_account_id"] == "123456"
 
-        removed = client.delete(f"/api/v1/integrations/{created.json()['id']}", headers=headers)
+        removed = client.delete(
+            f"/api/v1/integrations/{created.json()['id']}",
+            headers={**headers, "Idempotency-Key": "managed-mt5-remove-request-0001"},
+        )
         assert removed.status_code == 200
         assert removed.json()["status"] == "REMOVED"
         assert removed.json()["unbound_account_count"] == 0

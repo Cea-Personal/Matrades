@@ -9,6 +9,9 @@ test("unauthenticated visitors see the TraderX authentication entry routes", asy
 });
 
 test("authentication flows have deep-linkable pages without operational content", async ({ page }) => {
+  await page.route("**/api/v1/auth/bootstrap-status", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ bootstrap_available: false }) });
+  });
   await page.goto("/sign-in");
   await expect(page.getByRole("form", { name: "TraderX sign in" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Reset your password" })).toHaveAttribute("href", "/password-reset");
@@ -16,7 +19,7 @@ test("authentication flows have deep-linkable pages without operational content"
   await page.goto("/password-reset");
   await expect(page.getByRole("form", { name: "Request password reset" })).toBeVisible();
   await expect(page.getByRole("form", { name: "Complete password reset" })).toBeVisible();
-  await expect(page.getByText("Command Center")).not.toBeVisible();
+  await expect(page.getByRole("heading", { name: "Command Center" })).not.toBeVisible();
 });
 
 test("first-owner signup presents a complete, usable form", async ({ page }) => {

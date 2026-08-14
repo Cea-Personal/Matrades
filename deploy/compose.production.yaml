@@ -1,16 +1,156 @@
+x-app-hardening: &app-hardening
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=64m
+  user: "10001:10001"
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  restart: unless-stopped
+
+x-worker-resources: &worker-resources
+  resources:
+    limits:
+      cpus: "1.0"
+      memory: 1G
+    reservations:
+      memory: 256M
+
+x-production-environment: &production-environment
+  TRADERX_ENVIRONMENT: production
+  TRADERX_SESSION_PEPPER_FILE: /run/secrets/session_pepper
+  TRADERX_ENCRYPTION_KEY_B64_FILE: /run/secrets/encryption_key_b64
+
+x-application-secrets: &application-secrets
+  - postgres_password
+  - session_pepper
+  - encryption_key_b64
+
 services:
+  migrate:
+    extends: { file: compose.yaml, service: migrate }
+    <<: *app-hardening
+    restart: "no"
+    environment: *production-environment
+    secrets: *application-secrets
+    deploy: *worker-resources
+
   api:
     extends: { file: compose.yaml, service: api }
-    read_only: true
-    tmpfs: [/tmp]
-    user: "10001:10001"
-    security_opt: [no-new-privileges:true]
-    deploy: { resources: { limits: { cpus: "1.0", memory: 1G } } }
+    <<: *app-hardening
+    environment: *production-environment
+    secrets: *application-secrets
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 1G }
+        reservations: { memory: 256M }
+
+  worker-monitoring:
+    extends: { file: compose.yaml, service: worker-monitoring }
+    <<: *app-hardening
+    environment: *production-environment
+    secrets: *application-secrets
+    deploy: *worker-resources
+
+  worker-research:
+    extends: { file: compose.yaml, service: worker-research }
+    <<: *app-hardening
+    environment: *production-environment
+    secrets: *application-secrets
+    deploy: *worker-resources
+
+  worker-notifications:
+    extends: { file: compose.yaml, service: worker-notifications }
+    <<: *app-hardening
+    environment: *production-environment
+    secrets: *application-secrets
+    deploy: *worker-resources
+
+  scheduler:
+    extends: { file: compose.yaml, service: scheduler }
+    <<: *app-hardening
+    environment: *production-environment
+    secrets: *application-secrets
+    deploy: *worker-resources
+
   web:
     extends: { file: compose.yaml, service: web }
+    <<: *app-hardening
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3000/"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits: { cpus: "0.75", memory: 768M }
+        reservations: { memory: 192M }
+
+  proxy:
+    extends: { file: compose.yaml, service: proxy }
     read_only: true
-    user: "10001:10001"
     security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    tmpfs: [/tmp:rw,noexec,nosuid,size=32m]
+    volumes:
+      - ./proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 256M }
+
   postgres:
     extends: { file: compose.yaml, service: postgres }
-    deploy: { resources: { limits: { cpus: "1.0", memory: 2G } } }
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+      - /var/run/postgresql:rw,nosuid,size=16m
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 2G }
+        reservations: { memory: 512M }
+
+  redis:
+    extends: { file: compose.yaml, service: redis }
+    read_only: true
+    tmpfs: [/tmp:rw,noexec,nosuid,size=32m]
+    volumes:
+      - redis_data:/data
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 512M }
+
+volumes:
+  postgres_data:
+  redis_data:
+  caddy_data:
+  caddy_config:
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password
+  session_pepper:
+    external: true
+  encryption_key_b64:
+    external: true
+
+networks:
+  ingress:
+  private:
+    internal: true

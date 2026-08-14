@@ -22,10 +22,14 @@ class PaperRun(IdentifiedMixin, Base):
     strategy_version_id: Mapped[UUID] = mapped_column(
         ForeignKey("strategy_versions.id"), nullable=False
     )
+    validation_run_id: Mapped[UUID] = mapped_column(
+        ForeignKey("validation_runs.id"), nullable=False
+    )
     state: Mapped[str] = mapped_column(String(32), default=PaperRunState.RUNNING, nullable=False)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     metrics: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
+    criteria: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
     evidence_hash: Mapped[str] = mapped_column(String(64), nullable=False)
 
 
@@ -43,5 +47,9 @@ class PaperTradeReference(IdentifiedMixin, Base):
     paper_run_id: Mapped[UUID] = mapped_column(ForeignKey("paper_runs.id"), nullable=False)
     entry: Mapped[object] = mapped_column(FinancialDecimal, nullable=False)
     exit: Mapped[object | None] = mapped_column(FinancialDecimal, nullable=True)
+    stop: Mapped[object] = mapped_column(FinancialDecimal, nullable=False)
+    target: Mapped[object] = mapped_column(FinancialDecimal, nullable=False)
     units: Mapped[object] = mapped_column(FinancialDecimal, nullable=False)
+    direction: Mapped[str] = mapped_column(String(8), nullable=False)
+    pnl: Mapped[object] = mapped_column(FinancialDecimal, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

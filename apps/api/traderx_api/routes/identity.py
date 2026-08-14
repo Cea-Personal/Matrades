@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import secrets
 from dataclasses import asdict, dataclass
@@ -25,6 +26,7 @@ from traderx.identity.authentication import (
 from traderx.identity.mfa import TotpManager
 from traderx.identity.model import (
     AssistedMfaResetRequest,
+    AuthenticationThrottle,
     AuthSession,
     BootstrapState,
     MfaFactor,
@@ -38,6 +40,7 @@ from traderx.integrations.crypto import EncryptedSecret, SecretBox
 from traderx.shared.config import get_settings
 from traderx.shared.types import (
     AuthenticationError,
+    AuthenticationRateLimited,
     AuthorizationError,
     BootstrapUnavailable,
     utc_now,
@@ -121,6 +124,56 @@ def _session_manager() -> SessionManager:
     )
 
 
+def _login_throttle_key(email: str, client_host: str) -> str:
+    pepper = get_settings().session_pepper.get_secret_value()
+    return hashlib.sha256(f"{pepper}:{email.lower()}:{client_host}".encode()).hexdigest()
+
+
+def _as_utc_datetime(value: datetime) -> datetime:
+    return value if value.tzinfo else value.replace(tzinfo=UTC)
+
+
+def _check_login_throttle(database: Session, key_digest: str, now: datetime) -> None:
+    throttle = database.scalar(
+        select(AuthenticationThrottle).where(AuthenticationThrottle.key_digest == key_digest)
+    )
+    if throttle and throttle.locked_until and _as_utc_datetime(throttle.locked_until) > now:
+        raise AuthenticationRateLimited("too many authentication attempts; try again later")
+
+
+def _record_failed_login(database: Session, key_digest: str, now: datetime) -> bool:
+    throttle = database.scalar(
+        select(AuthenticationThrottle).where(AuthenticationThrottle.key_digest == key_digest)
+    )
+    window = timedelta(minutes=15)
+    if throttle is None:
+        throttle = AuthenticationThrottle(
+            key_digest=key_digest,
+            window_started_at=now,
+            failure_count=1,
+            locked_until=None,
+        )
+        database.add(throttle)
+    elif now - _as_utc_datetime(throttle.window_started_at) > window:
+        throttle.window_started_at = now
+        throttle.failure_count = 1
+        throttle.locked_until = None
+    else:
+        throttle.failure_count += 1
+    if throttle.failure_count >= 5:
+        throttle.locked_until = now + window
+    database.commit()
+    return throttle.locked_until is not None
+
+
+def _clear_login_throttle(database: Session, key_digest: str) -> None:
+    throttle = database.scalar(
+        select(AuthenticationThrottle).where(AuthenticationThrottle.key_digest == key_digest)
+    )
+    if throttle is not None:
+        database.delete(throttle)
+
+
 def _secret_box() -> SecretBox:
     return SecretBox(get_settings().encryption_key_b64.get_secret_value())
 
@@ -198,9 +251,7 @@ def _as_utc(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
-def authenticated_context(
-    request: Request, database: DatabaseSession
-) -> AuthenticationContext:
+def authenticated_context(request: Request, database: DatabaseSession) -> AuthenticationContext:
     context = _active_context(request, database)
     if context.session.assurance != "MFA":
         raise AuthenticationError("multi-factor verification is required")
@@ -288,7 +339,9 @@ def _confirmed_factor(database: Session, user_id: UUID) -> MfaFactor | None:
     )
 
 
-def _redeem_recovery_code(database: Session, user_id: UUID, supplied_code: str, now: datetime) -> None:
+def _redeem_recovery_code(
+    database: Session, user_id: UUID, supplied_code: str, now: datetime
+) -> None:
     for recovery_code in database.scalars(
         select(RecoveryCode).where(
             RecoveryCode.user_id == user_id,
@@ -454,15 +507,25 @@ def complete_password_reset(
 @router.post("/login", response_model=LoginResult)
 def login(
     payload: LoginRequest,
+    request: Request,
     response: Response,
     database: DatabaseSession,
 ) -> LoginResult:
+    client_host = request.client.host if request.client else "unknown"
+    throttle_key = _login_throttle_key(str(payload.email), client_host)
+    now = utc_now()
+    _check_login_throttle(database, throttle_key, now)
     user = database.scalar(select(User).where(User.email == str(payload.email).lower()))
     if user is None or user.status != UserStatus.ACTIVE:
+        if _record_failed_login(database, throttle_key, now):
+            raise AuthenticationRateLimited("too many authentication attempts; try again later")
         raise AuthenticationError("invalid email or password")
     if not verify_password(payload.password, user.password_hash):
+        if _record_failed_login(database, throttle_key, now):
+            raise AuthenticationRateLimited("too many authentication attempts; try again later")
         raise AuthenticationError("invalid email or password")
 
+    _clear_login_throttle(database, throttle_key)
     token = _issue_session(database, user.id, assurance="PASSWORD")
     confirmed_factor = _confirmed_factor(database, user.id)
     database.commit()

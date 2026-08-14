@@ -100,7 +100,10 @@ def test_authoritative_snapshot_and_checkpoint_commit_together() -> None:
         session.commit()
 
         assert snapshot.quality == "VERIFIED"
-        assert session.scalar(select(AccountSnapshot).where(AccountSnapshot.id == snapshot.id)) is not None
+        assert (
+            session.scalar(select(AccountSnapshot).where(AccountSnapshot.id == snapshot.id))
+            is not None
+        )
         checkpoint = session.scalar(select(BrokerReconciliationCheckpoint))
         assert checkpoint is not None
         assert checkpoint.account_snapshot_id == snapshot.id
@@ -129,7 +132,9 @@ def test_failed_reconciliation_keeps_last_good_snapshot_and_blocks_account() -> 
         )
         session.commit()
 
-        snapshots = session.scalars(select(AccountSnapshot).order_by(AccountSnapshot.created_at)).all()
+        snapshots = session.scalars(
+            select(AccountSnapshot).order_by(AccountSnapshot.created_at)
+        ).all()
         assert [snapshot.id for snapshot in snapshots] == [good.id]
         assert session.get(TradingAccount, account.id).status == AccountStatus.BLOCKED
         assert session.get(Integration, integration.id).state == "DEGRADED"

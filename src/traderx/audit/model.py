@@ -2,17 +2,23 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import JSON, DateTime, String
+from sqlalchemy import JSON, DateTime, String, event
 from sqlalchemy.orm import Mapped, mapped_column
 
 from traderx.shared.db import Base, IdentifiedMixin
 
 
 def _integrity_hash(values: dict[str, object]) -> str:
-    return hashlib.sha256(json.dumps(values, sort_keys=True, default=str).encode()).hexdigest()
+    def canonical(value: object) -> str:
+        if isinstance(value, datetime):
+            aware = value if value.tzinfo else value.replace(tzinfo=UTC)
+            return aware.astimezone(UTC).isoformat()
+        return str(value)
+
+    return hashlib.sha256(json.dumps(values, sort_keys=True, default=canonical).encode()).hexdigest()
 
 
 class AuditEvent(IdentifiedMixin, Base):
@@ -40,3 +46,34 @@ class AuditEvent(IdentifiedMixin, Base):
     def create(cls, **kwargs: object) -> AuditEvent:
         hashed = _integrity_hash(kwargs)
         return cls(integrity_hash=hashed, **kwargs)  # type: ignore[arg-type]
+
+    def verify_integrity(self) -> bool:
+        values = {
+            "actor_type": self.actor_type,
+            "actor_id": self.actor_id,
+            "actor_role": self.actor_role,
+            "action": self.action,
+            "outcome": self.outcome,
+            "target_type": self.target_type,
+            "target_id": self.target_id,
+            "target_version": self.target_version,
+            "reason": self.reason,
+            "assurance": self.assurance,
+            "correlation_id": self.correlation_id,
+            "causation_id": self.causation_id,
+            "idempotency_key": self.idempotency_key,
+            "previous_value": self.previous_value,
+            "new_value": self.new_value,
+            "occurred_at": self.occurred_at,
+        }
+        return self.integrity_hash == _integrity_hash(values)
+
+
+@event.listens_for(AuditEvent, "before_update")
+def _reject_audit_update(*_: object) -> None:
+    raise ValueError("audit events are append-only")
+
+
+@event.listens_for(AuditEvent, "before_delete")
+def _reject_audit_delete(*_: object) -> None:
+    raise ValueError("audit events are append-only")

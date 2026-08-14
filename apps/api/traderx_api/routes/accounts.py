@@ -101,7 +101,9 @@ def _account_or_404(database: Session, account_id: UUID) -> TradingAccount:
 
 def _require_current_version(account: TradingAccount, if_match: str) -> None:
     if if_match != _etag(account):
-        raise ConcurrentModification("the account changed; refresh the Command Center and try again")
+        raise ConcurrentModification(
+            "the account changed; refresh the Command Center and try again"
+        )
 
 
 @router.get("")

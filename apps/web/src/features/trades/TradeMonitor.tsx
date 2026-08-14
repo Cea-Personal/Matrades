@@ -1,3 +1,5 @@
-export function TradeMonitor() {
-  return <section aria-labelledby="trade-monitor"><h2 id="trade-monitor">Frozen trade thesis</h2><p>The original rationale is immutable; a separate append-only health timeline provides guidance.</p></section>;
+export type ThesisEvidence = { position_id: string; immutable: true; thesis?: { id: string; frozen_evidence: Record<string, unknown>; created_at: string }; observations: Array<{ id: string; health: string; evidence: Record<string, unknown>; observed_at: string }> };
+
+export function TradeMonitor({ thesis }: { thesis?: ThesisEvidence }) {
+  return <section aria-labelledby="trade-monitor"><h3 id="trade-monitor">Frozen trade thesis</h3><p>The original recommendation evidence is immutable. New market checks append health observations without rewriting it.</p>{thesis?.thesis ? <><details open><summary>Original rationale · frozen {new Date(thesis.thesis.created_at).toLocaleString()}</summary><pre>{JSON.stringify(thesis.thesis.frozen_evidence, null, 2)}</pre></details><ol className="timeline">{thesis.observations.map((observation) => <li key={observation.id}><strong>{observation.health}</strong><span>{new Date(observation.observed_at).toLocaleString()}</span><small>{JSON.stringify(observation.evidence)}</small></li>)}</ol></> : <p className="workspace-notice">{thesis ? "This discretionary position has no recommendation thesis. It is still included in shared account risk." : "Select a detected position to inspect its monitoring evidence."}</p>}</section>;
 }

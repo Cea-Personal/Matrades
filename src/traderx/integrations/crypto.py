@@ -14,6 +14,8 @@ class EncryptedSecret:
     nonce_b64: str
     key_version: str
     aad: str
+    wrapped_dek_b64: str | None = None
+    dek_nonce_b64: str | None = None
 
 
 class SecretBox:
@@ -24,19 +26,31 @@ class SecretBox:
         self._key_version = key_version
 
     def encrypt(self, value: dict[str, object], *, aad: str) -> EncryptedSecret:
+        data_key = AESGCM.generate_key(bit_length=256)
         nonce = os.urandom(12)
-        encrypted = AESGCM(self._key).encrypt(
+        encrypted = AESGCM(data_key).encrypt(
             nonce, json.dumps(value, sort_keys=True).encode(), aad.encode()
         )
+        dek_nonce = os.urandom(12)
+        wrapped_dek = AESGCM(self._key).encrypt(dek_nonce, data_key, aad.encode())
         return EncryptedSecret(
             ciphertext_b64=base64.urlsafe_b64encode(encrypted).decode(),
             nonce_b64=base64.urlsafe_b64encode(nonce).decode(),
             key_version=self._key_version,
             aad=aad,
+            wrapped_dek_b64=base64.urlsafe_b64encode(wrapped_dek).decode(),
+            dek_nonce_b64=base64.urlsafe_b64encode(dek_nonce).decode(),
         )
 
     def decrypt(self, secret: EncryptedSecret) -> dict[str, object]:
-        plaintext = AESGCM(self._key).decrypt(
+        data_key = self._key
+        if secret.wrapped_dek_b64 is not None and secret.dek_nonce_b64 is not None:
+            data_key = AESGCM(self._key).decrypt(
+                base64.urlsafe_b64decode(secret.dek_nonce_b64),
+                base64.urlsafe_b64decode(secret.wrapped_dek_b64),
+                secret.aad.encode(),
+            )
+        plaintext = AESGCM(data_key).decrypt(
             base64.urlsafe_b64decode(secret.nonce_b64),
             base64.urlsafe_b64decode(secret.ciphertext_b64),
             secret.aad.encode(),

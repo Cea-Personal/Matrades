@@ -11,6 +11,7 @@ class StrategyDefinition:
     regime: str
     timeframes: tuple[str, ...]
     conditions: tuple[dict[str, object], ...]
+    direction: str = "BOTH"
     filters: tuple[dict[str, object], ...] = ()
     stop: dict[str, object] = field(default_factory=dict)
     target: dict[str, object] = field(default_factory=dict)

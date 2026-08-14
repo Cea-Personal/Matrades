@@ -23,6 +23,18 @@ def database_url_from_environment() -> str:
     return make_url(raw_url).set(password=password).render_as_string(hide_password=False)
 
 
+def secret_from_environment(name: str, default: str) -> str:
+    """Load a startup secret from an environment value or a Docker secret file."""
+
+    secret_file = getenv(f"{name}_FILE")
+    if secret_file:
+        value = Path(secret_file).read_text(encoding="utf-8").strip()
+        if not value:
+            raise ValueError(f"{name}_FILE must contain a value")
+        return value
+    return getenv(name, default)
+
+
 class Settings(BaseModel):
     """Non-secret runtime configuration; secrets are injected only at process startup."""
 
@@ -46,10 +58,13 @@ class Settings(BaseModel):
             database_url=database_url_from_environment(),
             redis_url=getenv("TRADERX_REDIS_URL", "redis://localhost:6379/0"),
             session_pepper=SecretStr(
-                getenv("TRADERX_SESSION_PEPPER", "development-only-change-me")
+                secret_from_environment("TRADERX_SESSION_PEPPER", "development-only-change-me")
             ),
             encryption_key_b64=SecretStr(
-                getenv("TRADERX_ENCRYPTION_KEY_B64", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+                secret_from_environment(
+                    "TRADERX_ENCRYPTION_KEY_B64",
+                    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                )
             ),
         )
 

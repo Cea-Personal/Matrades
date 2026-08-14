@@ -36,12 +36,11 @@ function messageFor(result: ApiProblem): string {
 }
 
 async function request(path: string, method: "GET" | "POST" | "PUT" | "DELETE", body?: object) {
+  const mutationHeaders = method === "GET" ? undefined : { "Idempotency-Key": crypto.randomUUID() };
   const response = await fetch(`/api/v1${path}`, {
     method,
     credentials: "same-origin",
-    headers: body
-      ? { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() }
-      : undefined,
+    headers: body ? { ...mutationHeaders, "Content-Type": "application/json" } : mutationHeaders,
     body: body ? JSON.stringify(body) : undefined
   });
   return { response, result: (await response.json().catch(() => ({}))) as ApiProblem };
@@ -208,6 +207,25 @@ export function Integrations({
     }
   }
 
+  async function setIntegrationEnabled(integration: Integration, enabled: boolean) {
+    setBusy(true);
+    setError(undefined);
+    setMessage(undefined);
+    try {
+      const response = await fetch(`/api/v1/integrations/${integration.id}/state`, {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", "If-Match": `"integration-${integration.version}"`, "Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({ enabled, reason: enabled ? "Reconnect this approved read-only MT5 integration" : "Temporarily disable this MT5 integration" })
+      });
+      const result = await response.json() as ApiProblem;
+      if (!response.ok) { setError(messageFor(result)); return; }
+      await Promise.all([loadIntegrations(), onAccountChanged()]);
+      setMessage(enabled ? "Integration enabled in verification-required state. Reconnect and verify the account snapshot." : "Integration disabled. Its account data is no longer authoritative and TraderX remains fail closed.");
+    } catch { setError("TraderX could not change the integration state."); }
+    finally { setBusy(false); }
+  }
+
   async function removeMt5Integration(integration: Integration) {
     setBusy(true);
     setError(undefined);
@@ -274,6 +292,7 @@ export function Integrations({
             <div className="integration-actions">
               {integration.status === "HEALTHY" ? <button disabled={busy} onClick={() => void testIntegration(integration)} type="button">Test & discover accounts</button> : null}<button className={integration.status === "HEALTHY" ? "secondary-button" : undefined} disabled={busy} onClick={() => void renewMt5Enrollment(integration)} type="button">{integration.status === "HEALTHY" ? "Reconnect MT5 bridge" : "Create setup code for this account"}</button>
               {account.broker_integration_id === integration.id ? <button className="secondary-button" disabled={busy} onClick={() => void verifyAccount(integration)} type="button">Verify account data</button> : null}
+              <button className="secondary-button" disabled={busy} onClick={() => void setIntegrationEnabled(integration, integration.status === "DISABLED")} type="button">{integration.status === "DISABLED" ? "Enable integration" : "Disable integration"}</button>
               {removeConfirmationId === integration.id ? <><button className="danger-button" disabled={busy} onClick={() => void removeMt5Integration(integration)} type="button">Confirm remove MT5 account {integration.mt5_account_login}</button><button className="secondary-button" disabled={busy} onClick={() => setRemoveConfirmationId(undefined)} type="button">Cancel</button></> : <button className="danger-button" disabled={busy} onClick={() => setRemoveConfirmationId(integration.id)} type="button">Remove this MT5 account</button>}
             </div>
             {removeConfirmationId === integration.id ? <p className="remove-integration-warning">Removing this account revokes its EA credential. If it is bound to TraderX, it will be unbound and TraderX will remain in LOCKDOWN until another verified account is connected.</p> : null}

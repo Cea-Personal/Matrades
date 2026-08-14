@@ -21,6 +21,8 @@ def validate_definition(definition: StrategyDefinition) -> None:
         raise ValueError(
             "strategy risk fraction must be greater than zero and no more than two percent"
         )
+    if definition.direction not in {"LONG", "SHORT", "BOTH"}:
+        raise ValueError("strategy direction must be LONG, SHORT, or BOTH")
     if not definition.stop or not definition.target or not definition.invalidation:
         raise ValueError("strategy requires stop, target, and invalidation definitions")
     for condition in definition.conditions:

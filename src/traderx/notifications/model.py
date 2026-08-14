@@ -32,6 +32,7 @@ class RoutedNotification(IdentifiedMixin, Base):
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
     channel: Mapped[str] = mapped_column(String(32), nullable=False)
     state: Mapped[str] = mapped_column(String(24), nullable=False, default="PENDING")
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class DeliveryAttempt(IdentifiedMixin, Base):

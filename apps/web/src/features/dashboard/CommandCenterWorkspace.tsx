@@ -1,29 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Integrations } from "@/features/integrations/Integrations";
-import { Journal } from "@/features/journal/Journal";
-import { JournalAnalytics } from "@/features/journal/JournalAnalytics";
-import { ActiveMarkets } from "@/features/markets/ActiveMarkets";
-import { InstrumentLibrary } from "@/features/markets/InstrumentLibrary";
-import { InstrumentReactivation } from "@/features/markets/InstrumentReactivation";
-import { MarketReplacement } from "@/features/markets/MarketReplacement";
-import { MarketResearchReport } from "@/features/markets/MarketResearchReport";
+import { JournalWorkspace } from "@/features/journal/JournalWorkspace";
+import { MarketsWorkspace } from "@/features/markets/MarketsWorkspace";
 import { Notifications } from "@/features/notifications/Notifications";
-import { OpportunityBoard } from "@/features/opportunities/OpportunityBoard";
-import { RecommendationPanel } from "@/features/opportunities/RecommendationPanel";
-import { ApprovalReview } from "@/features/paper/ApprovalReview";
-import { PaperTrading } from "@/features/paper/PaperTrading";
+import { OpportunitiesWorkspace } from "@/features/opportunities/OpportunitiesWorkspace";
+import { PaperWorkspace } from "@/features/paper/PaperWorkspace";
 import type { AccountSummary } from "@/features/risk/AccountRiskSetup";
-import { ResearchBacktest } from "@/features/strategies/ResearchBacktest";
-import { StrategyBuilder } from "@/features/strategies/StrategyBuilder";
-import { StrategyVersions } from "@/features/strategies/StrategyVersions";
-import { ValidationReport } from "@/features/strategies/ValidationReport";
+import { StrategiesWorkspace } from "@/features/strategies/StrategiesWorkspace";
 import { Jobs } from "@/features/system/Jobs";
 import { SystemControl } from "@/features/system/SystemControl";
-import { Positions } from "@/features/trades/Positions";
-import { TradeMonitor } from "@/features/trades/TradeMonitor";
+import { MonitoringWorkspace } from "@/features/trades/MonitoringWorkspace";
 
 type Workspace =
   | "integrations"
@@ -60,6 +49,14 @@ export function CommandCenterWorkspace({
   startAtMarkets?: boolean;
 }) {
   const [current, setCurrent] = useState<Workspace>(startAtMarkets ? "markets" : "integrations");
+  useEffect(() => {
+    const openWorkspace = (event: Event) => {
+      const requested = (event as CustomEvent<string>).detail;
+      if (workspaces.some((item) => item.id === requested)) setCurrent(requested as Workspace);
+    };
+    window.addEventListener("traderx:workspace", openWorkspace);
+    return () => window.removeEventListener("traderx:workspace", openWorkspace);
+  }, []);
   const currentWorkspace = workspaces.find((workspace) => workspace.id === current)!;
 
   return (
@@ -77,7 +74,10 @@ export function CommandCenterWorkspace({
             aria-pressed={current === workspace.id}
             className={current === workspace.id ? "active" : "secondary-button"}
             key={workspace.id}
-            onClick={() => setCurrent(workspace.id)}
+            onClick={() => {
+              setCurrent(workspace.id);
+              window.history.replaceState(null, "", `/command-center?workspace=${workspace.id}`);
+            }}
             type="button"
           >
             {workspace.label}
@@ -86,13 +86,13 @@ export function CommandCenterWorkspace({
       </nav>
       <div className="workspace-content">
         {current === "integrations" && (account ? <Integrations account={account} onAccountChanged={onAccountChanged} /> : <EmptyDataNotice area="Account connection" />)}
-        {current === "markets" && <><EmptyDataNotice area="Market research" /><InstrumentLibrary /><MarketResearchReport /><ActiveMarkets /><MarketReplacement /><InstrumentReactivation /></>}
-        {current === "strategies" && <><EmptyDataNotice area="Strategy research" /><StrategyBuilder /><StrategyVersions /><ResearchBacktest /><ValidationReport /></>}
-        {current === "paper" && <><EmptyDataNotice area="Paper trading" /><PaperTrading /><ApprovalReview /></>}
-        {current === "opportunities" && <><EmptyDataNotice area="Opportunity evaluation" /><OpportunityBoard /><RecommendationPanel /></>}
-        {current === "monitoring" && <><EmptyDataNotice area="Position monitoring" /><Positions /><TradeMonitor /></>}
-        {current === "journal" && <><EmptyDataNotice area="Trade journal" /><Journal /><JournalAnalytics /></>}
-        {current === "operations" && <><EmptyDataNotice area="Operations" /><Jobs /><Notifications /><SystemControl /></>}
+        {current === "markets" && <MarketsWorkspace />}
+        {current === "strategies" && <StrategiesWorkspace />}
+        {current === "paper" && <PaperWorkspace />}
+        {current === "opportunities" && <OpportunitiesWorkspace />}
+        {current === "monitoring" && <MonitoringWorkspace />}
+        {current === "journal" && <JournalWorkspace />}
+        {current === "operations" && <div className="governed-workspace"><Jobs /><Notifications /><SystemControl /></div>}
       </div>
     </section>
   );

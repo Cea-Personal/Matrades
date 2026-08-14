@@ -469,6 +469,11 @@ def sync_selected_broker_account(
             open_position_count=len(mt5_source.positions),
         )
         snapshot = commit_authoritative_snapshot(database, integration, account, truth)
+        # The bridge remains read-only; this only projects its complete snapshot
+        # into TraderX monitoring and never calls an MT5 trading method.
+        from traderx.monitoring.reconciliation import project_mt5_positions
+
+        project_mt5_positions(database, account, mt5_source.positions, mt5_source.deals)
     except (ValueError, InvalidTransition) as error:
         record_broker_failure(
             database,

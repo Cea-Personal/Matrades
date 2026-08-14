@@ -150,14 +150,20 @@ def record_broker_failure(
                 breaker_type="BROKER_ACCOUNT_TRUTH",
                 scope="INTEGRATION",
                 state=CircuitBreakerState.TRIPPED,
-                trigger_evidence={"integration_id": str(integration.id), "reason_code": reason_code},
+                trigger_evidence={
+                    "integration_id": str(integration.id),
+                    "reason_code": reason_code,
+                },
                 tripped_at=now,
                 reason=detail[:2000],
             )
         )
     else:
         existing.state = CircuitBreakerState.TRIPPED
-        existing.trigger_evidence = {"integration_id": str(integration.id), "reason_code": reason_code}
+        existing.trigger_evidence = {
+            "integration_id": str(integration.id),
+            "reason_code": reason_code,
+        }
         existing.tripped_at = now
         existing.reason = detail[:2000]
     database.flush()
@@ -184,19 +190,24 @@ def _project_verified_risk(
 
     if account.prop_profile_id is None or account.risk_policy_id is None:
         return
-    if database.scalar(
-        select(CircuitBreaker.id).where(
-            CircuitBreaker.account_id == account.id,
-            CircuitBreaker.state == CircuitBreakerState.TRIPPED,
+    if (
+        database.scalar(
+            select(CircuitBreaker.id).where(
+                CircuitBreaker.account_id == account.id,
+                CircuitBreaker.state == CircuitBreakerState.TRIPPED,
+            )
         )
-    ) is not None:
+        is not None
+    ):
         return
     prop = database.get(PropProfileVersion, account.prop_profile_id)
     policy = database.get(RiskPolicyVersion, account.risk_policy_id)
     if prop is None or policy is None:
         return
     realized_loss = max(Decimal("0"), -Decimal(str(snapshot.realized_pl)))
-    drawdown = max(Decimal("0"), Decimal(str(account.starting_balance)) - Decimal(str(snapshot.equity)))
+    drawdown = max(
+        Decimal("0"), Decimal(str(account.starting_balance)) - Decimal(str(snapshot.equity))
+    )
     result = project_risk(
         equity=Decimal(str(snapshot.equity)),
         daily_loss=realized_loss,

@@ -12,9 +12,11 @@ from traderx.shared.db import Base, IdentifiedMixin
 class Integration(IdentifiedMixin, Base):
     __tablename__ = "integrations"
     name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    category: Mapped[str] = mapped_column(String(48), nullable=False, default="BROKER_ACCOUNT_DATA")
     provider: Mapped[str] = mapped_column(String(128), nullable=False)
     state: Mapped[str] = mapped_column(String(24), nullable=False, default="DISABLED")
     capabilities: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    configuration: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
     official_source: Mapped[bool] = mapped_column(nullable=False, default=True)
 
 
