@@ -31,7 +31,9 @@ from traderx.integrations.model import Integration
 from traderx.integrations.registry import approved_providers
 from traderx.integrations.service import (
     create_non_broker_integration,
+    declare_integration_entitlement,
     integration_management_payload,
+    remove_non_broker_integration,
     rotate_integration_credentials,
     transition_persisted_integration,
 )
@@ -100,10 +102,19 @@ class NonBrokerIntegrationCommand(BaseModel):
     credentials: dict[str, object] = Field(default_factory=dict)
     capabilities: set[str] = Field(default_factory=lambda: {"NOTIFICATION_SEND"})
     official_source: bool = True
+    licensing_accepted: bool = False
+    retention_accepted: bool = False
+    reason: str = Field(default="Configure approved integration", min_length=8, max_length=2000)
 
 
 class CredentialRotationCommand(BaseModel):
     credentials: dict[str, object]
+
+
+class EntitlementDeclarationCommand(BaseModel):
+    confirmation: str = Field(pattern=r"^CONFIRM_ENTITLEMENT$")
+    evidence_reference: str = Field(min_length=4, max_length=256)
+    reason: str = Field(min_length=8, max_length=2000)
 
 
 class IntegrationLifecycleCommand(BaseModel):
@@ -254,6 +265,18 @@ def provider_catalog(
                 "configuration_fields": sorted(definition.configuration_fields),
                 "credential_fields": sorted(definition.credential_fields),
                 "credentials_are_write_only": True,
+                "catalogue_revision": definition.catalogue_revision,
+                "adapter_revision": definition.adapter_revision,
+                "lifecycle": definition.lifecycle,
+                "asset_categories": sorted(definition.asset_categories),
+                "venues": sorted(definition.venues),
+                "capability_semantics": dict(definition.capability_semantics),
+                "permitted_models": sorted(definition.permitted_models),
+                "licensing_notice": definition.licensing_notice,
+                "retention_posture": definition.retention_posture,
+                "credential_required": definition.credential_required,
+                "entitlement_required": definition.entitlement_required,
+                "verification_only": definition.verification_only,
             }
             for definition in approved_providers()
         ]
@@ -297,6 +320,9 @@ def configure_non_broker_integration(
             now=utc_now(),
             correlation_id=correlation_id.get() or "unavailable",
             idempotency_key=idempotency_key,
+            licensing_accepted=payload.licensing_accepted,
+            retention_accepted=payload.retention_accepted,
+            reason=payload.reason,
         )
     except ValueError as exc:
         raise InvalidTransition(str(exc)) from exc
@@ -326,6 +352,38 @@ def rotate_non_broker_credentials(
             integration,
             credentials=payload.credentials,
             secret_box=SecretBox(get_settings().encryption_key_b64.get_secret_value()),
+            now=utc_now(),
+            correlation_id=correlation_id.get() or "unavailable",
+            idempotency_key=idempotency_key,
+        )
+    except ValueError as exc:
+        raise InvalidTransition(str(exc)) from exc
+    database.commit()
+    database.refresh(integration)
+    response.headers["ETag"] = _etag(integration)
+    return integration_management_payload(database, integration)
+
+
+@router.put("/{integration_id}/entitlement")
+def declare_non_broker_entitlement(
+    integration_id: UUID,
+    payload: EntitlementDeclarationCommand,
+    response: Response,
+    context: Annotated[AuthenticationContext, Depends(authenticated_context)],
+    database: DatabaseSession,
+    if_match: str = Header(alias="If-Match"),
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=16, max_length=200),
+) -> dict[str, object]:
+    integration = _non_broker_integration_or_404(database, integration_id)
+    if if_match != _etag(integration):
+        raise ConcurrentModification("the integration changed; refresh before declaring entitlement")
+    try:
+        declare_integration_entitlement(
+            database,
+            _require_manager(context),
+            integration,
+            evidence_reference=payload.evidence_reference,
+            reason=payload.reason,
             now=utc_now(),
             correlation_id=correlation_id.get() or "unavailable",
             idempotency_key=idempotency_key,
@@ -438,7 +496,28 @@ def remove_mt5_integration(
     context: Annotated[AuthenticationContext, Depends(authenticated_context)],
     database: DatabaseSession,
     idempotency_key: str = Header(alias="Idempotency-Key", min_length=16, max_length=200),
+    if_match: str | None = Header(default=None, alias="If-Match"),
 ) -> dict[str, object]:
+    raw_integration = database.get(Integration, integration_id)
+    if raw_integration is None or raw_integration.state == "REMOVED":
+        raise InvalidTransition("the requested integration does not exist")
+    if raw_integration.provider != BrokerProvider.MT5_TERMINAL_BRIDGE:
+        if if_match != _etag(raw_integration):
+            raise ConcurrentModification("the integration changed; refresh before removing it")
+        try:
+            remove_non_broker_integration(
+                database,
+                _require_manager(context),
+                raw_integration,
+                reason="Remove reviewed provider integration",
+                now=utc_now(),
+                correlation_id=correlation_id.get() or "unavailable",
+                idempotency_key=idempotency_key,
+            )
+        except ValueError as exc:
+            raise InvalidTransition(str(exc)) from exc
+        database.commit()
+        return {"integration_id": str(raw_integration.id), "status": "REMOVED"}
     integration = _mt5_integration_or_404(database, integration_id, include_removed=True)
     unbound_account_count = remove_managed_mt5_integration(
         database, _require_manager(context), integration
@@ -575,8 +654,34 @@ def test_integration(
     database: DatabaseSession,
     idempotency_key: str = Header(alias="Idempotency-Key", min_length=16, max_length=200),
 ) -> dict[str, object]:
-    integration = _mt5_integration_or_404(database, integration_id)
+    raw_integration = database.get(Integration, integration_id)
+    if raw_integration is None or raw_integration.state == "REMOVED":
+        raise InvalidTransition("the requested integration does not exist")
     _require_manager(context)
+    if raw_integration.provider != BrokerProvider.MT5_TERMINAL_BRIDGE:
+        job = BackgroundJob(
+            job_type="PROVIDER_QUALIFICATION",
+            owner_id=context.user.id,
+            context={"integration_id": str(raw_integration.id)},
+            input_manifest={
+                "provider": raw_integration.provider,
+                "catalogue_revision": raw_integration.catalogue_revision,
+                "credential": "REDACTED",
+            },
+            state=JobState.QUEUED,
+            progress={"stage": "QUALIFICATION_QUEUED"},
+        )
+        database.add(job)
+        database.commit()
+        response.headers["Location"] = f"/api/v1/jobs/{job.id}"
+        return {
+            "id": str(job.id),
+            "type": job.job_type,
+            "state": job.state,
+            "provider": raw_integration.provider,
+            "credential": "REDACTED",
+        }
+    integration = _mt5_integration_or_404(database, integration_id)
     job = BackgroundJob(
         job_type="BROKER_CONNECTION_TEST",
         owner_id=context.user.id,

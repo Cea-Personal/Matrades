@@ -4,11 +4,22 @@ import json
 from datetime import UTC, datetime
 from uuid import UUID
 
+import httpx
 from celery import shared_task
 from sqlalchemy import func, select
 
 from traderx.integrations.broker_model import Mt5BridgeAgent
-from traderx.integrations.model import Integration, IntegrationHealthObservation
+from traderx.integrations.crypto import EncryptedSecret, SecretBox
+from traderx.integrations.health import provider_health_state
+from traderx.integrations.model import CredentialVersion, Integration, IntegrationHealthObservation
+from traderx.integrations.providers.anthropic_messages import AnthropicMessagesAdapter
+from traderx.integrations.providers.openai_responses import OpenAIResponsesAdapter
+from traderx.integrations.registry import approved_provider
+from traderx.jobs.model import BackgroundJob, JobState
+from traderx.market_data.providers.cboe_fx_spot import CboeFxSpotAdapter
+from traderx.market_data.providers.cme_group import CmeGroupAdapter
+from traderx.market_data.providers.coinbase_exchange import CoinbaseExchangeAdapter
+from traderx.market_data.providers.http import ProviderHttpTransport, ProviderTransportError
 from traderx.notifications.model import DeliveryAttempt, NotificationEvent, RoutedNotification
 from traderx.notifications.providers import (
     DeliveryProvider,
@@ -17,6 +28,7 @@ from traderx.notifications.providers import (
     WebInboxProvider,
 )
 from traderx.notifications.router import retryable, route_event
+from traderx.shared.config import get_settings
 from traderx.shared.types import utc_now
 from traderx.strategies.health import observe_live_strategy_health
 from traderx_worker.tasks.database import session_factory
@@ -102,6 +114,39 @@ def poll_health(self) -> dict[str, str]:  # type: ignore[no-untyped-def]
         for integration in database.scalars(
             select(Integration).where(Integration.state != "REMOVED")
         ):
+            if integration.provider != "MT5_TERMINAL_BRIDGE":
+                latest = database.scalar(
+                    select(IntegrationHealthObservation)
+                    .where(IntegrationHealthObservation.integration_id == integration.id)
+                    .order_by(IntegrationHealthObservation.observed_at.desc())
+                    .limit(1)
+                )
+                status, affected = provider_health_state(integration, latest, now=now)
+                database.add(
+                    IntegrationHealthObservation(
+                        integration_id=integration.id,
+                        status=status,
+                        evidence={
+                            "provider": integration.provider,
+                            "category": integration.category,
+                            "integration_state": integration.state,
+                            "entitlement_status": integration.entitlement_status,
+                            "catalogue_revision": integration.catalogue_revision,
+                            "credential_redacted": True,
+                        },
+                        observed_at=now,
+                        last_success_at=latest.last_success_at if latest else None,
+                        affected_capabilities=list(affected),
+                        current_error=(
+                            "ENTITLEMENT_VERIFICATION_REQUIRED"
+                            if approved_provider(integration.provider).entitlement_required
+                            and integration.entitlement_status != "VERIFIED"
+                            else None
+                        ),
+                    )
+                )
+                observed += 1
+                continue
             bridge = database.scalar(
                 select(Mt5BridgeAgent).where(Mt5BridgeAgent.integration_id == integration.id)
             )
@@ -131,6 +176,153 @@ def poll_health(self) -> dict[str, str]:  # type: ignore[no-untyped-def]
         "integrations_observed": str(observed),
         "strategies_observed": str(len(strategies)),
     }
+
+
+@shared_task(name="traderx.operations.qualify_provider", bind=True, acks_late=True)
+def qualify_provider(self, integration_id: str) -> dict[str, str]:  # type: ignore[no-untyped-def]
+    """Probe one reviewed provider and retain only redacted qualification evidence."""
+
+    with session_factory().begin() as database:
+        integration = database.get(Integration, UUID(integration_id))
+        if integration is None or integration.state == "REMOVED":
+            return {"integration_id": integration_id, "status": "MISSING"}
+        status, _reason = _qualify(database, integration, now=utc_now())
+    return {"integration_id": integration_id, "status": status}
+
+
+@shared_task(name="traderx.operations.run_queued_qualifications", bind=True, acks_late=True)
+def run_queued_qualifications(self) -> dict[str, object]:  # type: ignore[no-untyped-def]
+    """Claim durable UI-created qualification jobs without relying on the API process."""
+
+    completed: list[str] = []
+    with session_factory().begin() as database:
+        jobs = list(
+            database.scalars(
+                select(BackgroundJob)
+                .where(
+                    BackgroundJob.job_type == "PROVIDER_QUALIFICATION",
+                    BackgroundJob.state == JobState.QUEUED,
+                )
+                .order_by(BackgroundJob.created_at)
+                .limit(10)
+                .with_for_update(skip_locked=True)
+            )
+        )
+        for job in jobs:
+            job.transition(JobState.RUNNING)
+            job.started_at = utc_now()
+            job.attempt_count += 1
+            raw_id = job.context.get("integration_id")
+            try:
+                integration = database.get(Integration, UUID(str(raw_id)))
+            except (TypeError, ValueError):
+                integration = None
+            if integration is None or integration.state == "REMOVED":
+                job.transition(JobState.FAILED)
+                job.error_code = "INTEGRATION_NOT_AVAILABLE"
+                job.finished_at = utc_now()
+                continue
+            status, reason = _qualify(database, integration, now=utc_now())
+            job.progress = {"stage": "COMPLETED", "qualification_status": status}
+            job.error_code = reason
+            job.result_ref = f"/api/v1/integrations/non-broker"
+            job.transition(JobState.COMPLETED)
+            job.finished_at = utc_now()
+            completed.append(str(job.id))
+    return {"status": "COMPLETED", "jobs": completed}
+
+
+def _qualify(database, integration: Integration, *, now: datetime) -> tuple[str, str | None]:  # type: ignore[no-untyped-def]
+    definition = approved_provider(integration.provider)
+    credential = database.scalar(
+        select(CredentialVersion).where(
+            CredentialVersion.integration_id == integration.id,
+            CredentialVersion.active.is_(True),
+        )
+    )
+    reason: str | None = None
+    if definition.credential_required and credential is None:
+        reason = "CREDENTIAL_REQUIRED"
+    elif definition.entitlement_required and integration.entitlement_status not in {
+        "DECLARED",
+        "VERIFIED",
+    }:
+        reason = "ENTITLEMENT_EVIDENCE_REQUIRED"
+    else:
+        try:
+            credentials = _decrypt_credential(integration, credential)
+            _probe(integration, credentials)
+        except ProviderTransportError as error:
+            reason = f"PROVIDER_{error.kind}"
+        except (httpx.HTTPError, KeyError, TypeError, ValueError):
+            reason = "PROVIDER_QUALIFICATION_FAILED"
+    status = "HEALTHY" if reason is None else "DEGRADED"
+    integration.state = status
+    if status == "HEALTHY" and definition.entitlement_required:
+        integration.entitlement_status = "VERIFIED"
+    database.add(
+        IntegrationHealthObservation(
+            integration_id=integration.id,
+            status=status,
+            evidence={
+                "provider": integration.provider,
+                "category": integration.category,
+                "integration_state": status,
+                "entitlement_status": integration.entitlement_status,
+                "catalogue_revision": integration.catalogue_revision,
+                "adapter_revision": integration.adapter_revision,
+                "credential_redacted": True,
+                "probe": "LIVE_REVIEWED_ENDPOINT",
+                "capabilities": sorted(integration.capabilities),
+            },
+            observed_at=now,
+            last_success_at=now if status == "HEALTHY" else None,
+            current_error=reason,
+            affected_capabilities=list(integration.capabilities) if reason else [],
+        )
+    )
+    return status, reason
+
+
+def _decrypt_credential(
+    integration: Integration, credential: CredentialVersion | None
+) -> dict[str, object]:
+    if credential is None:
+        return {}
+    encrypted = EncryptedSecret(**json.loads(credential.encrypted_value))
+    return SecretBox(
+        get_settings().encryption_key_b64.get_secret_value(), key_version=credential.key_version
+    ).decrypt(encrypted)
+
+
+def _probe(integration: Integration, credentials: dict[str, object]) -> None:
+    definition = approved_provider(integration.provider)
+    token = None
+    if definition.credential_fields:
+        token = str(credentials[next(iter(sorted(definition.credential_fields)))])
+    if integration.provider in {"CME_GROUP", "CBOE_FX_SPOT", "COINBASE_EXCHANGE"}:
+        transport = ProviderHttpTransport(integration.provider, credential=token)
+        try:
+            if integration.provider == "CME_GROUP":
+                result = CmeGroupAdapter(transport, entitlement_verified=True).test_connection()
+            elif integration.provider == "CBOE_FX_SPOT":
+                result = CboeFxSpotAdapter(transport, entitlement_verified=True).test_connection()
+            else:
+                result = CoinbaseExchangeAdapter(transport).test_connection()
+        finally:
+            transport.close()
+    elif integration.provider in {"OPENAI_RESPONSES", "ANTHROPIC_MESSAGES"}:
+        assert token is not None
+        with httpx.Client(timeout=get_settings().provider_read_timeout_seconds) as client:
+            model = sorted(definition.permitted_models)[0]
+            if integration.provider == "OPENAI_RESPONSES":
+                result = OpenAIResponsesAdapter(token, client=client).test_connection(model)
+            else:
+                result = AnthropicMessagesAdapter(token, client=client).test_connection(model)
+    else:
+        raise ValueError("provider does not expose a reviewed qualification probe")
+    if not bool(result.get("healthy")):
+        raise ValueError("provider qualification did not report healthy")
 
 
 def _aware(value: datetime) -> datetime:

@@ -35,3 +35,19 @@ def test_native_mt5_ea_prefers_a_new_enrollment_code_over_stale_local_state() ->
     local_state_fallback = source.index("else if(!LoadState())")
     assert fresh_enrollment < local_state_fallback
     assert "if(!Enroll())" in source[fresh_enrollment:local_state_fallback]
+
+
+def test_native_mt5_ea_labels_extended_market_evidence_without_inventing_depth() -> None:
+    source = EA_SOURCE.read_text(encoding="utf-8")
+
+    assert "MqlRates" in source
+    assert "real_volume" in source
+    assert "tick_volume" in source
+    assert "depth_status" in source
+    assert "MarketBookGet(" in source
+    assert "UNAVAILABLE" in source
+    assert "observed_at" in source
+
+    # Broker evidence remains broker-specific and the EA never calls a write operation.
+    assert "BROKER_PROXY" in source
+    assert "OrderSend(" not in source

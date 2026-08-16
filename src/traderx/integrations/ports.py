@@ -1,8 +1,82 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
+from enum import StrEnum
 from typing import Protocol
+
+
+class ProviderErrorKind(StrEnum):
+    AUTHENTICATION = "AUTHENTICATION"
+    AUTHORIZATION = "AUTHORIZATION"
+    RATE_LIMIT = "RATE_LIMIT"
+    TRANSIENT = "TRANSIENT"
+    PERMANENT_INPUT = "PERMANENT_INPUT"
+    UNSUPPORTED = "UNSUPPORTED"
+    STALE = "STALE"
+    CONTRADICTORY = "CONTRADICTORY"
+    UNKNOWN = "UNKNOWN"
+
+
+class SourceSemantics(StrEnum):
+    AUTHORITATIVE = "AUTHORITATIVE"
+    ACTUAL = "ACTUAL"
+    BROKER_PROXY = "BROKER_PROXY"
+    UNAVAILABLE = "UNAVAILABLE"
+
+
+class MarketDataCapability(StrEnum):
+    INSTRUMENTS = "INSTRUMENTS"
+    QUOTES = "QUOTES"
+    TRADES = "TRADES"
+    CANDLES = "CANDLES"
+    TRADED_VOLUME = "TRADED_VOLUME"
+    OPEN_INTEREST = "OPEN_INTEREST"
+    TOP_OF_BOOK = "TOP_OF_BOOK"
+    ORDER_BOOK = "ORDER_BOOK"
+    SETTLEMENT = "SETTLEMENT"
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderObservation:
+    provider: str
+    provider_symbol: str
+    capability: str
+    semantics: SourceSemantics
+    observed_at: datetime | None
+    received_at: datetime
+    payload: dict[str, object]
+    venue: str | None = None
+    provider_event_id: str | None = None
+    sequence: str | None = None
+    revision: str | None = None
+    complete: bool = True
+    final: bool = True
+    quality_flags: tuple[str, ...] = ()
+    raw_reference: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class LlmAnalysisRequest:
+    provider: str
+    exact_model_id: str
+    prompt_template_version: str
+    output_schema_version: str
+    inference_policy_version: str
+    evidence: dict[str, object]
+    timeout_seconds: int = 180
+    store: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class LlmAnalysisResponse:
+    state: str
+    analysis: dict[str, object] | None
+    provider_request_id: str | None = None
+    usage: dict[str, int] = field(default_factory=dict)
+    retry_after_seconds: int | None = None
+    reason: str | None = None
 
 
 class BrokerReadPort(Protocol):
@@ -22,10 +96,28 @@ class BrokerReadPort(Protocol):
 
 
 class MarketDataPort(Protocol):
+    def test_connection(self) -> dict[str, object]: ...
+    def capabilities(self) -> dict[str, SourceSemantics]: ...
     def discover_instruments(self, category: str) -> list[dict[str, object]]: ...
     def get_historical_observations(
         self, provider_symbol: str, kind: str, interval: str, start: datetime, end: datetime
     ) -> list[dict[str, object]]: ...
+    def get_observations(
+        self,
+        provider_symbol: str,
+        capability: MarketDataCapability,
+        *,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        cursor: str | None = None,
+    ) -> list[ProviderObservation]: ...
+
+
+class LlmAnalysisPort(Protocol):
+    """Advisory-only analysis. Implementations expose no tools or financial authority."""
+
+    def test_connection(self, exact_model_id: str) -> dict[str, object]: ...
+    def analyze(self, request: LlmAnalysisRequest) -> LlmAnalysisResponse: ...
 
 
 class NotificationPort(Protocol):

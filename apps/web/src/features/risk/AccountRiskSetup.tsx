@@ -53,10 +53,12 @@ async function replace(path: string, body: object, etag: string) {
 
 export function AccountRiskSetup({
   account,
-  onAccountChanged
+  onAccountChanged,
+  operational = false
 }: {
   account: AccountSummary | null;
   onAccountChanged: () => Promise<void>;
+  operational?: boolean;
 }) {
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState<string>();
@@ -100,7 +102,7 @@ export function AccountRiskSetup({
         floating_loss_counts: form.get("floating-loss-counts") === "on",
         reset_timezone: form.get("reset-timezone"),
         reset_time: form.get("reset-time"),
-        reason: "Initial external loss-rule configuration"
+        reason: String(form.get("profile-reason") ?? "Initial external loss-rule configuration")
       }, account.etag);
       if (!response.ok) {
         setMessage(problemMessage(result));
@@ -130,7 +132,7 @@ export function AccountRiskSetup({
         minimum_prop_buffer: form.get("prop-buffer"),
         maximum_positions: Number(form.get("maximum-positions")),
         correlation_limit: form.get("correlation-limit"),
-        reason: "Initial internal risk-policy configuration"
+        reason: String(form.get("risk-reason") ?? "Initial internal risk-policy configuration")
       }, account.etag);
       if (!response.ok) {
         setMessage(problemMessage(result));
@@ -205,6 +207,28 @@ export function AccountRiskSetup({
         </form>
         {message ? <p className="status-message" data-tone="error" role="alert">{message}</p> : null}
       </section>
+    );
+  }
+
+  if (operational) {
+    return (
+      <div className="governed-workspace">
+        <section className="setup-card setup-complete" aria-labelledby="account-risk-current">
+          <p className="section-kicker">Authorized control plane</p>
+          <h3 id="account-risk-current">Account and risk policy</h3>
+          <p>Review current identity and configuration state. Policy replacement requires an MFA-backed owner/admin session, the current ETag, a deliberate confirmation, and a reason. Every prior version remains auditable.</p>
+          <dl className="evidence-metrics"><div><dt>Account</dt><dd>{account.name}</dd></div><div><dt>Mode</dt><dd>{account.mode}</dd></div><div><dt>Declared capital</dt><dd>{account.starting_balance} {account.currency}</dd></div><div><dt>Account state</dt><dd>{account.status}</dd></div><div><dt>External profile</dt><dd>{account.prop_profile_configured ? "CONFIGURED" : "MISSING"}</dd></div><div><dt>Internal policy</dt><dd>{account.risk_policy_configured ? "CONFIGURED" : "MISSING"}</dd></div><div><dt>Version / ETag</dt><dd>{account.version} · {account.etag}</dd></div></dl>
+        </section>
+        <section className="setup-card" aria-labelledby="replace-external-policy">
+          <h3 id="replace-external-policy">Replace external loss rules</h3><p><strong>Effect:</strong> Future risk decisions use the new complete rule version. Existing evidence and prior versions are retained.</p>
+          <form className="setup-form" onSubmit={savePropProfile}><div className="form-row"><label htmlFor="operational-prop-daily-loss">Daily loss limit<input id="operational-prop-daily-loss" name="prop-daily-loss" min="0.01" required step="0.01" type="number" /></label><label htmlFor="operational-prop-maximum-loss">Maximum loss limit<input id="operational-prop-maximum-loss" name="prop-maximum-loss" min="0.01" required step="0.01" type="number" /></label></div><div className="form-row"><label htmlFor="operational-reset-timezone">Reset time zone<input defaultValue="UTC" id="operational-reset-timezone" name="reset-timezone" required /></label><label htmlFor="operational-reset-time">Reset time<input defaultValue="00:00" id="operational-reset-time" name="reset-time" required type="time" /></label></div><fieldset className="check-grid"><legend>Loss treatment</legend><label><input defaultChecked name="floating-loss-counts" type="checkbox" /> Floating loss counts</label><label><input name="trailing-drawdown" type="checkbox" /> Trailing drawdown</label></fieldset><label htmlFor="profile-reason">Reason for replacement<textarea id="profile-reason" minLength={8} name="profile-reason" required /></label><label className="confirmation-check"><input required type="checkbox" /> I reviewed the effect and intend to replace the complete external profile.</label><button disabled={isSaving} type="submit">{isSaving ? "Recording…" : "Replace external profile"}</button></form>
+        </section>
+        <section className="setup-card" aria-labelledby="replace-internal-policy">
+          <h3 id="replace-internal-policy">Replace internal risk guardrails</h3><p><strong>Effect:</strong> The stricter applicable limit governs future risk decisions. This action never places or changes an order.</p>
+          <form className="setup-form" onSubmit={saveRiskPolicy}><div className="form-row"><label htmlFor="operational-risk-per-trade">Maximum risk per trade<input id="operational-risk-per-trade" name="risk-per-trade" min="0.01" required step="0.01" type="number" /></label><label htmlFor="operational-portfolio-risk">Maximum portfolio risk<input id="operational-portfolio-risk" name="portfolio-risk" min="0.01" required step="0.01" type="number" /></label></div><div className="form-row"><label htmlFor="operational-daily-loss">Internal daily loss<input id="operational-daily-loss" name="internal-daily-loss" min="0.01" required step="0.01" type="number" /></label><label htmlFor="operational-drawdown">Internal drawdown<input id="operational-drawdown" name="internal-drawdown" min="0.01" required step="0.01" type="number" /></label></div><div className="form-row"><label htmlFor="operational-prop-buffer">Minimum prop buffer<input defaultValue="0" id="operational-prop-buffer" name="prop-buffer" min="0" required step="0.01" type="number" /></label><label htmlFor="operational-maximum-positions">Maximum positions<select defaultValue="2" id="operational-maximum-positions" name="maximum-positions"><option value="1">1</option><option value="2">2</option></select></label></div><label htmlFor="operational-correlation">Maximum correlated exposure<input defaultValue="1" id="operational-correlation" max="1" min="0" name="correlation-limit" required step="0.01" type="number" /></label><label htmlFor="risk-reason">Reason for replacement<textarea id="risk-reason" minLength={8} name="risk-reason" required /></label><label className="confirmation-check"><input required type="checkbox" /> I reviewed the effect and intend to replace the complete internal policy.</label><button disabled={isSaving} type="submit">{isSaving ? "Recording…" : "Replace internal guardrails"}</button></form>
+        </section>
+        {message ? <p className="status-message" role="status">{message}</p> : null}
+      </div>
     );
   }
 

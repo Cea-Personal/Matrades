@@ -37,6 +37,15 @@ class InstrumentAlias(IdentifiedMixin, Base):
     instrument_id: Mapped[UUID] = mapped_column(ForeignKey("instruments.id"), nullable=False)
     provider: Mapped[str] = mapped_column(String(120), nullable=False)
     native_symbol: Mapped[str] = mapped_column(String(256), nullable=False)
+    integration_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("integrations.id"), nullable=True
+    )
+    venue: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    mapping_revision: Mapped[str] = mapped_column(String(64), nullable=False, default="v1")
+    contract_variant: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    provider_metadata: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
+    approved_by: Mapped[UUID | None] = mapped_column(nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     valid_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     valid_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -45,20 +54,70 @@ class DataSetManifest(IdentifiedMixin, Base):
     __tablename__ = "dataset_manifests"
 
     provider: Mapped[str] = mapped_column(String(120), nullable=False)
+    integration_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("integrations.id"), nullable=True
+    )
+    provider_symbol: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    venue: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    capability: Mapped[str] = mapped_column(String(64), nullable=False, default="CANDLES")
+    semantics: Mapped[str] = mapped_column(String(24), nullable=False, default="UNAVAILABLE")
+    source_role: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="SPECIALIST_PRIMARY"
+    )
+    catalogue_revision: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    adapter_revision: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    mapping_revision: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    freshness_policy_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    retry_policy_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    entitlement_status: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="UNVERIFIED"
+    )
     purpose: Mapped[str] = mapped_column(String(64), nullable=False)
     parquet_uri: Mapped[str] = mapped_column(String(1024), nullable=False)
     content_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     coverage: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
+    source_observed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    complete: Mapped[bool] = mapped_column(nullable=False, default=False)
+    quality: Mapped[str] = mapped_column(String(24), nullable=False, default=DataQuality.UNKNOWN)
+    conflict_state: Mapped[str] = mapped_column(String(24), nullable=False, default="UNCHECKED")
+    fallback_reason: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    raw_reference: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class MarketObservation(IdentifiedMixin, Base):
     __tablename__ = "market_observations"
     __table_args__ = (
-        UniqueConstraint("instrument_id", "observed_at", "revision", name="uq_market_observation"),
+        UniqueConstraint(
+            "instrument_id",
+            "provider",
+            "capability",
+            "observed_at",
+            "revision",
+            name="uq_market_observation",
+        ),
     )
 
     instrument_id: Mapped[UUID] = mapped_column(ForeignKey("instruments.id"), nullable=False)
+    integration_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("integrations.id"), nullable=True
+    )
+    dataset_manifest_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("dataset_manifests.id"), nullable=True
+    )
+    provider: Mapped[str] = mapped_column(String(120), nullable=False, default="UNKNOWN")
+    provider_symbol: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    venue: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    capability: Mapped[str] = mapped_column(String(64), nullable=False, default="CANDLES")
+    semantics: Mapped[str] = mapped_column(String(24), nullable=False, default="UNAVAILABLE")
+    source_role: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="SPECIALIST_PRIMARY"
+    )
+    mapping_revision: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    freshness_policy_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     revision: Mapped[int] = mapped_column(nullable=False, default=1)
@@ -68,6 +127,10 @@ class MarketObservation(IdentifiedMixin, Base):
     close: Mapped[object] = mapped_column(FinancialDecimal, nullable=False)
     volume: Mapped[object | None] = mapped_column(FinancialDecimal, nullable=True)
     spread: Mapped[object | None] = mapped_column(FinancialDecimal, nullable=True)
+    measures: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
+    complete: Mapped[bool] = mapped_column(nullable=False, default=True)
+    conflict_state: Mapped[str] = mapped_column(String(24), nullable=False, default="CLEAR")
+    raw_reference: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     quality: Mapped[str] = mapped_column(String(16), default=DataQuality.UNKNOWN, nullable=False)
 
 

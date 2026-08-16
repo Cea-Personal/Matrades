@@ -54,3 +54,25 @@ test("primary controls meet contrast and failures expose an accessible recovery 
   await expect(page.locator(".status-message[role=alert]")).toContainText("could not run market research");
   await expect(page.getByRole("button", { name: "Run Forex research" })).toBeEnabled();
 });
+
+test("market automation exposes labelled controls and non-colour evidence states", async ({ page }) => {
+  await mockReadyCommandCenter(page, { seedMarketAutomation: true });
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/command-center");
+  await page.getByRole("button", { name: "Markets" }).click();
+
+  await expect(page.getByLabel("Global research model")).toBeVisible();
+  await expect(page.getByLabel("Research interval")).toBeVisible();
+  await expect(page.getByLabel("Anchor start")).toBeVisible();
+  await expect(page.getByLabel("Account time zone")).toBeVisible();
+  await page.getByRole("button", { name: "Run all three markets" }).click();
+  const report = page.getByRole("region", { name: "Coordinated market research" });
+  await expect(report).toContainText("BLOCKED");
+  await expect(report).toContainText("analysis unavailable");
+  await report.getByRole("button", { name: "Retry pinned analysis" }).focus();
+  await expect(report.getByRole("button", { name: "Retry pinned analysis" })).toBeFocused();
+  const overflow = await page.evaluate(() => [...document.querySelectorAll("body *")]
+    .filter((element) => element.getBoundingClientRect().right > window.innerWidth + 1)
+    .map((element) => element.tagName));
+  expect(overflow).toEqual([]);
+});

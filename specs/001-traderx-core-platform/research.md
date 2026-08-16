@@ -366,51 +366,35 @@ sessions, and explicit-logout-only sessions are rejected.
 
 ## 23. MetaTrader 5 Read-Only Terminal Bridge
 
-**Decision**: Integrate MT5 through an isolated terminal bridge, not a direct core-service API
-client. The official `MetaTrader5` Python package communicates through IPC with a locally running
-terminal, so the first production bridge is a small service on a managed Windows host beside one
-provisioned terminal/account. It exposes only mutually authenticated HTTPS `health`,
-`account-snapshot`, `positions`, `deals`, and `instruments` operations to TraderX. The core API
-stores bridge registration/client credentials, not the MT5 password; the bridge stores the
-account-specific investor password in its own encryption boundary.
+**Decision**: Use the native `TraderXReadOnlyBridge.mq5` Expert Advisor already delivered with
+TraderX. It runs inside the user's MT5 terminal on macOS or Windows and makes outbound HTTPS calls
+to a fixed TraderX API surface. An authorized owner records the login/server and receives a
+single-use enrollment code; the EA exchanges it for a bearer agent credential. TraderX stores only
+digests, and the investor password remains entirely inside MT5.
 
-Every bridge connection uses explicit terminal path, login, server, and investor password. Before
-publishing and on every poll, it verifies terminal connectivity, exact `account_info` login/server,
-and `trade_allowed = false` for both account and terminal. Its internal allowlist is limited to
-initialization/lifecycle diagnostics, terminal/account info, positions, historical deals, symbols,
-instrument info, and optional tick reads. It must not call `symbol_select`, `order_check`,
-`order_send`, calculation helpers, scripts, EAs, or any trade method. A null MT5 result is an error
-to classify using `last_error`, never proof that no position or deal exists.
+Every enrollment and snapshot verifies the configured login/server, terminal connection, and
+disabled trading for the account and terminal. The EA publishes complete account, position,
+overlapping deal-history, visible-instrument, specification, current bid/ask, and broker market-
+evidence sections. It contains no order create/check/modify/cancel/close or terminal-state-changing
+call. A missing/partial section is an error, never an empty portfolio.
 
-Polling is single-flight per terminal/account at a 15-second normal cadence with bounded manual
-refresh, an overlapping deal-history window, immutable deal-ticket deduplication, and periodic
-full lookback reconciliation. A snapshot is rejected when any component is missing, stale,
-disconnected, inconsistent, or belongs to a different login/server. The bridge reports source and
-observation times, terminal version/connection diagnostics, source IDs, and payload hashes; it
-never overwrites a previous valid snapshot silently. MT5's investor password is the provider
-mechanism that makes account trading disallowed. See the official
-[Python integration overview](https://www.mql5.com/en/docs/python_metatrader5),
-[`initialize`](https://www.mql5.com/en/docs/python_metatrader5/mt5initialize_py),
-[terminal information](https://www.mql5.com/en/docs/python_metatrader5/mt5terminalinfo_py),
-[account information](https://www.mql5.com/en/docs/python_metatrader5/mt5accountinfo_py),
-[positions](https://www.mql5.com/en/docs/python_metatrader5/mt5positionsget_py),
-[deal history](https://www.mql5.com/en/docs/python_metatrader5/mt5historydealsget_py), and the
-[investor-password restriction](https://www.mql5.com/en/book/automation/account/account_limits_and_restrictions).
+Extend the evidence profile with server-requested visible-symbol batches, multi-window bars/ticks,
+`MqlRates.real_volume`, and optional DOM subscription/snapshots through `MarketBookAdd` and
+`MarketBookGet`. MT5 bars expose OHLC, spread, tick volume, and broker-supplied real volume; tick
+history distinguishes bid/ask activity from last-price/volume changes. Broker DOM is optional and,
+for non-exchange Forex, may be absent or limited to broker-client interest, so it is always labelled
+`BROKER_PROXY` rather than a global book. See [MqlRates](https://www.mql5.com/en/docs/constants/structures/mqlrates),
+[CopyTicksRange](https://www.mql5.com/en/docs/series/copyticksrange), and
+[MT5 market-depth semantics](https://www.mql5.com/en/book/automation/symbols/symbols_market_depth).
 
-**Rationale**: MT5's integration boundary is a terminal process, not a broker REST API. A local
-bridge makes that boundary explicit, permits network and credential isolation, and produces a
-small contract that can be verified as incapable of trading. Investor-password and
-`trade_allowed` checks provide defense in depth rather than relying on code-path intent.
+**Rationale**: The native outbound EA works in the user's actual macOS/Windows terminal without a
+separate Windows Python service, keeps credentials out of TraderX, and makes the prohibited trading
+surface statically testable. MT5 remains the only authority for broker support and execution
+feasibility while honestly exposing the limits of broker volume/depth.
 
-**Alternatives considered**: importing `MetaTrader5` into the Linux API container, sharing one
-terminal among accounts, a Docker/headless terminal without a compatibility proof, using a normal
-trading password, remote desktop as a data protocol, and treating `None` as an empty result are
-rejected.
-
-**Release-gating unknowns**: confirm broker investor-password support, server naming, retained
-deal history, symbol suffixes, terminal restart behavior, and a Windows-host bridge proof of
-connectivity. The vendor documents Linux installation through Wine but does not make Docker or
-headless terminal operation a supported deployment assumption.
+**Alternatives considered**: The Python `MetaTrader5` IPC bridge, an inbound socket/REST bridge,
+Docker/headless MT5, normal trading credentials, arbitrary third-party EAs, and treating missing
+DOM/real volume as zero are rejected.
 
 ## 24. Provider Selection, Freshness, and Account Authority
 
@@ -436,8 +420,137 @@ reconnect from silently changing portfolio risk.
 merging simultaneous broker accounts, clearing a breaker on transport recovery alone, storing a
 cursor outside the snapshot transaction, and automatic provider failover are rejected.
 
+## 25. Fixed Specialist Market-Data Catalogue
+
+**Decision**: Ship reviewed catalogue profiles for `CME_GROUP` (Commodity), `CBOE_FX_SPOT`
+(Forex), and `COINBASE_EXCHANGE` (Cryptocurrency). An entry is selectable only after the owner has
+accepted applicable licensing, supplied any required entitlement/credential through the UI,
+passed connection/capability tests, and approved versioned MT5-to-venue symbol mappings.
+
+- CME's cloud feed supplies top of book, trades, cleared volume, open interest, and settlement;
+  DataMine adds entitled historical MBO/depth/BBO/time-and-sales files through its download API.
+  See [CME real-time API](https://www.cmegroup.com/market-data/real-time-futures-and-options-data-api.html),
+  [DataMine API](https://www.cmegroup.com/datamine/datamine-api.html), and
+  [licensing](https://www.cmegroup.com/market-data/license-data.html).
+- Cboe publishes official venue/instrument spot-FX volume and offers licensed TOP, prints, and
+  full-depth/history. It is one institutional venue, never a consolidated global FX book. See
+  [Cboe FX volume](https://www.cboe.com/global/fx/spot/volume/) and
+  [Cboe FX resources](https://www.cboe.com/global/fx/resources/).
+- Coinbase REST/WebSocket supplies trades, candles, actual venue volume, and L2/L3 books. WebSocket
+  is used for live depth; REST candles are paged and gap-checked. See
+  [product candles](https://docs.cdp.coinbase.com/api-reference/exchange-api/rest-api/products/get-product-candles),
+  [product book](https://docs.cdp.coinbase.com/api-reference/exchange-api/rest-api/products/get-product-book),
+  and [WebSocket feed](https://docs.cdp.coinbase.com/exchange/websocket-feed/overview).
+
+`CFTC_COT`, CME FX futures, and `KRAKEN_SPOT` are verification-only profiles disabled by default.
+CME/Cboe commercial access and raw-data display/retention rights are release gates; tests use
+licensed recorded or synthetic fixtures, never scraped substitutes.
+
+**Rationale**: Venue-native sources provide actual volume, open interest, and depth with explicit
+provenance. A single multi-asset aggregator would obscure evidence semantics and licensing.
+
+**Alternatives considered**: MT5-only research, CFTC as a current commodity source, one universal
+aggregator, Kraken as the primary crypto source, and arbitrary REST URLs are rejected.
+
+## 26. Source Authority, Asset-Aware Gates, and Fallback
+
+**Decision**: MT5 is authoritative for broker support/specifications/current execution feasibility;
+specialists are authoritative only for catalogue-declared capabilities. Every measure records
+provider, venue, mapping, capability, `ACTUAL`/`BROKER_PROXY`/`UNAVAILABLE`, event/receive time,
+freshness-policy version, entitlement, and quality/conflict result.
+
+Forex gates use broker spread, quote/tick activity, freshness, and execution proxies without a
+global-book claim. Commodity gates require official traded volume and open interest plus depth when
+entitled. Crypto gates require actual selected-venue volume and order-book depth. Conflicting or
+missing mandatory evidence is `UNKNOWN`, not zero.
+
+After three specialist attempts with versioned exponential backoff/jitter, the category tries
+current complete MT5 evidence and then the most recent complete external dataset that is still
+within the same capability-specific freshness limit. An outage never extends freshness or weakens
+a gate. Otherwise that category blocks and preserves its active assignment while valid categories
+may finish.
+
+**Rationale**: Explicit authority and semantics prevent broker proxies, venue data, and missing
+values from becoming misleadingly comparable while honoring the requested fallback order.
+
+**Alternatives considered**: provider-last-write-wins, automatic cross-provider merging, zero for
+missing evidence, stale-cache grace periods, and failure of all three categories are rejected.
+
+## 27. Durable Coordinated Research Schedule
+
+**Decision**: PostgreSQL owns schedule configuration and occurrence claims; Celery Beat wakes a due
+scanner. The schedule stores a repeat interval from one hour through 30 days, anchored local start,
+account IANA time zone, enabled state, and next due time. Each unique `(schedule, scheduled_for)`
+atomically records either one coordinated parent job with exactly three category children or one
+`SKIPPED_OVERLAP` outcome. Leases use fencing tokens; a crash may resume/retry the claimed job but
+never create a second occurrence or catch-up run.
+
+Each run pins the approved methodology, source catalogue, freshness/retry policies, and global LLM
+selection at start. Independently complete categories may publish selection proposals, but active
+assignments change only through separate human approval.
+
+**Rationale**: Database authority survives browser closure, worker restarts, duplicate wakeups,
+time-zone transitions, and at-least-once task delivery while providing the exact skip history.
+
+**Alternatives considered**: browser timers, Celery Beat configuration as product truth, queueing
+catch-up work, concurrent occurrences, and one independent schedule per category are rejected.
+
+## 28. Reviewed LLM Catalogue and Structured Advisory Port
+
+**Decision**: Implement a provider-neutral server-side port with a static reviewed allowlist. The
+initial catalogue contains `OPENAI_RESPONSES/gpt-5.6-terra` as the default and
+`ANTHROPIC_MESSAGES/claude-sonnet-5` as the alternative. Provider model-list APIs verify access;
+they do not auto-admit newly listed models. OpenAI uses Responses strict JSON Schema with
+`store=false`; Anthropic uses Messages `output_config.format` JSON Schema. Tools, web/file search,
+MCP, shell/code execution, and arbitrary endpoints are disabled. See
+[OpenAI model](https://developers.openai.com/api/docs/models/gpt-5.6-terra),
+[OpenAI structured output](https://developers.openai.com/api/docs/guides/structured-outputs),
+[Anthropic model versioning](https://platform.claude.com/docs/en/about-claude/models/model-ids-and-versions),
+and [Anthropic structured output](https://platform.claude.com/docs/en/build-with-claude/structured-outputs).
+
+One global selection applies to all categories. Each invocation records the exact requested and
+returned model, catalogue/adapter revision, evidence hash, deterministic method, prompt/schema and
+inference-policy versions, attempts, provider request ID, stop/failure reason, token usage, latency,
+output hash, and estimated-cost rate-card version. Pinning improves reproducibility but does not
+promise bit-for-bit model output; deterministic research remains the authority.
+
+**Rationale**: A fixed evaluated catalogue provides real owner choice without allowing provider
+catalogue churn, incompatible output, or an arbitrary endpoint into a financial workflow.
+
+**Alternatives considered**: dynamic admission from model-list APIs, a generic OpenAI-compatible
+endpoint, locally hosted arbitrary models, provider web/tools, category overrides, and model changes
+during an active run are rejected.
+
+## 29. LLM Privacy, Retry, and Deterministic Independence
+
+**Decision**: Send only bounded normalized market evidence, evidence identifiers, and deterministic
+results. Exclude credentials, MT5/account identity, balance/equity, personal data, raw integration
+configuration, unrestricted database content, and untrusted prose instructions. Locally validate
+the strict response again; it can contain summaries, anomalies, cautions, data-quality observations,
+and methodology proposals but no gate/weight/score/rank/activation/risk/order fields.
+
+TraderX owns at most three attempts, 180 seconds each, within ten minutes overall. Retry classified
+timeouts, connection failures, 408/409/429/5xx, and truncation as policy allows; do not retry
+authentication/authorization/unsupported-model errors or identical refusals. After exhaustion,
+publish the independently valid deterministic report, mark advisory analysis unavailable, alert,
+and permit an explicit later retry with the same pinned model. Never substitute a model silently.
+
+Provider retention posture is displayed accurately. OpenAI API data is not used for training by
+default but standard abuse monitoring can retain data for up to 30 days; `store=false` is not a ZDR
+claim. Anthropic retention depends on workspace/model/contract, and ZDR requires an approved
+arrangement. See [OpenAI data controls](https://developers.openai.com/api/docs/guides/your-data) and
+[Anthropic retention](https://platform.claude.com/docs/en/manage-claude/api-and-data-retention).
+
+**Rationale**: Data minimization and tool prohibition bound prompt-injection/exfiltration risk;
+independent deterministic completion keeps an LLM outage from becoming a market-control outage.
+
+**Alternatives considered**: sending raw pages/account data, hidden SDK retries, unlimited retries,
+automatic cross-model failover, failing valid deterministic research, and claiming ZDR from a
+request flag are rejected.
+
 ## Resolution Status
 
-The core Technical Context is resolved. The provider-specific release gate is an MT5 Windows bridge
-proof with a target broker's investor-password account. It does not permit a constitutional
-exception; until resolved, affected accounts stay unavailable for risk authority.
+All Technical Context questions are resolved. Production enablement remains gated—not ambiguous—on
+MT5 investor-mode verification, CME/Cboe/Coinbase entitlement and use rights, reviewed symbol
+mappings, and successful LLM provider/model qualification with the owner's actual account access.
+Until a gate passes, its catalogue entry stays unavailable and affected categories fail closed.

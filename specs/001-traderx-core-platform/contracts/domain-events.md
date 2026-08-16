@@ -75,6 +75,7 @@ Rules:
 |---|---|---|
 | `com.traderx.integration.health-changed.v1` | integration, from/to, affected capabilities, reason | dashboard, circuit breakers, alerts |
 | `com.traderx.integration.credential-rotated.v1` | integration, credential version, actor | audit, connection tester |
+| `com.traderx.integration.catalogue-entry-changed.v1` | provider key, old/new revision, lifecycle, evidence | integration eligibility, audit |
 | `com.traderx.marketdata.batch-ingested.v1` | batch/manifest, coverage, quality | normalization, jobs |
 | `com.traderx.marketdata.quality-failed.v1` | instrument/provider, scope, policy, reasons | quarantine, circuit breakers, alerts |
 | `com.traderx.broker.position-observed.v1` | account, position, revision, reconciliation state | risk, matching, monitoring, journal |
@@ -86,6 +87,16 @@ Rules:
 | Event type | Minimum data | Primary consumers |
 |---|---|---|
 | `com.traderx.markets.research-completed.v1` | run, category, methodology, eligible count | UI, alerts |
+| `com.traderx.markets.research-schedule-updated.v1` | schedule, interval/anchor/timezone, next due, actor/reason | due scanner, UI, audit |
+| `com.traderx.markets.research-occurrence-started.v1` | occurrence, schedule, due time, coordinated run | jobs, UI |
+| `com.traderx.markets.research-occurrence-skipped.v1` | occurrence, due time, active run, reason | UI, audit |
+| `com.traderx.markets.coordinated-research-completed.v1` | parent run, three category outcomes, pinned policies/model | UI, alerts |
+| `com.traderx.markets.category-research-blocked.v1` | run/category, failed evidence/gates, preserved assignment | UI, alerts |
+| `com.traderx.markets.source-fallback-applied.v1` | run/category, from/to source role, policy, reason | evidence report, audit |
+| `com.traderx.markets.model-selection-changed.v1` | old/new provider/model/catalogue, actor/reason | future-run configuration, audit |
+| `com.traderx.markets.llm-analysis-completed.v1` | run/category, pinned model/policies, output hash/usage | UI, audit |
+| `com.traderx.markets.llm-analysis-unavailable.v1` | run/category, pinned model, failure/retry evidence | UI, alerts |
+| `com.traderx.markets.llm-analysis-retry-requested.v1` | run/category, pinned model, actor, source attempt | jobs, audit |
 | `com.traderx.markets.candidate-ineligible.v1` | run, instrument, failed gates | report/audit |
 | `com.traderx.markets.active-assignment-approved.v1` | category, instrument, assessment, actor, reason | active-universe projection, audit |
 | `com.traderx.markets.active-assignment-ended.v1` | category, instrument, reason | strategy/opportunity eligibility, audit |

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import select
@@ -79,3 +80,44 @@ def route_event(database: Session, event: NotificationEvent, user_id: UUID) -> i
         created += 1
     database.flush()
     return created
+
+
+_MARKET_RESEARCH_SEVERITY = {
+    "CATALOGUE_RETIRED": "HIGH",
+    "ENTITLEMENT_LOST": "HIGH",
+    "SOURCE_STALE": "WARNING",
+    "SOURCE_CONFLICT": "HIGH",
+    "SCHEDULE_OVERLAP": "INFO",
+    "SCHEDULE_FAILED": "HIGH",
+    "LLM_UNAVAILABLE": "WARNING",
+}
+
+
+def create_market_research_notification(
+    database: Session,
+    *,
+    kind: str,
+    subject_id: str,
+    payload: dict[str, object],
+    created_at: datetime,
+) -> NotificationEvent:
+    """Persist one actionable, preference-routed market-research notification fact."""
+
+    if kind not in _MARKET_RESEARCH_SEVERITY:
+        raise ValueError("unsupported market research notification kind")
+    dedupe_key = f"market-research:{kind}:{subject_id}"
+    existing = database.scalar(
+        select(NotificationEvent).where(NotificationEvent.dedupe_key == dedupe_key)
+    )
+    if existing is not None:
+        return existing
+    event = NotificationEvent(
+        event_type=f"MARKET_RESEARCH_{kind}",
+        severity=_MARKET_RESEARCH_SEVERITY[kind],
+        dedupe_key=dedupe_key,
+        payload={**payload, "subject_id": subject_id},
+        created_at=created_at,
+    )
+    database.add(event)
+    database.flush()
+    return event

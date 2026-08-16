@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 
-export async function mockReadyCommandCenter(page: Page, options: { seedActiveMarket?: boolean; seedPaperEvidence?: boolean; seedOpportunities?: boolean; seedMonitoring?: boolean; seedJournal?: boolean; seedOperations?: boolean } = {}) {
+export async function mockReadyCommandCenter(page: Page, options: { seedActiveMarket?: boolean; seedPaperEvidence?: boolean; seedOpportunities?: boolean; seedMonitoring?: boolean; seedJournal?: boolean; seedOperations?: boolean; seedMarketAutomation?: boolean } = {}) {
   const symbols: Record<string, string> = { COMMODITY: "XAUUSD", FOREX: "EURUSD", CRYPTO: "BTCUSD" };
   const activeMarkets: Array<{ id: string; instrument_id: string; symbol: string; category: string; state: string; version: number; etag: string }> = [];
   if (options.seedActiveMarket) activeMarkets.push({ id: "active-FOREX", instrument_id: "instrument-FOREX", symbol: "EURUSD", category: "FOREX", state: "ACTIVE", version: 1, etag: '"active-FOREX-1"' });
@@ -14,6 +14,9 @@ export async function mockReadyCommandCenter(page: Page, options: { seedActiveMa
   const notificationPreferences: Array<Record<string, unknown>> = options.seedOperations ? [{ id: "preference-web", channel: "WEB", minimum_severity: "INFO", enabled: true }] : [];
   const notices: Array<Record<string, unknown>> = [];
   const mt5Integrations: Array<Record<string, unknown>> = options.seedOperations ? [{ id: "integration-1", version: 1, category: "BROKER", provider: "MT5_TERMINAL_BRIDGE", name: "MT5 MetaQuotes-Demo 5054425064", mt5_account_login: "5054425064", mt5_server: "MetaQuotes-Demo", status: "HEALTHY", credential_hint: "configured; verified" }] : [];
+  if (options.seedMarketAutomation) mt5Integrations.push({ id: "integration-openai-1", version: 1, category: "LLM", provider: "OPENAI_RESPONSES", name: "Research OpenAI", state: "HEALTHY", status: "HEALTHY", credential_hint: "configured; write only" });
+  let researchSchedule: Record<string, unknown> = { configured: false, enabled: false };
+  let researchModel: Record<string, unknown> = { configured: false, applies_to: "FUTURE_RUNS_ONLY" };
   if (options.seedPaperEvidence) {
     activeMarkets.push({ id: "active-FOREX", instrument_id: "instrument-FOREX", symbol: "EURUSD", category: "FOREX", state: "ACTIVE", version: 1, etag: '"active-FOREX-1"' });
     strategies.push({ id: "strategy-1", name: "H1 trend continuation", instrument_id: "instrument-FOREX", version: 1, etag: '"strategy-strategy-1-1"', versions: [{ id: "version-1", sequence: 1, lifecycle: "BACKTEST_PASSED", definition_hash: "strategy-definition-hash-v1", change_summary: "Validated fixture", immutable: true, etag: '"strategy-version-version-1-1"' }] });
@@ -129,6 +132,22 @@ export async function mockReadyCommandCenter(page: Page, options: { seedActiveMa
       body = { id: "attachment-1", entry_id: "journal-1", protected: true, checksum: "abcdef1234567890", download_path: "/api/v1/journal/attachments/attachment-1" };
     } else if (path.endsWith("/journal/proposals") && method === "POST") {
       body = { id: "proposal-1", hypothesis: "Test trend entries after planned pullbacks", evidence_links: ["journal:journal-1"], state: "PROPOSED", source_strategy_mutated: false };
+    } else if (path.endsWith("/integrations/providers")) {
+      body = { items: [
+        { provider: "CME_GROUP", category: "MARKET_DATA", configuration_fields: ["project_id"], credential_fields: ["api_token"], asset_categories: ["COMMODITY"], permitted_models: [], licensing_notice: "CME terms apply", retention_posture: "NOT_APPLICABLE", entitlement_required: true, verification_only: false },
+        { provider: "CBOE_FX_SPOT", category: "MARKET_DATA", configuration_fields: ["venue"], credential_fields: ["api_token"], asset_categories: ["FOREX"], permitted_models: [], licensing_notice: "Cboe terms apply", retention_posture: "NOT_APPLICABLE", entitlement_required: true, verification_only: false },
+        { provider: "COINBASE_EXCHANGE", category: "MARKET_DATA", configuration_fields: [], credential_fields: [], asset_categories: ["CRYPTO"], permitted_models: [], licensing_notice: "Coinbase terms apply", retention_posture: "NOT_APPLICABLE", entitlement_required: false, verification_only: false },
+        { provider: "OPENAI_RESPONSES", category: "LLM", configuration_fields: [], credential_fields: ["api_key"], asset_categories: [], permitted_models: ["gpt-5.6-terra"], licensing_notice: "OpenAI terms apply", retention_posture: "STANDARD", entitlement_required: false, verification_only: false },
+        { provider: "ANTHROPIC_MESSAGES", category: "LLM", configuration_fields: [], credential_fields: ["api_key"], asset_categories: [], permitted_models: ["claude-sonnet-5"], licensing_notice: "Anthropic terms apply", retention_posture: "STANDARD", entitlement_required: false, verification_only: false }
+      ] };
+    } else if (path.includes("/integrations/integration-openai-1/credentials/rotate") && method === "POST") {
+      body = { id: "integration-openai-1", version: 2, name: "Research OpenAI", category: "LLM", provider: "OPENAI_RESPONSES", state: "DEGRADED", credential: "WRITE_ONLY", credential_status: "CONFIGURED", entitlement_status: "NOT_REQUIRED", catalogue_revision: "2026-08-14.v1", retention_posture: "STANDARD" };
+    } else if (path.includes("/integrations/integration-openai-1/test") && method === "POST") {
+      body = { id: "qualification-job-1", type: "PROVIDER_QUALIFICATION", state: "QUEUED", provider: "OPENAI_RESPONSES", credential: "REDACTED" };
+    } else if (path.includes("/integrations/integration-openai-1/non-broker/state") && method === "PUT") {
+      body = { id: "integration-openai-1", version: 2, state: "DISABLED", credential: "WRITE_ONLY" };
+    } else if (path.endsWith("/integrations/non-broker") && method === "GET") {
+      body = { items: options.seedMarketAutomation ? [{ id: "integration-openai-1", version: 1, name: "Research OpenAI", category: "LLM", provider: "OPENAI_RESPONSES", state: "HEALTHY", credential: "WRITE_ONLY", credential_status: "CONFIGURED", entitlement_status: "NOT_REQUIRED", catalogue_revision: "2026-08-14.v1", retention_posture: "STANDARD" }] : [] };
     } else if (path.endsWith("/integrations")) {
       body = mt5Integrations;
     } else if (path.includes("/integrations/integration-1/mt5/enrollment") && method === "POST") {
@@ -139,6 +158,31 @@ export async function mockReadyCommandCenter(page: Page, options: { seedActiveMa
       body = { items: activeMarkets.map((item) => ({ ...item, effective_from: "2026-08-14T00:00:00Z", effective_to: null, approval_reason: "Approved fixture" })) };
     } else if (path.includes("/market-rotation/instruments/") && path.endsWith("/reactivation")) {
       body = { instrument_id: path.split("/").at(-2), symbol: "EURUSD", current_status: "INACTIVE", state: "REVALIDATION_REQUIRED", workflow_state: method === "POST" ? "REVALIDATION_REQUIRED" : undefined, steps: ["REFRESH_MISSING_INTERVALS", "SELECTIVE_VALIDATION", "HUMAN_APPROVAL"], data_gaps: [{ kind: "HISTORICAL_COVERAGE", required_observations: 30 }], knowledge: { aliases: 2, strategies: 1, strategy_versions: 3, journal_entries: 8, research_experiments: 2 }, ends_in_human_approval: true, automatically_activated: false, ...(method === "POST" ? { job: { id: "reactivation-job-1", state: "COMPLETED" } } : {}) };
+    } else if (path.endsWith("/markets/research/schedule") && method === "GET") {
+      body = researchSchedule;
+    } else if (path.endsWith("/markets/research/schedule") && method === "PUT") {
+      const requestBody = route.request().postDataJSON() as Record<string, unknown>;
+      researchSchedule = { id: "research-schedule-1", version: 1, ...requestBody, next_run_at: "2026-08-14T10:00:00Z", last_due_at: null };
+      body = researchSchedule;
+    } else if (path.endsWith("/markets/research/model-configuration") && method === "GET") {
+      body = researchModel;
+    } else if (path.endsWith("/markets/research/model-configuration") && method === "PUT") {
+      const requestBody = route.request().postDataJSON() as Record<string, unknown>;
+      researchModel = { id: "research-model-1", version: 1, ...requestBody, applies_to: "FUTURE_RUNS_ONLY", catalogue_revision: "2026-08-14.v1" };
+      body = researchModel;
+    } else if (path.endsWith("/markets/research/coordinated") && method === "POST") {
+      body = { run_id: "coordinated-run-1", state: "QUEUED", category_count: 3 };
+    } else if (path.endsWith("/markets/research/coordinated/coordinated-run-1") && method === "GET") {
+      body = {
+        id: "coordinated-run-1", state: "PARTIAL", trigger: "MANUAL", methodology_version: "market-suitability-v2", source_catalogue_revision: "2026-08-14.v1", exact_model_id: "gpt-5.6-terra", ranking_is_not_activation: true, active_assignments_changed: false,
+        categories: [
+          { run_id: "category-COMMODITY", category: "COMMODITY", state: "COMPLETED", outcome: "RECOMMENDED", block_reasons: [], source_manifest: { selected_role: "SPECIALIST_PRIMARY", evidence: [{ provider: "CME_GROUP", venue: "COMEX", capability: "OPEN_INTEREST", semantics: "ACTUAL", source_role: "SPECIALIST_PRIMARY", freshness: "FRESH", mapping_revision: "mapping-v1" }] }, fallback_path: [], deterministic_result_hash: "commodity-result", llm_analysis: { state: "UNAVAILABLE", authoritative: false }, activation_state: "REQUIRES_SEPARATE_HUMAN_CONFIRMATION", candidates: [] },
+          { run_id: "category-FOREX", category: "FOREX", state: "COMPLETED", outcome: "RECOMMENDED", block_reasons: [], source_manifest: { selected_role: "FALLBACK_MT5", evidence: [{ provider: "MT5_TERMINAL_BRIDGE", capability: "BROKER_ACTIVITY", semantics: "BROKER_PROXY", source_role: "FALLBACK_MT5", freshness: "FRESH", mapping_revision: "mapping-v1" }] }, fallback_path: [{ role: "SPECIALIST_PRIMARY", accepted: false, reason_codes: ["SPECIALIST_RETRIES_EXHAUSTED"] }, { role: "FALLBACK_MT5", accepted: true, reason_codes: [] }], deterministic_result_hash: "forex-result", llm_analysis: { state: "UNAVAILABLE", authoritative: false }, activation_state: "REQUIRES_SEPARATE_HUMAN_CONFIRMATION", candidates: [{ id: "candidate-FOREX", symbol: "EURUSD", display_name: "Euro / US Dollar", eligible: true, score: "0.82", rank: 1, confidence: "0.91", exclusions: [], components: { volatility: "0.8", liquidity: "0.9", cost_quality: "0.7" } }] },
+          { run_id: "category-CRYPTO", category: "CRYPTO", state: "BLOCKED", outcome: "BLOCKED", block_reasons: ["ORDER_BOOK_UNAVAILABLE"], source_manifest: { selected_role: "SPECIALIST_PRIMARY", evidence: [{ provider: "COINBASE_EXCHANGE", venue: "COINBASE_EXCHANGE", capability: "TRADED_VOLUME", semantics: "ACTUAL", source_role: "SPECIALIST_PRIMARY", freshness: "FRESH" }] }, fallback_path: [], deterministic_result_hash: "crypto-result", llm_analysis: { state: "UNAVAILABLE", authoritative: false }, activation_state: "REQUIRES_SEPARATE_HUMAN_CONFIRMATION", candidates: [] }
+        ]
+      };
+    } else if (path.includes("/markets/research/category-runs/") && path.endsWith("/llm-analysis/retry") && method === "POST") {
+      body = { run_id: path.split("/").at(-3), state: "RETRY_QUEUED", same_pinned_model: true };
     } else if (path.endsWith("/markets/instruments")) {
       const category = new URL(route.request().url()).searchParams.get("category") ?? "FOREX";
       const symbol = symbols[category];

@@ -80,6 +80,9 @@ account balance, equity, currency, and terminal version
 open positions
 overlapping immutable deal history
 instrument metadata and contract specifications
+current bid/ask/spread and visible broker-supported symbol universe
+versioned bar/tick activity and broker-supplied real volume where available
+optional broker Depth of Market with explicit unsupported/unavailable status
 ```
 
 The EA source contains no order creation, check, modification, cancellation, closure, or terminal
@@ -93,6 +96,11 @@ upserts positions by terminal ticket/identifier, and deduplicates deal history b
 ticket plus account/server over an overlapping window. It retains source/observation time and runs
 periodic fuller lookbacks. Static and contract tests validate the EA's narrow denied capability
 surface, enrollment identity, HTTPS-only transport, schema, freshness, and account binding.
+
+MT5 price, tick volume, quote frequency, real volume, and DOM retain `BROKER_PROXY` semantics for
+market research unless a reviewed exchange mapping proves otherwise. DOM collection uses
+`MarketBookAdd`/`MarketBookGet` only for symbols where MT5 confirms it is available; absence is not
+zero liquidity and MT5 DOM is never described as a consolidated Forex book.
 
 ### Reconciliation
 
@@ -110,9 +118,14 @@ surface, enrollment identity, HTTPS-only transport, schema, freshness, and accou
 Required capabilities:
 
 ```text
-discover_instruments(category)
+describe_catalogue_profile()
+test_connection()
+list_capabilities()
+discover_instruments(category, venue)
 get_instrument_metadata(provider_symbol)
 get_historical_observations(provider_symbol, kind, interval, range, cursor)
+get_current_observations(provider_symbol, kind_set)
+get_order_book_snapshot(provider_symbol, depth)  # explicit UNSUPPORTED is valid
 stream_observations(provider_symbol_set, kind_set, cursor)
 get_data_health(provider_symbol, kind, interval)
 ```
@@ -124,6 +137,48 @@ TraderX never treats FX tick volume, exchange traded volume, and turnover as equ
 Candles use `[start, end)` intervals, explicit price basis, completeness, and revision. Provider
 corrections create superseding canonical revisions. Missing intervals and transformations are
 reported, not silently hidden.
+
+Every response also identifies catalogue/adapter/integration/venue, declared capability,
+`ACTUAL`/`BROKER_PROXY`/`UNAVAILABLE` semantics, instrument mapping revision, entitlement tier,
+source/event/receive time, freshness-policy reference, completeness, and revision. Initial reviewed
+profiles are `CME_GROUP` for Commodity, `CBOE_FX_SPOT` for Forex, and `COINBASE_EXCHANGE` for
+Cryptocurrency. MT5 remains authoritative for broker eligibility.
+
+Ordered failure handling is per category: bounded specialist retries, current complete MT5
+evidence, then complete cached external evidence inside the unchanged freshness policy, otherwise
+`BLOCKED`. Adapters cannot weaken a gate or extend freshness during an outage.
+
+## LLM Analysis Port
+
+```text
+test_connection()
+describe_permitted_models()
+analyze(
+  pinned_provider,
+  exact_model_id,
+  catalogue_revision,
+  adapter_revision,
+  inference_policy_version,
+  prompt_template_version,
+  output_schema_version,
+  normalized_evidence_manifest,
+  deterministic_result_manifest,
+  idempotency_key,
+  timeout
+)
+```
+
+The first reviewed profiles are `OPENAI_RESPONSES/gpt-5.6-terra` and
+`ANTHROPIC_MESSAGES/claude-sonnet-5`. Model-list operations verify credential access only and cannot
+admit a model outside the static catalogue. The normalized result includes exact requested/returned
+model ID, provider request ID, validated advisory analysis, anomalies/cautions/explanations/method
+proposals, usage/latency, output hash, and a redacted failure classification.
+
+The port exposes no tools, browsing, file/MCP/code/shell execution, credentials, arbitrary URLs,
+ranking operation, activation, risk change, or financial mutation. Response schemas contain no
+field that can change eligibility, metrics, weights, score, rank, selection proposal, active market,
+risk, or order state. Three TraderX-owned attempts are allowed; exhaustion returns a visible
+unavailable state, never an alternative model.
 
 ## Notification Port
 
@@ -174,7 +229,12 @@ Every adapter MUST pass contract tests for:
 - stale, missing, contradictory, and incomplete data;
 - rate limits, retry-after behavior, timeouts, and ambiguous outcomes;
 - canonical instrument alias/specification mapping;
-- incremental historical synchronization without overwriting evidence; and
-- absence of callable real-money order methods in broker implementations; and
+- incremental historical synchronization without overwriting evidence;
+- absence of callable real-money order methods in broker implementations;
 - MT5 native-EA enrollment identity, investor-mode/trading-disabled checks, rejected null responses,
-  account/server match, overlapping-deal reconciliation, and denied terminal API surface.
+  account/server match, overlapping-deal reconciliation, broker-specific evidence labels, optional
+  DOM, and denied terminal API surface;
+- specialist entitlement loss, provider retirement, capability negotiation, asset-aware mandatory
+  evidence, source conflicts, unchanged freshness during outage, and ordered fallback; and
+- LLM model allowlisting/pinning, secret/data minimization, strict local schema validation, refusal,
+  truncation, rate limit/timeout, deterministic-output immutability, and no automatic substitution.

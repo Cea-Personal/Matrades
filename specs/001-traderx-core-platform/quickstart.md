@@ -15,6 +15,10 @@ interfaces are defined under [contracts/](contracts/).
   test credentials only
 - For broker-adapter validation: a dedicated MT5 **demo** account using an investor/read-only
   password. The password is entered only into the local MT5 terminal, never into TraderX.
+- Licensed recorded or synthetic fixtures for CME Group, Cboe FX Spot, and Coinbase Exchange;
+  production entitlements and redistribution rights are not required for local tests.
+- A test OpenAI or Anthropic API project/model credential, or the contract test adapter. Never use
+  prompts containing account identity, equity, personal data, or integration secrets.
 - A test MFA authenticator and optional test Email/Telegram destinations
 
 Never place production secrets in shell history, repository files, fixtures, screenshots, or test
@@ -34,7 +38,8 @@ uv run pytest tests/contract
 
 Expected outcomes:
 
-- the generated web client compiles against [http-api.yaml](contracts/http-api.yaml);
+- the design contract in [http-api.yaml](contracts/http-api.yaml) reconciles with the FastAPI-
+  generated runtime OpenAPI before client generation;
 - every HTTP operation has a unique operation ID and versioned path;
 - event and provider-port fixtures validate;
 - no broker adapter or API operation exposes live order create/change/cancel/close;
@@ -123,6 +128,27 @@ Expected outcomes:
    duplicate deal, and partial response. None may be interpreted as an empty portfolio. Static
    safety tests must reject `OrderSend`, `OrderCheck`, `SymbolSelect`, and every order endpoint.
 
+### Reviewed market-data and LLM integrations
+
+1. In the existing Integrations panel confirm the fixed catalogue lists CME Group for Commodity,
+   Cboe FX Spot for Forex, Coinbase Exchange for Cryptocurrency, and the reviewed OpenAI/Anthropic
+   models. Attempt to enter an arbitrary URL/provider/model and confirm rejection.
+2. Connect each fixture adapter through the UI, test it, rotate a write-only test credential,
+   disable/re-enable it, and remove it. Confirm secrets never return and capability, venue,
+   entitlement, retention, health, and freshness remain visible.
+3. Map fixture venue instruments to MT5 broker symbols. Include one externally covered symbol that
+   MT5 does not support and one ambiguous CFD-to-benchmark mapping.
+4. Replay provider rate limits, entitlement loss, source conflict, missing depth, missing real
+   volume, and a retired catalogue/model entry.
+
+Expected outcomes:
+
+- only reviewed entries can become healthy integrations;
+- external coverage never makes an MT5-unsupported/ambiguous symbol eligible;
+- each observation identifies provider, venue, capability and
+  `ACTUAL`/`BROKER_PROXY`/`UNAVAILABLE` semantics; and
+- unavailable evidence remains unknown rather than becoming numeric zero.
+
 ### Shared fail-closed behavior
 
 1. Test, reconnect, and renew the MT5 enrollment code.
@@ -159,10 +185,47 @@ Run market-universe research from the UI and inspect the report.
 Expected outcomes:
 
 - data, liquidity, execution, broker, prop, and sizing gates run before final ranking;
+- Forex uses broker spread/tick/execution evidence without claiming a global book; Commodity uses
+  official traded volume/open interest and entitled depth; Crypto uses venue volume and book depth;
 - each ineligible candidate shows its evidence and cannot be approved;
-- the report preserves metrics, weights, methodology, dataset manifests, rank, and explanation;
+- the report preserves metrics, weights, methodology, source/fallback manifests, actual/proxy
+  semantics, rank, deterministic explanation, and optional advisory analysis;
 - the user may approve at most one eligible Commodity, Forex pair, and Cryptocurrency pair;
 - a later higher score recommends review but never silently replaces the current assignment.
+
+### Ordered source fallback
+
+1. For one category exhaust the specialist adapter's bounded retries.
+2. Supply current complete MT5 evidence and verify it is attempted first.
+3. Make MT5 insufficient, then supply a previously successful external dataset inside its original
+   freshness policy; repeat after advancing beyond that limit.
+4. Keep the other two categories independently valid.
+
+Expected outcomes: the trail is specialist retries → MT5 → fresh cached external → blocked. Stale
+cache is rejected without extending freshness; the affected active assignment is unchanged while
+the two valid categories may complete.
+
+### Schedule and global model
+
+1. Select one healthy approved LLM model, configure an anchored repeat interval/time zone, enable
+   the schedule, close the browser, and advance the fixture clock to the due time.
+2. Keep the coordinated job running across the next due time. Restart the scheduler/worker and
+   replay the same wake-up.
+3. Change the global model while a run is active, then start a later run.
+4. Inject conflicting analysis, invalid JSON/schema, refusal, rate limit, timeout, authentication
+   failure, and provider outage. Exhaust retries, then request an explicit analysis retry.
+
+Expected outcomes:
+
+- one due time creates exactly one durable coordinated parent job or one durable overlap skip,
+  with no concurrent/catch-up run even after duplicate wakeups;
+- each parent contains exactly one Commodity, Forex, and Crypto result;
+- the active run retains its pinned model and the later run uses the new global selection;
+- every invocation records provider/model/catalogue/prompt/schema/inference versions;
+- deterministic gates, metrics, scores, ranks, and selection proposals are byte-identical across
+  all injected LLM outcomes;
+- exhausted analysis is visibly unavailable and alerts the owner without changing models; and
+- explicit retry uses the same pinned model and never changes the deterministic report.
 
 ## 7. Validate Strategy Evidence and Reproducibility
 

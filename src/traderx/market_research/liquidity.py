@@ -53,22 +53,26 @@ def assess_asset_liquidity(
     if any(value < 0 for value in values):
         raise ValueError("liquidity metrics cannot be negative")
 
-    evidence: list[str] = ["TURNOVER", "SPREAD"]
+    if turnover <= 0:
+        raise ValueError("asset liquidity requires positive turnover or activity evidence")
+    evidence: list[str] = ["SPREAD"]
     if category == MarketCategory.CRYPTO:
         if quoted_depth is None:
             raise ValueError("cryptocurrency liquidity requires quoted depth")
         depth = quoted_depth
-        evidence.append("QUOTED_DEPTH")
+        evidence.extend(("TRADED_VOLUME_ACTUAL", "ORDER_BOOK_ACTUAL"))
     elif category == MarketCategory.COMMODITY:
-        if open_interest is None and tick_volume is None:
-            raise ValueError("commodity liquidity requires open interest or tick volume")
-        depth = open_interest if open_interest is not None else tick_volume or Decimal("0")
-        evidence.append("OPEN_INTEREST" if open_interest is not None else "TICK_VOLUME_PROXY")
+        if open_interest is None:
+            raise ValueError("commodity liquidity requires official venue open interest")
+        depth = quoted_depth if quoted_depth is not None else open_interest
+        evidence.extend(("TRADED_VOLUME_ACTUAL", "OPEN_INTEREST_ACTUAL"))
+        if quoted_depth is not None:
+            evidence.append("ORDER_BOOK_ACTUAL")
     else:
         if tick_volume is None:
             raise ValueError("forex liquidity requires broker tick volume")
         depth = tick_volume
-        evidence.append("TICK_VOLUME_PROXY")
+        evidence.extend(("BROKER_ACTIVITY_PROXY", "TICK_VOLUME_PROXY", "TICK_VOLUME_BROKER_PROXY"))
 
     modeled = spread_bps / Decimal("2") + Decimal("100000") / max(depth, Decimal("1"))
     slippage = observed_slippage_bps if observed_slippage_bps is not None else modeled

@@ -45,6 +45,17 @@ class Settings(BaseModel):
     encryption_key_b64: SecretStr = SecretStr("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
     session_idle_minutes: int = Field(default=30, ge=5, le=1440)
     session_absolute_hours: int = Field(default=12, ge=1, le=720)
+    provider_connect_timeout_seconds: int = Field(default=10, ge=1, le=60)
+    provider_read_timeout_seconds: int = Field(default=30, ge=1, le=180)
+    specialist_maximum_attempts: int = Field(default=3, ge=1, le=3)
+    llm_attempt_timeout_seconds: int = Field(default=180, ge=1, le=180)
+    llm_overall_timeout_seconds: int = Field(default=600, ge=1, le=600)
+    market_research_due_scan_seconds: int = Field(default=60, ge=15, le=300)
+    market_research_minimum_interval_seconds: int = Field(default=3600, ge=3600, le=2592000)
+    market_research_maximum_interval_seconds: int = Field(default=2592000, ge=3600, le=2592000)
+    provider_retention_posture: str = Field(
+        default="STANDARD", pattern=r"^(STANDARD|ADMIN_VERIFIED)$"
+    )
 
     @field_validator("session_pepper", "encryption_key_b64")
     @classmethod
@@ -69,6 +80,11 @@ class Settings(BaseModel):
         )
 
     def validate_startup(self) -> None:
+        if (
+            self.market_research_minimum_interval_seconds
+            > self.market_research_maximum_interval_seconds
+        ):
+            raise ValueError("market research interval bounds are invalid")
         if self.environment == "production":
             if self.session_pepper.get_secret_value() == "development-only-change-me":
                 raise ValueError("TRADERX_SESSION_PEPPER must be set in production")

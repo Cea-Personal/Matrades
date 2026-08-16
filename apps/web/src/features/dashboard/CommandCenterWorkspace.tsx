@@ -8,7 +8,7 @@ import { MarketsWorkspace } from "@/features/markets/MarketsWorkspace";
 import { Notifications } from "@/features/notifications/Notifications";
 import { OpportunitiesWorkspace } from "@/features/opportunities/OpportunitiesWorkspace";
 import { PaperWorkspace } from "@/features/paper/PaperWorkspace";
-import type { AccountSummary } from "@/features/risk/AccountRiskSetup";
+import { AccountRiskSetup, type AccountSummary } from "@/features/risk/AccountRiskSetup";
 import { StrategiesWorkspace } from "@/features/strategies/StrategiesWorkspace";
 import { Jobs } from "@/features/system/Jobs";
 import { SystemControl } from "@/features/system/SystemControl";
@@ -16,6 +16,7 @@ import { MonitoringWorkspace } from "@/features/trades/MonitoringWorkspace";
 
 type Workspace =
   | "integrations"
+  | "account-risk"
   | "markets"
   | "strategies"
   | "paper"
@@ -26,6 +27,7 @@ type Workspace =
 
 const workspaces: Array<{ id: Workspace; label: string; description: string }> = [
   { id: "integrations", label: "Account connection", description: "Manage your MT5 read-only account connection." },
+  { id: "account-risk", label: "Account & risk", description: "Review account identity and deliberately version governed risk limits." },
   { id: "markets", label: "Markets", description: "Research and explicitly approve eligible active markets." },
   { id: "strategies", label: "Strategies", description: "Build, test, and validate immutable strategy evidence." },
   { id: "paper", label: "Paper trading", description: "Compare current-data simulation with historical evidence." },
@@ -86,6 +88,7 @@ export function CommandCenterWorkspace({
       </nav>
       <div className="workspace-content">
         {current === "integrations" && (account ? <Integrations account={account} onAccountChanged={onAccountChanged} /> : <EmptyDataNotice area="Account connection" />)}
+        {current === "account-risk" && <AccountRiskSetup account={account} onAccountChanged={onAccountChanged} operational />}
         {current === "markets" && <MarketsWorkspace />}
         {current === "strategies" && <StrategiesWorkspace />}
         {current === "paper" && <PaperWorkspace />}

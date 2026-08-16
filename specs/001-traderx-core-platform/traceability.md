@@ -1,7 +1,7 @@
 # Requirements traceability
 
 Validated on 2026-08-14. The functional requirement ranges below cover every requirement from
-FR-001 through FR-094 without a gap. Task checkboxes remain the authoritative unit-level ledger.
+FR-001 through FR-105 without a gap. Task checkboxes remain the authoritative unit-level ledger.
 
 ## Functional requirements
 
@@ -18,6 +18,17 @@ FR-001 through FR-094 without a gap. Task checkboxes remain the authoritative un
 | FR-074–FR-078 journal and learning | T182–T195 | journal projection, annotations, protected attachments, analytics, proposals | journal projection/learning/contract and browser tests |
 | FR-079–FR-088 integrations/operations | T209–T233 | provider registry, secrets, jobs, notifications, health, audit, operations UI | integration/job/notification/audit contract/integration/browser tests |
 | FR-089–FR-094 security, UI, evidence, AI boundary | T015–T036, T209–T249, T251–T252 | authorization/audit, current UI, recovery, observability, negative capabilities | hardening, audit integrity, constitutional, accessibility and system-operation tests |
+| FR-095 fixed official source authority and semantics | T262–T270, T271–T293 | reviewed catalogue, MT5 evidence, CME/Cboe/Coinbase adapters, mappings, manifests, quality/fallback | specialist contract, source-authority, liquidity, fallback and MT5 safety tests |
+| FR-096 asset-aware deterministic gates | T273–T275, T289–T293 | broker veto, actual/proxy/unavailable evidence, Commodity/Forex/Crypto liquidity, unchanged suitability | data-quality, asset-liquidity, acceptance and constitutional tests |
+| FR-097 durable anchored automation | T265–T266, T276–T277, T298–T303 | schedule/occurrence/parent/children, DST due math, unique claims, overlap skip, scanner/leases | scheduler and coordinated-run integration tests |
+| FR-098 exactly-three coordinated outcomes | T277, T300–T304, T307–T309 | parent constraint, independent category children/outcomes, report and embedded Markets UI | coordinated/API/browser journey definitions and acceptance test |
+| FR-099 global reviewed LLM selection | T265, T267, T278, T294–T298, T304, T306–T309 | future-run configuration, exact pin, strict schema, OpenAI/Anthropic adapters | LLM-boundary and automation API tests |
+| FR-100 deterministic authority over LLM | T278, T294–T297, T309, T321–T322 | minimized prompt, no tools, strict advisory output, immutable deterministic hash | LLM-boundary, static negative-capability and acceptance tests |
+| FR-101 bounded same-source fallback | T269, T275, T288–T293, T301 | specialist retry → current MT5 → originally-fresh cache → block | fallback safety and acceptance tests |
+| FR-102 reviewed provider operations | T311–T320 | catalogue-bound encrypted lifecycle, qualification/health, existing Integration/System UI | provider contract/security and UI journey definitions |
+| FR-103 source/model/schedule evidence visibility | T304–T310, T319–T320 | coordinated report, Instrument Library, System health, durable notifications | API contract, strict web checks, browser journey definitions |
+| FR-104 human activation/replacement separation | T293, T300, T304, T308–T309, T321–T322 | proposal-only category results, preserved active assignment, existing approval component | acceptance/constitutional tests and active-market tests |
+| FR-105 retained evidence and recovery | T264–T266, T288–T305, T325–T329 | immutable manifests/raw hashes, pins/attempts/events, leases, operator recovery runbook | migration, scheduler, backup/recovery and acceptance tests |
 
 ## Success criteria
 
@@ -45,10 +56,21 @@ must not be represented as production evidence.
 | SC-016 90% moderated core-workflow completion | T103, T132, T150, T169, T185, T199, T214, T240 | 19 browser journeys pass; moderated user study OPEN |
 | SC-017 no real-money execution path | T040, T148, T150, T234–T235 | static/OpenAPI/MT5/source negative-capability tests — PASS (automated) |
 | SC-018 90% user explanation success | T095, T127, T160, T240 | evidence UI and accessibility journeys pass; moderated comprehension study OPEN |
+| SC-019 unique browser-independent occurrences | T276–T277, T299–T303, T322–T323 | unique-claim/DST/overlap/recovery and due-math performance tests — PASS (automated); live restart drill OPEN |
+| SC-020 authoritative complete source evidence | T271–T293, T310, T321–T322 | provider, mapping, MT5 veto, asset-liquidity, fallback and conflict tests — PASS (automated); production entitlements OPEN |
+| SC-021 exact LLM pin and deterministic independence | T278, T294–T309, T321–T322 | invalid/rate-limit/timeout/retry tests retain deterministic hash and exact model — PASS (automated) |
+| SC-022 usable three-category automation | T279–T280, T304–T310, T313, T324 | API/Vitest/lint/type/build pass; new Playwright journeys authored, current execution BLOCKED by local-server permission |
 
 ## Release consequence
 
-All 94 functional requirements are mapped to implementation and automated evidence. The 18 success
-criteria are individually mapped, but SC-001, SC-003, SC-012, SC-013, SC-014, SC-016, and SC-018
-still require production-like or moderated measurements. T247 remains incomplete until those rows
-have passing evidence rather than only automated proxies.
+All 105 functional requirements and 22 success criteria are mapped. The original market,
+strategy, paper, opportunity, monitoring, journal/retention, and operations closures are backed by
+persisted services, authorized routes, the current Command Center workspaces, and the automated
+evidence named above; no phase creates an order or automatic lifecycle promotion.
+
+SC-001, SC-003, SC-012–SC-014, SC-016, and SC-018 still require production-like or moderated
+measurements. SC-019 needs a running restart drill, SC-020 needs legally usable production
+entitlements, and SC-022 needs execution of the two newly added Playwright journeys. The current
+sandbox refused the local Next test server bind on port 3100, so that evidence is explicitly open
+rather than inferred from lint/type/build success. T247/T328 documentation is complete, while the
+production release remains blocked on the open external evidence.

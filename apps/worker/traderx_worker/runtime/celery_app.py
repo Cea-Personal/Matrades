@@ -30,6 +30,7 @@ celery_app.conf.update(
         "traderx.broker.*": {"queue": "monitoring"},
         "traderx.monitoring.*": {"queue": "monitoring"},
         "traderx.market_data.*": {"queue": "data"},
+        "traderx.market_research.*": {"queue": "research"},
         "traderx.research.*": {"queue": "research"},
         "traderx.paper.*": {"queue": "paper"},
         "traderx.validation.*": {"queue": "research"},
@@ -58,9 +59,9 @@ celery_app.conf.update(
             "schedule": 60.0,
             "args": ["all"],
         },
-        "research-market-rotation": {
-            "task": "traderx.market_rotation.research",
-            "schedule": 86400.0,
+        "scan-due-market-research": {
+            "task": "traderx.market_rotation.scan_due",
+            "schedule": 60.0,
         },
         "deliver-notifications": {
             "task": "traderx.operations.notifications",
@@ -69,6 +70,10 @@ celery_app.conf.update(
         "poll-operational-health": {
             "task": "traderx.operations.health",
             "schedule": 60.0,
+        },
+        "run-queued-provider-qualifications": {
+            "task": "traderx.operations.run_queued_qualifications",
+            "schedule": 5.0,
         },
     },
     broker_connection_retry_on_startup=True,

@@ -6,6 +6,7 @@ from decimal import Decimal
 from enum import StrEnum
 
 from traderx.market_data.ingestion import CanonicalBar
+from traderx.market_data.source_evidence import ConflictState, FreshnessState, SourceEvidence
 from traderx.shared.types import DataQuality
 
 
@@ -137,3 +138,37 @@ def project_fail_closed_status(current_status: str, result: QualityResult) -> st
     if result.quality != DataQuality.VERIFIED:
         return "QUARANTINED"
     return "INACTIVE" if current_status == "QUARANTINED" else current_status
+
+
+def assess_required_source_capabilities(
+    evidence: list[SourceEvidence], *, required_capabilities: set[str]
+) -> QualityResult:
+    """Fail closed when any required capability is absent, stale, partial, or conflicting."""
+
+    reasons: list[str] = []
+    by_capability: dict[str, list[SourceEvidence]] = {}
+    for item in evidence:
+        by_capability.setdefault(item.capability, []).append(item)
+    for capability in sorted(required_capabilities):
+        candidates = by_capability.get(capability, [])
+        if not candidates:
+            reasons.append(f"{capability}_UNAVAILABLE")
+            continue
+        if not any(item.complete for item in candidates):
+            reasons.append(f"{capability}_INCOMPLETE")
+        if not any(item.freshness == FreshnessState.FRESH for item in candidates):
+            reasons.append(f"{capability}_STALE")
+        if any(item.conflict_state == ConflictState.MATERIAL_CONFLICT for item in candidates):
+            reasons.append(f"{capability}_CONTRADICTORY")
+        if not any(item.qualifies for item in candidates):
+            reasons.append(f"{capability}_NOT_VERIFIED")
+    if not reasons:
+        return QualityResult(DataQuality.VERIFIED, ())
+    quality = (
+        DataQuality.CONTRADICTORY
+        if any(reason.endswith("_CONTRADICTORY") for reason in reasons)
+        else DataQuality.STALE
+        if reasons and all(reason.endswith("_STALE") for reason in reasons)
+        else DataQuality.QUARANTINED
+    )
+    return QualityResult(quality, tuple(sorted(set(reasons))))

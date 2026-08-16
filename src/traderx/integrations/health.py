@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
+
+from traderx.integrations.model import Integration, IntegrationHealthObservation
+from traderx.integrations.registry import approved_provider
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,3 +39,32 @@ def operational_components(
         "HEALTHY" if account_age_seconds is not None and account_age_seconds <= 90 else "DEGRADED"
     )
     return components
+
+
+def provider_health_state(
+    integration: Integration,
+    latest: IntegrationHealthObservation | None = None,
+    *,
+    now: datetime | None = None,
+    maximum_age_seconds: int = 300,
+) -> tuple[str, tuple[str, ...]]:
+    """Aggregate lifecycle, entitlement, qualification, and freshness fail-closed."""
+
+    definition = approved_provider(integration.provider)
+    if integration.state == "DISABLED":
+        return "DISABLED", tuple(sorted(integration.capabilities))
+    if integration.state in {"FAILED", "REMOVED"}:
+        return "FAILED", tuple(sorted(integration.capabilities))
+    if definition.entitlement_required and integration.entitlement_status != "VERIFIED":
+        return "DEGRADED", tuple(sorted(integration.capabilities))
+    if latest is not None and latest.status == "FAILED":
+        return "FAILED", tuple(sorted(latest.affected_capabilities or integration.capabilities))
+    if now is not None and latest is not None:
+        observed_at = latest.observed_at
+        if observed_at.tzinfo is None:
+            observed_at = observed_at.replace(tzinfo=now.tzinfo)
+        if (now - observed_at).total_seconds() > maximum_age_seconds:
+            return "DEGRADED", tuple(sorted(integration.capabilities))
+    if integration.state == "HEALTHY" and latest is not None and latest.status == "HEALTHY":
+        return "HEALTHY", ()
+    return "DEGRADED", tuple(sorted(integration.capabilities))

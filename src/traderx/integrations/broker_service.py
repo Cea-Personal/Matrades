@@ -20,6 +20,7 @@ from traderx.integrations.broker_model import (
     Mt5BridgeAgent,
 )
 from traderx.integrations.model import Integration, IntegrationHealthObservation
+from traderx.integrations.mt5_bridge import Mt5BridgeError, normalize_native_market_evidence
 from traderx.integrations.reconciliation import (
     NormalizedBrokerSnapshot,
     commit_authoritative_snapshot,
@@ -299,6 +300,10 @@ def ingest_managed_mt5_snapshot(
     if not terminal_version.strip():
         raise InvalidTransition("the MT5 bridge returned no terminal version")
     now = datetime.now(UTC)
+    try:
+        normalized_instruments = normalize_native_market_evidence(instruments, received_at=now)
+    except Mt5BridgeError as error:
+        raise InvalidTransition(str(error)) from error
     agent.last_seen_at = now
     agent.last_snapshot_at = now
     agent.latest_snapshot = {
@@ -307,7 +312,7 @@ def ingest_managed_mt5_snapshot(
         "currency": currency.upper(),
         "positions": positions,
         "deals": deals,
-        "instruments": instruments,
+        "instruments": normalized_instruments,
         "terminal_version": terminal_version,
     }
     integration.state = "HEALTHY"

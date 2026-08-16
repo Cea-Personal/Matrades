@@ -34,6 +34,18 @@ class ProviderBatch:
     retrieved_at: datetime
     payload: bytes
     cursor: str | None = None
+    venue: str | None = None
+    capability: str = "CANDLES"
+    semantics: str = "UNAVAILABLE"
+    source_role: str = "SPECIALIST_PRIMARY"
+    catalogue_revision: str | None = None
+    adapter_revision: str | None = None
+    mapping_revision: str | None = None
+    freshness_policy_version: str | None = None
+    retry_policy_version: str | None = None
+    entitlement_status: str = "UNVERIFIED"
+    source_observed_at: datetime | None = None
+    raw_reference: str | None = None
 
     @property
     def content_hash(self) -> str:
@@ -51,6 +63,7 @@ class ParquetArtifact:
     coverage_start: datetime | None
     coverage_end: datetime | None
     cursor: str | None
+    source_manifest: dict[str, object]
 
 
 def normalize_bar(raw: dict[str, object]) -> CanonicalBar:
@@ -129,6 +142,13 @@ def build_parquet_artifact(
             "provider": [batch.provider for _ in normalized],
             "provider_symbol": [batch.provider_symbol for _ in normalized],
             "retrieved_at": [retrieved_at for _ in normalized],
+            "venue": [batch.venue for _ in normalized],
+            "capability": [batch.capability for _ in normalized],
+            "semantics": [batch.semantics for _ in normalized],
+            "source_role": [batch.source_role for _ in normalized],
+            "catalogue_revision": [batch.catalogue_revision for _ in normalized],
+            "adapter_revision": [batch.adapter_revision for _ in normalized],
+            "mapping_revision": [batch.mapping_revision for _ in normalized],
         }
     )
     target = io.BytesIO()
@@ -142,6 +162,29 @@ def build_parquet_artifact(
         coverage_start=normalized[0].observed_at if normalized else None,
         coverage_end=normalized[-1].observed_at if normalized else None,
         cursor=batch.cursor,
+        source_manifest={
+            "provider": batch.provider,
+            "provider_symbol": batch.provider_symbol,
+            "venue": batch.venue,
+            "capability": batch.capability,
+            "semantics": batch.semantics,
+            "source_role": batch.source_role,
+            "catalogue_revision": batch.catalogue_revision,
+            "adapter_revision": batch.adapter_revision,
+            "mapping_revision": batch.mapping_revision,
+            "freshness_policy_version": batch.freshness_policy_version,
+            "retry_policy_version": batch.retry_policy_version,
+            "entitlement_status": batch.entitlement_status,
+            "source_observed_at": (
+                _utc_instant(batch.source_observed_at).isoformat()
+                if batch.source_observed_at is not None
+                else None
+            ),
+            "retrieved_at": retrieved_at.isoformat(),
+            "source_hash": batch.content_hash,
+            "raw_reference": batch.raw_reference,
+            "complete": bool(normalized),
+        },
     )
 
 

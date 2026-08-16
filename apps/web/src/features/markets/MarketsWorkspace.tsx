@@ -2,8 +2,11 @@
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 
+import type { CoordinatedMarketResearchReport } from "@/lib/api/generated";
+
 import { ActiveMarkets, type ActiveMarket } from "./ActiveMarkets";
-import { InstrumentLibrary, type MarketInstrument } from "./InstrumentLibrary";
+import { InstrumentLibrary, type MarketInstrument, type SpecialistIntegration } from "./InstrumentLibrary";
+import { MarketResearchControls } from "./MarketResearchControls";
 import { MarketResearchReport, type MarketCandidate } from "./MarketResearchReport";
 import { MarketRotation } from "./MarketRotation";
 
@@ -39,8 +42,10 @@ async function readJson<T>(response: Response): Promise<T> {
 export function MarketsWorkspace() {
   const [category, setCategory] = useState<MarketCategory>("FOREX");
   const [instruments, setInstruments] = useState<MarketInstrument[]>([]);
+  const [specialistIntegrations, setSpecialistIntegrations] = useState<SpecialistIntegration[]>([]);
   const [activeMarkets, setActiveMarkets] = useState<ActiveMarket[]>([]);
   const [report, setReport] = useState<MarketReport>();
+  const [coordinatedReport, setCoordinatedReport] = useState<CoordinatedMarketResearchReport>();
   const [candidate, setCandidate] = useState<MarketCandidate>();
   const [deactivation, setDeactivation] = useState<ActiveMarket>();
   const [busy, setBusy] = useState(false);
@@ -49,17 +54,20 @@ export function MarketsWorkspace() {
 
   const loadEvidence = useCallback(async (selectedCategory: MarketCategory) => {
     try {
-      const [libraryResponse, activeResponse] = await Promise.all([
+      const [libraryResponse, activeResponse, integrationsResponse] = await Promise.all([
         fetch(`/api/v1/markets/instruments?category=${selectedCategory}`, { credentials: "same-origin" }),
-        fetch("/api/v1/markets/active", { credentials: "same-origin" })
+        fetch("/api/v1/markets/active", { credentials: "same-origin" }),
+        fetch("/api/v1/integrations/non-broker", { credentials: "same-origin" })
       ]);
-      if (!libraryResponse.ok || !activeResponse.ok) {
+      if (!libraryResponse.ok || !activeResponse.ok || !integrationsResponse.ok) {
         throw new Error("market evidence unavailable");
       }
       const library = await readJson<{ items: MarketInstrument[] }>(libraryResponse);
       const active = await readJson<{ items: ActiveMarket[] }>(activeResponse);
+      const integrations = await readJson<{ items: SpecialistIntegration[] }>(integrationsResponse);
       setInstruments(library.items);
       setActiveMarkets(active.items);
+      setSpecialistIntegrations(integrations.items);
       setError(undefined);
     } catch {
       setError("TraderX could not load market evidence. Refresh the workspace and try again.");
@@ -107,6 +115,45 @@ export function MarketsWorkspace() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function retryPinnedAnalysis(runId: string) {
+    setBusy(true); setError(undefined); setMessage(undefined);
+    try {
+      const response = await fetch(`/api/v1/markets/research/category-runs/${runId}/llm-analysis/retry`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Idempotency-Key": crypto.randomUUID() }
+      });
+      const result = await readJson<{ state?: string } & ApiProblem>(response);
+      if (!response.ok) { setError(problemMessage(result)); return; }
+      setMessage("Advisory analysis retry was queued with the same pinned model. Deterministic results remain unchanged.");
+    } catch {
+      setError("TraderX could not queue the same-model analysis retry.");
+    } finally { setBusy(false); }
+  }
+
+  async function approveMapping(instrument: MarketInstrument, mapping: { integrationId: string; providerSymbol: string; venue: string; contractVariant?: string; reason: string }) {
+    setBusy(true); setError(undefined); setMessage(undefined);
+    try {
+      const response = await fetch(`/api/v1/markets/instruments/${instrument.id}/mapping`, {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", "If-Match": `"instrument-${instrument.id}-${instrument.version ?? 1}"`, "Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({ integration_id: mapping.integrationId, provider_symbol: mapping.providerSymbol, venue: mapping.venue, contract_variant: mapping.contractVariant, mapping_revision: "owner-mapping-v1", reason: mapping.reason })
+      });
+      const result = await readJson<{ status?: string } & ApiProblem>(response);
+      if (!response.ok) { setError(problemMessage(result)); return; }
+      setMessage(`${instrument.symbol} now has an approved specialist mapping. The next run will still verify entitlement, freshness, and every deterministic gate.`);
+      await loadEvidence(category);
+    } catch { setError("TraderX could not approve the specialist symbol mapping."); }
+    finally { setBusy(false); }
+  }
+
+  function reviewCandidate(selected: MarketCandidate) {
+    if (selected.category) setCategory(selected.category);
+    setDeactivation(undefined);
+    setCandidate(selected);
   }
 
   async function approveCandidate(event: FormEvent<HTMLFormElement>) {
@@ -185,6 +232,11 @@ export function MarketsWorkspace() {
 
   return (
     <div className="market-workspace">
+      <MarketResearchControls
+        onReport={(completed) => { setCoordinatedReport(completed); setReport(undefined); }}
+        onStatus={(statusMessage, isError = false) => { if (isError) { setError(statusMessage); setMessage(undefined); } else { setMessage(statusMessage); setError(undefined); } }}
+      />
+      {coordinatedReport ? <MarketResearchReport coordinated={coordinatedReport} onRetry={(runId) => void retryPinnedAnalysis(runId)} onReview={reviewCandidate} /> : null}
       <section aria-labelledby="market-category-heading">
         <p className="section-kicker">Active universe</p>
         <h3 id="market-category-heading">Research one governed market category</h3>
@@ -208,8 +260,8 @@ export function MarketsWorkspace() {
       </section>
 
       <ActiveMarkets assignments={activeMarkets} onDeactivate={(assignment) => { setCandidate(undefined); setDeactivation(assignment); }} />
-      <InstrumentLibrary busy={busy} instruments={instruments} onRunResearch={runResearch} />
-      {report ? <MarketResearchReport candidates={report.candidates} methodologyVersion={report.methodology_version} onReview={setCandidate} /> : null}
+      <InstrumentLibrary busy={busy} instruments={instruments} integrations={specialistIntegrations} onApproveMapping={(instrument, mapping) => void approveMapping(instrument, mapping)} onRunResearch={runResearch} />
+      {report ? <MarketResearchReport candidates={report.candidates} methodologyVersion={report.methodology_version} onReview={reviewCandidate} /> : null}
       <MarketRotation />
 
       {candidate ? (

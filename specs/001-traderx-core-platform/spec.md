@@ -28,6 +28,18 @@ TraderX Speckit Specify v1.0.0 document."
 - Q: When scheduled agent research finds a new highest-volatility, deeply liquid eligible instrument, should it only recommend the change or automatically change the active market? → A: Agent recommends; human approves.
 - Q: How should the owner configure when recurring market research runs? → A: Repeat interval plus anchored start time.
 - Q: May research agents change the market-suitability method or its volatility and liquidity weights during scheduled runs? → A: Use the approved method and propose changes for human approval.
+- Q: What should TraderX do when the next scheduled market-research time arrives while the previous run is still running? → A: Skip and record the overlapping occurrence.
+- Q: How should TraderX handle a scheduled market-research run that fails because an official data source or provider is temporarily unavailable? → A: Bounded retries, then fail and alert.
+- Q: Should scheduled market research use only data from the connected MT5 broker, or combine MT5 with additional approved official market-data APIs and datasets? → A: Combine MT5 with approved official sources.
+- Q: How should TraderX admit additional market-data sources? → A: Use a fixed approved catalogue of built-in provider adapters, with owner-supplied credentials connected through the authenticated UI.
+- Q: How should the fixed catalogue cover Commodity, Forex, and Cryptocurrency? → A: Use a specialized primary provider adapter for each asset class, with optional approved verification sources.
+- Q: What liquidity evidence should be mandatory before ranking? → A: Apply asset-aware gates: broker spread, quote/tick activity, and execution proxies for Forex; official volume, open interest, and available depth for commodities; and venue volume plus order-book depth for cryptocurrency.
+- Q: If one category's specialist source remains unavailable after retries, what should the coordinated run do? → A: First attempt the affected category with current MT5 evidence, then try its most recent successful external dataset; use either fallback only if it remains complete, coherent, within its approved freshness limit, and satisfies the category's mandatory evidence gates, otherwise block that category.
+- Q: At what scope should the owner choose the LLM model used for market research? → A: Use one global model setting for every Commodity, Forex, and Cryptocurrency market-research agent.
+- Q: Where should the selectable LLM models come from? → A: Use a fixed catalogue of approved LLM providers and models, with owner-supplied provider credentials managed through the authenticated Integrations UI.
+- Q: When should a change to the global LLM model take effect? → A: Apply it only to future runs; every run pins and records the provider and model selected when that run starts.
+- Q: Which parts of market research should the selected LLM be allowed to control? → A: The LLM may analyze evidence, identify anomalies, explain results, and propose improvements; deterministic versioned rules exclusively control eligibility, metrics, scoring, ranking, and selection proposals.
+- Q: What should happen when the selected LLM remains unavailable or returns invalid output after bounded retries? → A: Complete and publish the deterministic research result, mark LLM analysis unavailable, alert the owner, and require an explicit retry with the same selected model rather than switching models automatically.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -110,6 +122,53 @@ category, and later replace one only through explicit confirmation.
    weights, **When** it completes the current run, **Then** the recorded ranking still uses the
    approved method version and the improvement remains a separate proposal until an authorized
    human approves a new version.
+8. **Given** a scheduled market-research run is still active, **When** the next occurrence becomes
+   due, **Then** TraderX does not start a concurrent or catch-up run, records the occurrence as
+   skipped because research is already running, and preserves the next regular run time.
+9. **Given** an official provider fails during scheduled research, **When** the bounded retry policy
+   is exhausted, **Then** TraderX marks the run failed, alerts the owner, preserves the existing
+   active assignments and next regular run time, and creates no recommendation from partial,
+   stale, or incomplete evidence.
+10. **Given** MT5 and approved official market-data sources are connected, **When** a coordinated
+   research run evaluates candidates, **Then** MT5 determines broker support, broker symbol and
+   execution feasibility while approved official sources supplement history, actual volume and
+   depth evidence; external evidence cannot make a broker-unsupported instrument eligible.
+11. **Given** an owner manages research data integrations, **When** they connect a source, **Then**
+   TraderX offers only reviewed built-in provider adapters, accepts and protects the required
+   credentials through the authenticated UI, and does not treat an arbitrary endpoint as an
+   approved source.
+12. **Given** a coordinated three-category research run, **When** it gathers market evidence,
+   **Then** each category uses its configured specialized primary provider and asset-appropriate
+   measures, may cross-check them with approved verification sources, and never substitutes one
+   category's liquidity model for another's.
+13. **Given** candidates from different asset classes, **When** TraderX applies mandatory liquidity
+   gates, **Then** it uses broker spread, quote/tick activity, and execution proxies for Forex;
+   official traded volume, open interest, and available depth for commodities; and venue volume
+   plus order-book depth for cryptocurrency, with every unavailable required measure recorded as
+   missing evidence rather than zero.
+14. **Given** one category's specialist source remains unavailable after bounded retries, **When**
+   the coordinated run applies its fallback policy, **Then** it first tries current MT5 evidence,
+   then the most recent successful external dataset, accepts a fallback only when it is complete,
+   coherent, fresh, and passes that category's mandatory gates, and otherwise blocks that category
+   without changing its active market while unaffected categories may complete.
+15. **Given** an authorized owner selects the global market-research LLM model, **When** a manual or
+   scheduled coordinated research run starts, **Then** every Commodity, Forex, and Cryptocurrency
+   research agent uses that same configured model rather than a category-specific override.
+16. **Given** an owner configures the market-research model, **When** they open the model selector,
+   **Then** TraderX lists only models exposed by reviewed provider adapters whose required
+   credentials can be connected and tested through the authenticated Integrations UI, and does not
+   accept an arbitrary endpoint or unreviewed model identifier.
+17. **Given** a market-research run is active, **When** an owner changes the global LLM model,
+   **Then** the active run continues with its pinned provider and model while every subsequently
+   started manual or scheduled run uses the new selection.
+18. **Given** the selected LLM produces an analysis that conflicts with the deterministic research
+   engine, **When** TraderX creates the result, **Then** the versioned eligibility gates, metrics,
+   suitability score, rank, and selection proposal remain unchanged while the conflicting model
+   output is labelled and retained only as non-authoritative analysis.
+19. **Given** the pinned LLM remains unavailable or returns invalid output after bounded retries,
+   **When** the deterministic research engine has complete and valid evidence, **Then** TraderX
+   completes the deterministic ranking and selection proposal, marks LLM analysis unavailable,
+   alerts the owner, and does not switch models automatically.
 
 ---
 
@@ -300,6 +359,8 @@ through authenticated screens.
 - Market data is fresh but contract specifications, tick value, or minimum volume are missing.
 - The most volatile candidate has unreliable history, a wide spread, shallow depth, excessive
   slippage, unacceptable gaps, or a prop-firm restriction.
+- MT5 provides tick volume but no real volume or Depth of Market for a symbol, or its broker-specific
+  activity evidence conflicts materially with an approved external source.
 - Two candidates have equal suitability scores or insufficient evidence to distinguish them.
 - Market-universe research completes with no eligible instrument in one category.
 - A market ranking changes while the user is reviewing a replacement.
@@ -312,6 +373,9 @@ through authenticated screens.
 - A recommendation expires at the same moment a manually opened broker position is detected.
 - A circuit breaker activates while background research and paper trading are running.
 - An integration fails during a long-running job and later recovers.
+- The pinned LLM times out, is rate-limited, is removed from its provider, or repeatedly returns
+  output that does not satisfy the reviewed adapter's response contract.
+- A scheduled market-research occurrence becomes due while its preceding run is still active.
 - The same trade update arrives more than once or arrives out of order.
 - An unauthorized role attempts to approve a strategy, relax risk, replace a market, rotate a
   secret, or override a circuit breaker.
@@ -383,8 +447,9 @@ through authenticated screens.
   one active Cryptocurrency pair.
 - **FR-016**: Active instrument identifiers MUST be selected from research and MUST NOT be
   permanently hardcoded.
-- **FR-017**: For each category, TraderX MUST discover candidates supported by the configured
-  broker and approved data sources.
+- **FR-017**: For each category, TraderX MUST discover candidates supported by the configured MT5
+  broker account and covered by sufficient approved data sources. The connected MT5 broker
+  universe MUST be authoritative for broker support and execution eligibility.
 - **FR-018**: Before volatility ranking, TraderX MUST evaluate each candidate for historical and
   live data availability, freshness and quality, liquidity, volume, spread, depth where available,
   expected slippage, execution quality, contract specifications, tick size and value, minimum
@@ -395,7 +460,72 @@ through authenticated screens.
 - **FR-020**: TraderX MUST evaluate volatility over multiple short-, medium-, and long-term windows
   using multiple appropriate measures rather than a single session or indicator.
 - **FR-021**: TraderX MUST evaluate liquidity and execution using the best reliable measures
-  available for each asset class.
+  available for each asset class. MT5 tick volume, quote frequency, spread, and Depth of Market
+  MUST be identified as broker-specific evidence rather than global market liquidity; unavailable
+  real volume or depth MUST be recorded as unavailable and MUST NOT be interpreted as zero.
+- **FR-096**: Market research MUST use layered source authority. The connected MT5 account MUST
+  supply broker symbol mapping, instrument availability, contract and volume specifications,
+  trading mode and hours, current bid/ask and spread, and broker-supplied activity or depth when
+  available. Approved official APIs or datasets MAY supplement longer historical prices, actual
+  traded volume, turnover, open interest, and order-book depth. TraderX MUST record every source,
+  capability, observation time, freshness, instrument mapping, and whether each measure is actual
+  or a proxy; it MUST quarantine materially conflicting evidence and MUST NOT create a market
+  recommendation until all mandatory evidence is coherent and fresh.
+- **FR-097**: TraderX MUST maintain a fixed, deny-by-default catalogue of reviewed market-data
+  provider adapters. Authorized owners MUST be able to connect, test, disable, rotate credentials
+  for, and remove a catalogue source through the authenticated Integrations UI. Secrets MUST be
+  encrypted, masked after entry, excluded from logs and research evidence, and inaccessible to
+  research agents. A generic URL, arbitrary API, or agent-selected source MUST NOT acquire approved
+  status without a reviewed adapter and an explicit catalogue change.
+- **FR-098**: The V1 catalogue MUST support a specialized primary market-data adapter for each of
+  Commodity, Forex, and Cryptocurrency rather than requiring one provider to represent every asset
+  class. Each adapter MUST declare its authoritative and proxy capabilities, supported venues and
+  instruments, historical coverage, update frequency, and licensing constraints. TraderX MAY use
+  additional approved verification sources, but MUST preserve per-source observations and MUST NOT
+  merge asset-class measures as though they were equivalent.
+- **FR-099**: Mandatory liquidity gates MUST be asset-aware. Forex evaluation MUST use current and
+  rolling broker spreads, quote or tick activity, data freshness, and available execution-quality
+  proxies and MUST NOT claim or require a global consolidated order book. Commodity evaluation
+  MUST use official venue traded volume and open interest and MUST use order-book depth when the
+  entitled source and instrument provide it. Cryptocurrency evaluation MUST use actual selected-
+  venue traded volume and order-book depth. Any required measure that is unavailable, stale, or
+  invalid MUST remain explicitly unknown and MUST block that candidate rather than be converted to
+  zero or replaced silently by a weaker measure.
+- **FR-100**: After the bounded retries for a category's unavailable specialist source are
+  exhausted, TraderX MUST apply this ordered fallback chain: first current MT5 evidence; then the
+  most recent successful external dataset for that category. A fallback MUST be explicitly labelled
+  with its source and reason, MUST satisfy the same mandatory asset-aware evidence gates, and MUST
+  be complete, internally coherent, consistent with current MT5 broker support, and within its
+  approved capability-specific freshness limit. TraderX MUST NOT extend a freshness limit because
+  a provider is unavailable. If neither fallback qualifies, the category MUST be blocked with no
+  new recommendation and no change to its active assignment; unaffected categories MAY complete.
+- **FR-101**: Authorized owners MUST be able to select and inspect one global LLM model setting for
+  all market-research agents through the authenticated UI. The same setting MUST govern Commodity,
+  Forex, and Cryptocurrency research for both manual and scheduled runs; V1 MUST NOT support
+  category-specific model overrides.
+- **FR-102**: TraderX MUST maintain a fixed, deny-by-default catalogue of reviewed LLM provider
+  adapters and permitted model identifiers. Authorized owners MUST be able to connect, test,
+  disable, rotate credentials for, and remove an LLM provider through the authenticated
+  Integrations UI. Provider secrets MUST be encrypted, masked after entry, excluded from prompts,
+  evidence and logs, and unavailable to research agents. An arbitrary endpoint or unreviewed model
+  identifier MUST NOT be selectable for production market research.
+- **FR-103**: When a market-research run starts, TraderX MUST atomically pin the selected LLM
+  provider, exact model identifier, catalogue revision, and relevant inference-policy version to
+  the run. A later configuration change MUST affect only runs that have not started, MUST NOT alter
+  an active or completed run, and MUST record the actor, previous and new selection, timestamp, and
+  reason in the audit history.
+- **FR-104**: The selected LLM MAY analyze normalized approved evidence, identify anomalies,
+  summarize findings, explain deterministic results, and propose future methodology improvements.
+  Only the versioned deterministic research engine MAY apply eligibility gates, calculate
+  volatility or liquidity measures and suitability scores, rank candidates, or create the market
+  selection proposal. LLM output MUST be treated as non-authoritative, MUST NOT modify a run's
+  inputs or approved method, and MUST NOT weaken, bypass, or override any evidence or safety gate.
+- **FR-105**: LLM invocation MUST use a finite, versioned retry policy for timeout, rate-limit,
+  provider, and invalid-response failures. After exhaustion, TraderX MUST complete any independently
+  valid deterministic market-research result, mark LLM analysis unavailable with a user-visible
+  reason, alert the owner, and preserve the failure evidence. TraderX MUST NOT select a different
+  model automatically; an authorized user MAY explicitly retry the analysis with the run's pinned
+  model while that run remains eligible for retry.
 - **FR-022**: TraderX MUST calculate a composite Market Suitability result that balances volatility
   opportunity, liquidity, execution, data quality, strategy opportunity, trading costs, gap risk,
   and prop-firm risk.
@@ -423,11 +553,20 @@ through authenticated screens.
 - **FR-095**: Authorized users MUST be able to enable recurring agent-driven market-universe
   research through the authenticated UI by choosing a repeat interval and an anchored start time.
   TraderX MUST interpret the schedule in the configured account time zone, persist its enabled
-  state and next run time, and execute it server-side while the browser is closed. Each scheduled
-  run MUST pin and apply the currently approved method version and the complete eligibility,
-  volatility, liquidity, suitability, evidence, and audit rules independently. It MAY create an
-  activation, replacement, or future-method proposal, but MUST NOT change an active market or
-  research method without explicit authorized human approval.
+  state and next run time, and execute it server-side while the browser is closed. One occurrence
+  MUST trigger one coordinated run covering Commodity, Forex, and Cryptocurrency and recommending
+  no more than one highest-ranked eligible instrument per category. Each scheduled run MUST pin
+  and apply the currently approved method version and the complete eligibility, volatility,
+  liquidity, suitability, evidence, and audit rules independently. It MAY create an activation,
+  replacement, or future-method proposal, but MUST NOT change an active market or research method
+  without explicit authorized human approval. Only one run for the schedule MAY be active at a
+  time; if another occurrence becomes due, TraderX MUST record it as skipped because research is
+  already running, MUST NOT queue a catch-up run, and MUST preserve the next regular occurrence.
+  Provider or data-source failures MUST use a finite, versioned retry policy with increasing
+  delays; after exhaustion, TraderX MUST apply the per-category fallback policy in FR-100. Any
+  category without complete, coherent, fresh mandatory evidence MUST be marked blocked, MUST alert
+  the owner, MUST preserve its existing active assignment and the next regular occurrence, and
+  MUST create no recommendation; independently valid categories MAY complete.
 
 #### Research and Strategy Lifecycle
 
@@ -613,9 +752,19 @@ through authenticated screens.
 - **Instrument**: A broker-supported Commodity, Forex pair, or Cryptocurrency pair with contract
   specifications, data and execution status, active state, and permanent knowledge history.
 - **Market Research Run**: A versioned evaluation of a category's candidate universe, eligibility
-  gates, volatility/liquidity evidence, suitability method, rankings, recommendation, and approval.
+  gates, volatility/liquidity evidence, suitability method, rankings, recommendation, approval,
+  and pinned LLM provider, exact model identifier, catalogue revision, and inference-policy
+  version where AI assistance is used.
+- **Market Data Source**: An approved MT5 connection, official API, or official dataset represented
+  by a reviewed catalogue adapter, with declared authority, asset coverage, available capabilities,
+  masked credential status, licensing or use constraints, freshness state, instrument mappings,
+  and collection history.
+- **Market Research Model Configuration**: The owner-selected global LLM provider and permitted
+  model identifier, its reviewed catalogue entry, masked integration status, and change history
+  used by Commodity, Forex, and Cryptocurrency research agents.
 - **Market Research Schedule**: An owner-configured recurring interval, anchored start time,
-  account time zone, enabled state, next run time, and history of the research jobs it triggered.
+  account time zone, enabled state, next run time, and history of the coordinated three-category
+  research jobs and skipped overlapping occurrences it triggered.
 - **Strategy**: A named trading hypothesis associated with an instrument and one or more immutable
   versions.
 - **Strategy Version**: An immutable deterministic rule set with lifecycle status, ancestry,
@@ -721,6 +870,22 @@ through authenticated screens.
 - **SC-018**: At least 90% of test users can explain from the displayed evidence why a market was
   selected, why a recommendation passed or was blocked, how its size was derived, and why the
   current position capacity is zero, one, or two.
+- **SC-019**: In scheduling acceptance tests, every due market-research occurrence MUST produce
+  exactly one durable research job or one recorded overlapping-run skip; every provider failure
+  that exhausts its bounded retries MUST remain visible and produce no activation or replacement
+  recommendation.
+- **SC-020**: In source-authority acceptance tests, 100% of externally covered but MT5-unsupported
+  candidates are excluded, every displayed liquidity measure identifies its source and actual or
+  proxy status, and missing, stale, or materially conflicting mandatory evidence produces no
+  activation or replacement recommendation.
+- **SC-021**: In fallback acceptance tests, 100% of specialist-source failures apply MT5 before
+  cached external evidence, accept only complete and fresh evidence that passes the unchanged
+  category gates, keep an unresolved category's active assignment unchanged, and allow only
+  independently complete categories to produce recommendations.
+- **SC-022**: In LLM-boundary acceptance tests, changing a model never alters an active run; every
+  run records its exact provider and model; conflicting, unavailable, or invalid LLM output changes
+  zero deterministic eligibility, metric, score, rank, or selection-proposal results; and exhausted
+  LLM retries remain visible without an automatic model substitution.
 
 ## Assumptions
 

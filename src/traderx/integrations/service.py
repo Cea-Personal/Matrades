@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime
@@ -10,8 +11,9 @@ from sqlalchemy.orm import Session
 from traderx.audit.model import AuditEvent
 from traderx.identity.authorization import Actor, Role, require_role
 from traderx.integrations.crypto import SecretBox
-from traderx.integrations.model import CredentialVersion, Integration
+from traderx.integrations.model import CredentialVersion, Integration, ProviderCatalogueEntry
 from traderx.integrations.registry import approved_provider, validate_provider_configuration
+from traderx.shared.events import append_outbox, event_envelope
 
 ALLOWED_CAPABILITIES = frozenset(
     {
@@ -20,6 +22,7 @@ ALLOWED_CAPABILITIES = frozenset(
         "POSITION_READ",
         "DEAL_READ",
         "MARKET_DATA_READ",
+        "LLM_ANALYSIS",
         "NOTIFICATION_SEND",
     }
 )
@@ -63,6 +66,9 @@ def create_non_broker_integration(
     now: datetime,
     correlation_id: str,
     idempotency_key: str,
+    licensing_accepted: bool = False,
+    retention_accepted: bool = False,
+    reason: str = "Configure approved non-broker integration",
 ) -> Integration:
     require_role(actor, {Role.OWNER, Role.ADMIN}, "integration.configure", require_mfa=True)
     definition = validate_provider_configuration(
@@ -74,8 +80,18 @@ def create_non_broker_integration(
     )
     if definition.category == "BROKER_ACCOUNT_DATA":
         raise ValueError("broker integrations use the managed MT5 enrollment flow")
+    if definition.licensing_notice and not licensing_accepted:
+        raise ValueError("provider licensing terms must be acknowledged")
+    if definition.retention_posture != "NOT_APPLICABLE" and not retention_accepted:
+        raise ValueError("provider retention posture must be acknowledged")
     if database.scalar(select(Integration.id).where(Integration.name == name)) is not None:
         raise ValueError("an integration with this name already exists")
+    catalogue = database.scalar(
+        select(ProviderCatalogueEntry).where(
+            ProviderCatalogueEntry.provider_key == definition.provider,
+            ProviderCatalogueEntry.catalogue_revision == definition.catalogue_revision,
+        )
+    )
     integration = Integration(
         name=name,
         category=definition.category,
@@ -84,6 +100,12 @@ def create_non_broker_integration(
         capabilities=sorted(requested_capabilities),
         configuration=configuration,
         official_source=official_source,
+        provider_catalogue_id=catalogue.id if catalogue else None,
+        catalogue_revision=definition.catalogue_revision,
+        adapter_revision=definition.adapter_revision,
+        entitlement_status="UNVERIFIED" if definition.entitlement_required else "NOT_REQUIRED",
+        retention_posture=definition.retention_posture,
+        licensing_accepted_at=now if licensing_accepted else None,
     )
     database.add(integration)
     database.flush()
@@ -96,12 +118,49 @@ def create_non_broker_integration(
         action="integration.configure",
         previous=None,
         current={"state": integration.state, "provider": integration.provider},
-        reason="Configure approved non-broker integration",
+        reason=reason,
         now=now,
         correlation_id=correlation_id,
         idempotency_key=idempotency_key,
     )
     return integration
+
+
+def remove_non_broker_integration(
+    database: Session,
+    actor: Actor,
+    integration: Integration,
+    *,
+    reason: str,
+    now: datetime,
+    correlation_id: str,
+    idempotency_key: str,
+) -> None:
+    require_role(actor, {Role.OWNER, Role.ADMIN}, "integration.remove", require_mfa=True)
+    if integration.provider == "MT5_TERMINAL_BRIDGE":
+        raise ValueError("managed MT5 removal uses the broker integration workflow")
+    previous = integration.state
+    integration.state = "REMOVED"
+    integration.removed_at = now
+    for credential in database.scalars(
+        select(CredentialVersion).where(
+            CredentialVersion.integration_id == integration.id,
+            CredentialVersion.active.is_(True),
+        )
+    ):
+        credential.active = False
+    _audit(
+        database,
+        actor,
+        integration,
+        action="integration.remove",
+        previous={"state": previous, "credential": "WRITE_ONLY"},
+        current={"state": "REMOVED", "credential": "REVOKED"},
+        reason=reason,
+        now=now,
+        correlation_id=correlation_id,
+        idempotency_key=idempotency_key,
+    )
 
 
 def rotate_integration_credentials(
@@ -139,7 +198,10 @@ def rotate_integration_credentials(
         actor,
         integration,
         action="integration.credential.rotate",
-        previous={"credential_version": str(previous.id) if previous else None, "state": prior_state},
+        previous={
+            "credential_version": str(previous.id) if previous else None,
+            "state": prior_state,
+        },
         current={"credential_version": str(credential.id), "state": integration.state},
         reason="Rotate write-only integration credential",
         now=now,
@@ -147,6 +209,45 @@ def rotate_integration_credentials(
         idempotency_key=idempotency_key,
     )
     return credential
+
+
+def declare_integration_entitlement(
+    database: Session,
+    actor: Actor,
+    integration: Integration,
+    *,
+    evidence_reference: str,
+    reason: str,
+    now: datetime,
+    correlation_id: str,
+    idempotency_key: str,
+) -> None:
+    """Record owner-supplied entitlement evidence pending a live provider probe."""
+
+    require_role(actor, {Role.OWNER}, "integration.entitlement.declare", require_mfa=True)
+    definition = approved_provider(integration.provider)
+    if not definition.entitlement_required:
+        raise ValueError("this provider does not require a paid entitlement")
+    reference = evidence_reference.strip()
+    if len(reference) < 4:
+        raise ValueError("an entitlement evidence reference is required")
+    previous = integration.entitlement_status
+    integration.entitlement_status = "DECLARED"
+    _audit(
+        database,
+        actor,
+        integration,
+        action="integration.entitlement.declare",
+        previous={"entitlement_status": previous},
+        current={
+            "entitlement_status": integration.entitlement_status,
+            "evidence_reference_hash": hashlib.sha256(reference.encode()).hexdigest(),
+        },
+        reason=reason,
+        now=now,
+        correlation_id=correlation_id,
+        idempotency_key=idempotency_key,
+    )
 
 
 def transition_persisted_integration(
@@ -179,7 +280,9 @@ def transition_persisted_integration(
     )
 
 
-def integration_management_payload(database: Session, integration: Integration) -> dict[str, object]:
+def integration_management_payload(
+    database: Session, integration: Integration
+) -> dict[str, object]:
     credential = database.scalar(
         select(CredentialVersion.id).where(
             CredentialVersion.integration_id == integration.id,
@@ -195,6 +298,11 @@ def integration_management_payload(database: Session, integration: Integration) 
         "state": integration.state,
         "capabilities": list(integration.capabilities),
         "configuration": dict(integration.configuration),
+        "catalogue_revision": integration.catalogue_revision,
+        "adapter_revision": integration.adapter_revision,
+        "entitlement_status": integration.entitlement_status,
+        "retention_posture": integration.retention_posture,
+        "licensing_accepted": integration.licensing_accepted_at is not None,
         "credential_status": "CONFIGURED" if credential else "NOT_CONFIGURED",
         "credential": "WRITE_ONLY",
     }
@@ -253,4 +361,33 @@ def _audit(
             new_value=current,
             occurred_at=now,
         )
+    )
+    event_type = (
+        "com.traderx.integration.credential-rotated.v1"
+        if action == "integration.credential.rotate"
+        else "com.traderx.integration.health-changed.v1"
+    )
+    safe_data: dict[str, object] = {
+        "integration_id": str(integration.id),
+        "provider": integration.provider,
+        "action": action,
+        "previous": previous or {},
+        "current": current,
+    }
+    append_outbox(
+        database,
+        aggregate_type="integration",
+        aggregate_id=integration.id,
+        aggregate_version=integration.version,
+        event_type=event_type,
+        envelope=event_envelope(
+            source="urn:traderx:integrations",
+            event_type=event_type,
+            subject=f"integrations/{integration.id}",
+            data=safe_data,
+            now=now,
+            correlation_id=correlation_id,
+            actor_id=actor.id,
+            aggregate_version=integration.version,
+        ),
     )

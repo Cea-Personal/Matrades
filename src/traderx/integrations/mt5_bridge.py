@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import httpx
@@ -155,3 +157,77 @@ class Mt5BridgeAdapter:
     @staticmethod
     def _not_found(provider_symbol: str) -> dict[str, object]:
         raise Mt5BridgeError(f"MT5 bridge did not return instrument {provider_symbol}")
+
+
+def normalize_native_market_evidence(
+    instruments: list[dict[str, object]], *, received_at: datetime
+) -> list[dict[str, object]]:
+    """Validate broker-specific market evidence received from the native outbound EA."""
+
+    normalized: list[dict[str, object]] = []
+    received = _utc(received_at)
+    for raw in instruments:
+        symbol = str(raw.get("symbol", "")).strip()
+        if not symbol:
+            raise Mt5BridgeError("MT5 instrument evidence is missing its symbol")
+        record = dict(raw)
+        record["source_semantics"] = "BROKER_PROXY"
+        record["observed_at"] = _source_time(raw.get("observed_at"), fallback=received).isoformat()
+        _validate_numeric(record, "bid", optional=True)
+        _validate_numeric(record, "ask", optional=True)
+        for series_name in ("closes", "tick_volumes", "real_volume", "bars_h1", "bars_d1"):
+            value = record.get(series_name)
+            if value is not None and not isinstance(value, list):
+                raise Mt5BridgeError(f"MT5 instrument evidence has invalid {series_name}")
+        real_volume = record.get("real_volume")
+        record["real_volume_status"] = (
+            "AVAILABLE" if isinstance(real_volume, list) and len(real_volume) > 0 else "UNAVAILABLE"
+        )
+        depth_status = str(record.get("depth_status", "UNAVAILABLE")).upper()
+        if depth_status not in {"AVAILABLE", "UNAVAILABLE", "UNSUPPORTED"}:
+            raise Mt5BridgeError("MT5 instrument evidence has invalid depth_status")
+        depth = record.get("depth")
+        if depth_status == "AVAILABLE" and (not isinstance(depth, list) or not depth):
+            raise Mt5BridgeError("MT5 available depth evidence must contain book entries")
+        if depth_status != "AVAILABLE":
+            record["depth"] = None
+        record["depth_status"] = depth_status
+        record["capability_status"] = {
+            "BROKER_SUPPORT": "AVAILABLE",
+            "QUOTES": "AVAILABLE" if record.get("bid") is not None and record.get("ask") is not None else "UNAVAILABLE",
+            "TICK_ACTIVITY": "AVAILABLE" if record.get("tick_volumes") else "UNAVAILABLE",
+            "REAL_VOLUME": record["real_volume_status"],
+            "ORDER_BOOK": depth_status,
+        }
+        normalized.append(record)
+    return normalized
+
+
+def _validate_numeric(payload: dict[str, object], field: str, *, optional: bool) -> None:
+    value = payload.get(field)
+    if value is None and optional:
+        return
+    try:
+        Decimal(str(value))
+    except (InvalidOperation, ValueError) as error:
+        raise Mt5BridgeError(f"MT5 instrument evidence has invalid {field}") from error
+
+
+def _source_time(value: object, *, fallback: datetime) -> datetime:
+    if value is None or value == "":
+        return fallback
+    if isinstance(value, datetime):
+        return _utc(value)
+    text = str(value)
+    try:
+        if text.isdigit():
+            return datetime.fromtimestamp(int(text), tz=UTC)
+        return _utc(datetime.fromisoformat(text.replace("Z", "+00:00")))
+    except (ValueError, OSError) as error:
+        raise Mt5BridgeError("MT5 instrument evidence has invalid observed_at") from error
+
+
+def _utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        raise Mt5BridgeError("MT5 evidence times must be timezone-aware")
+    return value.astimezone(UTC)

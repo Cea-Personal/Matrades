@@ -69,6 +69,44 @@ every 15 seconds. The MT5 investor password stays in MT5. You do not enter a bri
 identity, or bridge credential in TraderX. See [the MT5 bridge guide](apps/mt5_bridge/README.md)
 for the operational details.
 
+## Automated market research
+
+Market research is configured inside the existing **Markets** workspace. It always coordinates
+one Commodity, one Forex, and one Cryptocurrency category run. Set an interval from one hour to
+30 days, an anchored local start, and an IANA account time zone. PostgreSQL owns the next due time,
+so closing the browser does not stop research. If the preceding coordinated run is still active,
+TraderX records an overlap skip and does not create catch-up runs.
+
+Before enabling the schedule, use **Account connection → Reviewed research providers** to connect
+and qualify the fixed sources:
+
+- CME Group for Commodity venue volume, open interest, and entitled book evidence;
+- Cboe FX Spot for venue-specific Forex prints/volume/book evidence;
+- Coinbase Exchange for Cryptocurrency venue volume and order-book evidence; and
+- either OpenAI Responses (`gpt-5.6-terra`) or Anthropic Messages (`claude-sonnet-5`) for optional
+  advisory explanation.
+
+Provider licensing, entitlement, and retention prerequisites remain the operator’s responsibility.
+Credentials are encrypted and write-only. Arbitrary providers, URLs, and model IDs are rejected.
+MT5 remains the authority for broker support and provides explicitly labelled broker activity,
+spread, real-volume-when-available, and Depth of Market proxy evidence.
+
+The source trail is specialist (up to three bounded attempts), then current complete MT5, then a
+cached external success only while it remains inside the original freshness policy. Missing,
+stale, partial, contradictory, unentitled, or unsupported evidence blocks the affected category;
+it never becomes zero and never changes the current active market.
+
+The selected LLM applies only to future runs. Each run pins its exact provider/model and related
+catalogue, adapter, prompt, schema, and inference versions. Analysis cannot change deterministic
+gates, metrics, scores, ranks, or proposals. If analysis is unavailable, use **Retry pinned
+analysis** to retry the same model; TraderX never substitutes a different model automatically.
+After reviewing all eligibility and provenance evidence, **Review for activation** begins a
+separate deliberate human approval. A ranking alone never activates or replaces a market.
+
+Operator procedures for entitlement, mapping approval, outages, rotation, model retirement, and
+scheduler recovery are in
+[deploy/operations/market-research-runbook.md](deploy/operations/market-research-runbook.md).
+
 ## Safety boundary
 
 TraderX researches one human-approved Commodity, Forex, and Cryptocurrency market; validates

@@ -15,6 +15,10 @@ class EligibilityInputs:
     gap_risk_acceptable: bool
     hours_supported: bool
     prop_permitted: bool
+    broker_specification_current: bool = True
+    mandatory_source_evidence_complete: bool = True
+    source_conflict: bool = False
+    actual_liquidity_required_met: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,7 +30,11 @@ class EligibilityResult:
 def evaluate_eligibility(inputs: EligibilityInputs) -> EligibilityResult:
     checks = (
         (inputs.broker_available, "BROKER_UNAVAILABLE"),
+        (inputs.broker_specification_current, "BROKER_SPECIFICATION_STALE"),
         (inputs.data_verified, "DATA_NOT_VERIFIED"),
+        (inputs.mandatory_source_evidence_complete, "MANDATORY_SOURCE_EVIDENCE_INCOMPLETE"),
+        (not inputs.source_conflict, "SOURCE_EVIDENCE_CONTRADICTORY"),
+        (inputs.actual_liquidity_required_met, "ACTUAL_LIQUIDITY_EVIDENCE_MISSING"),
         (inputs.turnover > 0, "INSUFFICIENT_TURNOVER"),
         (inputs.spread_bps >= 0 and inputs.spread_bps <= Decimal("50"), "EXCESSIVE_SPREAD"),
         (inputs.depth > 0, "INSUFFICIENT_DEPTH"),

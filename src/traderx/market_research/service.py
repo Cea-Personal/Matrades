@@ -16,13 +16,17 @@ from traderx.audit.model import AuditEvent
 from traderx.identity.authorization import Actor, Role, require_role
 from traderx.integrations.broker_model import Mt5BridgeAgent
 from traderx.integrations.model import Integration
+from traderx.integrations.ports import SourceSemantics
 from traderx.market_data.model import (
     DataQualityObservation,
     Instrument,
     InstrumentAlias,
     InstrumentStatus,
 )
+from traderx.market_data.source_evidence import ConflictState, SourceEvidence
 from traderx.market_research.eligibility import EligibilityInputs, evaluate_eligibility
+from traderx.market_research.events import SOURCE_FALLBACK_SELECTED, emit_market_research_fact
+from traderx.market_research.liquidity import assess_asset_liquidity, assess_liquidity
 from traderx.market_research.model import (
     ActiveMarketAssignment,
     AssignmentState,
@@ -30,6 +34,7 @@ from traderx.market_research.model import (
     MarketResearchRun,
     ResearchRunState,
 )
+from traderx.market_research.source_selection import SourceSelection
 from traderx.market_research.suitability import SuitabilityResult, score_candidate
 from traderx.market_research.volatility import relative_range_volatility
 from traderx.shared.events import append_outbox, event_envelope
@@ -218,6 +223,8 @@ def execute_market_research(
     category: str,
     method_version: str,
     weights: dict[str, Decimal] | None = None,
+    existing_run: MarketResearchRun | None = None,
+    source_selection: SourceSelection | None = None,
 ) -> MarketResearchRun:
     canonical_category = normalize_category(category)
     selected_weights = weights or DEFAULT_WEIGHTS
@@ -244,7 +251,7 @@ def execute_market_research(
             for instrument in instruments
         ],
     }
-    run = MarketResearchRun(
+    run = existing_run or MarketResearchRun(
         category=canonical_category.value,
         method_version=method_version or METHOD_VERSION,
         input_manifest_hash=hashlib.sha256(
@@ -253,14 +260,72 @@ def execute_market_research(
         state=ResearchRunState.QUEUED,
         created_at=now,
     )
-    database.add(run)
+    if existing_run is not None:
+        if run.category != canonical_category.value:
+            raise InvalidTransition("coordinated child category does not match research input")
+        if run.state in {ResearchRunState.COMPLETED, ResearchRunState.BLOCKED}:
+            return run
+        run.method_version = method_version or run.method_version
+        run.input_manifest_hash = hashlib.sha256(
+            json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+    else:
+        database.add(run)
+    if source_selection is not None:
+        run.source_manifest = {
+            "selected_role": source_selection.role.value if source_selection.role else None,
+            "evidence": [item.as_manifest() for item in source_selection.evidence],
+            "active_assignment_changed": False,
+        }
+        run.fallback_path = [
+            {
+                "role": step.role.value,
+                "accepted": step.accepted,
+                "reason_codes": list(step.reason_codes),
+            }
+            for step in source_selection.trail
+        ]
+        if source_selection.role is not None and source_selection.role.value.startswith("FALLBACK"):
+            emit_market_research_fact(
+                database,
+                aggregate_type="market_research_run",
+                aggregate_id=run.id,
+                aggregate_version=run.version,
+                event_type=SOURCE_FALLBACK_SELECTED,
+                data={
+                    "category": run.category,
+                    "selected_role": source_selection.role.value,
+                    "trail": run.fallback_path,
+                    "active_assignment_changed": False,
+                },
+                now=now,
+                correlation_id="market-research-worker",
+            )
+        if source_selection.blocked:
+            run.state = ResearchRunState.BLOCKED
+            run.block_reasons = list(source_selection.reason_codes)
+            run.completed_at = now
+            database.flush()
+            return run
+    run.state = ResearchRunState.RUNNING
     database.flush()
 
     pending: list[
         tuple[Instrument, EligibilityInputs, SuitabilityResult, tuple[str, ...], dict[str, str]]
     ] = []
     for instrument in instruments:
-        eligibility_inputs, metrics, quality = _research_inputs(instrument)
+        candidate_evidence = (
+            tuple(
+                item
+                for item in source_selection.evidence
+                if item.canonical_instrument_id == str(instrument.id)
+            )
+            if source_selection is not None
+            else None
+        )
+        eligibility_inputs, metrics, quality = _research_inputs(
+            instrument, source_evidence=candidate_evidence
+        )
         eligibility = evaluate_eligibility(eligibility_inputs)
         score = score_candidate(
             eligibility=eligibility,
@@ -294,6 +359,8 @@ def execute_market_research(
                 gate_evidence={
                     "evaluation_order": [
                         "BROKER",
+                        "BROKER_SPECIFICATION",
+                        "SOURCE_EVIDENCE",
                         "DATA",
                         "LIQUIDITY",
                         "EXECUTION",
@@ -316,9 +383,34 @@ def execute_market_research(
                     "weights": {key: str(value) for key, value in selected_weights.items()},
                     "eligibility_precedes_ranking": True,
                     "details": _json_safe(result.explanation),
+                    "activation_requires_separate_human_confirmation": True,
                 },
+                source_evidence=(
+                    [item.as_manifest() for item in source_selection.evidence]
+                    if source_selection
+                    else []
+                ),
             )
         )
+    deterministic_manifest = {
+        "input_manifest_hash": run.input_manifest_hash,
+        "category": run.category,
+        "method_version": run.method_version,
+        "results": [
+            {
+                "instrument_id": str(instrument.id),
+                "eligible": result.score is not None,
+                "reason_codes": reason_codes,
+                "metrics": metrics,
+                "score": str(result.score) if result.score is not None else None,
+                "rank": ranks.get(instrument.id),
+            }
+            for instrument, _inputs, result, reason_codes, metrics in pending
+        ],
+    }
+    run.deterministic_result_hash = hashlib.sha256(
+        json.dumps(deterministic_manifest, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
     run.state = ResearchRunState.COMPLETED
     run.completed_at = now
     database.flush()
@@ -375,6 +467,13 @@ def instrument_library_payload(
         statement = statement.where(Instrument.status == status.upper())
     result: list[dict[str, object]] = []
     for instrument in database.scalars(statement):
+        aliases = list(
+            database.scalars(
+                select(InstrumentAlias)
+                .where(InstrumentAlias.instrument_id == instrument.id)
+                .order_by(InstrumentAlias.provider)
+            )
+        )
         quality = database.scalar(
             select(DataQualityObservation)
             .where(DataQualityObservation.instrument_id == instrument.id)
@@ -392,6 +491,25 @@ def instrument_library_payload(
             "version": instrument.version,
             "quality_observed_at": _as_utc(quality.observed_at).isoformat() if quality else None,
             "quality_reason_codes": quality.reason_codes if quality else [],
+            "source_coverage": [
+                {
+                    "provider": alias.provider,
+                    "provider_symbol": alias.native_symbol,
+                    "venue": alias.venue,
+                    "mapping_revision": alias.mapping_revision,
+                    "mapping_status": "APPROVED" if alias.approved_at else "BROKER_AUTHORITY",
+                    "entitlement_status": alias.provider_metadata.get(
+                        "entitlement_status", "NOT_REQUIRED"
+                    ),
+                    "semantics": (
+                        instrument.contract_spec.get("source_semantics", "BROKER_PROXY")
+                        if alias.provider == "MT5_TERMINAL_BRIDGE"
+                        else alias.provider_metadata.get("semantics", "UNAVAILABLE")
+                    ),
+                }
+                for alias in aliases
+            ],
+            "capability_status": instrument.contract_spec.get("capability_status", {}),
         })
     return result
 
@@ -613,6 +731,8 @@ def deactivate_active_market(
 
 def _research_inputs(
     instrument: Instrument,
+    *,
+    source_evidence: tuple[SourceEvidence, ...] | None = None,
 ) -> tuple[EligibilityInputs, dict[str, str], DataQuality]:
     spec = instrument.contract_spec
     closes = _decimal_list(spec.get("closes"))
@@ -620,8 +740,10 @@ def _research_inputs(
     bid = _optional_decimal(spec.get("bid"))
     ask = _optional_decimal(spec.get("ask"))
     data_verified = len(closes) >= 61 and all(close > 0 for close in closes)
-    turnover = sum(tick_volumes, Decimal("0"))
-    depth = turnover / Decimal(len(tick_volumes)) if tick_volumes else Decimal("0")
+    broker_turnover = sum(tick_volumes, Decimal("0"))
+    broker_depth = (
+        broker_turnover / Decimal(len(tick_volumes)) if tick_volumes else Decimal("0")
+    )
     if bid is not None and ask is not None and ask >= bid and bid + ask > 0:
         spread_bps = (ask - bid) / ((ask + bid) / Decimal("2")) * Decimal("10000")
     else:
@@ -640,6 +762,79 @@ def _research_inputs(
         trade_mode = int(str(spec.get("trade_mode", 0)))
     except (TypeError, ValueError):
         trade_mode = 0
+    turnover = broker_turnover
+    depth = broker_depth
+    liquidity = Decimal("0")
+    liquidity_evidence = ("BROKER_ACTIVITY_PROXY",)
+    mandatory_source_complete = True
+    source_conflict = False
+    actual_liquidity_required_met = True
+    if source_evidence is None:
+        liquidity = max(
+            Decimal("0"),
+            min(Decimal("1"), Decimal("1") - spread_bps / Decimal("50")),
+        )
+        liquidity = liquidity * Decimal("0.7") + min(
+            Decimal("1"), turnover / Decimal("100000")
+        ) * Decimal("0.3")
+    else:
+        qualified = [item for item in source_evidence if item.capability == "LIQUIDITY" and item.qualifies]
+        mandatory_source_complete = bool(qualified)
+        source_conflict = any(
+            item.conflict_state == ConflictState.MATERIAL_CONFLICT for item in source_evidence
+        )
+        actual = any(item.semantics == SourceSemantics.ACTUAL for item in qualified)
+        category = MarketCategory(instrument.category)
+        specialist = spec.get("specialist_metrics", {})
+        specialist_metrics = dict(specialist) if isinstance(specialist, dict) else {}
+        external_turnover = _optional_decimal(specialist_metrics.get("TRADED_VOLUME"))
+        external_depth = _optional_decimal(specialist_metrics.get("ORDER_BOOK"))
+        open_interest = _optional_decimal(specialist_metrics.get("OPEN_INTEREST"))
+        if actual and external_turnover is not None:
+            turnover = external_turnover
+        if category == MarketCategory.COMMODITY:
+            depth = external_depth or open_interest or Decimal("0")
+            actual_liquidity_required_met = bool(actual and open_interest and turnover > 0)
+            if actual_liquidity_required_met:
+                assessed = assess_asset_liquidity(
+                    category=category,
+                    turnover=turnover,
+                    spread_bps=spread_bps,
+                    quoted_depth=external_depth,
+                    open_interest=open_interest,
+                )
+                liquidity = assessed.execution_quality
+                liquidity_evidence = assessed.evidence
+        elif category == MarketCategory.CRYPTO:
+            depth = external_depth or Decimal("0")
+            actual_liquidity_required_met = bool(actual and external_depth and turnover > 0)
+            if actual_liquidity_required_met:
+                assessed = assess_asset_liquidity(
+                    category=category,
+                    turnover=turnover,
+                    spread_bps=spread_bps,
+                    quoted_depth=external_depth,
+                )
+                liquidity = assessed.execution_quality
+                liquidity_evidence = assessed.evidence
+        elif actual and external_depth is not None and external_turnover is not None:
+            depth = external_depth
+            assessed = assess_liquidity(
+                turnover=turnover,
+                spread_bps=spread_bps,
+                depth=depth,
+            )
+            liquidity = assessed.execution_quality
+            liquidity_evidence = ("TRADED_VOLUME_ACTUAL", "ORDER_BOOK_ACTUAL")
+        elif mandatory_source_complete:
+            assessed = assess_asset_liquidity(
+                category=category,
+                turnover=turnover,
+                spread_bps=spread_bps,
+                tick_volume=broker_depth,
+            )
+            liquidity = assessed.execution_quality
+            liquidity_evidence = assessed.evidence
     inputs = EligibilityInputs(
         broker_available=instrument.status != InstrumentStatus.QUARANTINED,
         data_verified=data_verified,
@@ -650,6 +845,9 @@ def _research_inputs(
         gap_risk_acceptable=gap_risk_acceptable,
         hours_supported=trade_mode in {1, 2, 4},
         prop_permitted=bool(spec.get("prop_permitted", True)),
+        mandatory_source_evidence_complete=mandatory_source_complete,
+        source_conflict=source_conflict,
+        actual_liquidity_required_met=actual_liquidity_required_met,
     )
     volatility = Decimal("0")
     if data_verified:
@@ -660,13 +858,6 @@ def _research_inputs(
             / Decimal("3")
             * Decimal("100"),
         )
-    liquidity = max(
-        Decimal("0"),
-        min(Decimal("1"), Decimal("1") - spread_bps / Decimal("50")),
-    )
-    liquidity = liquidity * Decimal("0.7") + min(
-        Decimal("1"), turnover / Decimal("100000")
-    ) * Decimal("0.3")
     cost_quality = max(Decimal("0"), min(Decimal("1"), Decimal("1") - spread_bps / Decimal("50")))
     metrics = {
         "volatility": str(volatility),
@@ -674,11 +865,13 @@ def _research_inputs(
         "cost_quality": str(cost_quality),
         "spread_bps": str(spread_bps),
         "turnover": str(turnover),
-        "depth_proxy": str(depth),
+        "depth": str(depth),
+        "liquidity_method_version": "asset-liquidity-v1",
+        "liquidity_evidence": ",".join(liquidity_evidence),
     }
     quality = (
         DataQuality.VERIFIED
-        if data_verified and spread_bps <= Decimal("50")
+        if data_verified and spread_bps <= Decimal("50") and mandatory_source_complete
         else DataQuality.QUARANTINED
     )
     return inputs, metrics, quality

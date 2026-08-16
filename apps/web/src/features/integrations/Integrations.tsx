@@ -31,6 +31,41 @@ type ManagedMt5Enrollment = Integration & {
   enrollment: { agent_id: string; code: string; expires_at: string };
 };
 
+type ProviderDefinition = {
+  provider: string;
+  category: string;
+  configuration_fields: string[];
+  credential_fields: string[];
+  asset_categories: string[];
+  permitted_models: string[];
+  licensing_notice: string;
+  retention_posture: string;
+  entitlement_required: boolean;
+  verification_only: boolean;
+};
+
+type ResearchIntegration = {
+  id: string;
+  version: number;
+  name: string;
+  category: string;
+  provider: string;
+  state: string;
+  credential: "WRITE_ONLY";
+  credential_status: string;
+  entitlement_status: string;
+  catalogue_revision: string;
+  retention_posture: string;
+};
+
+const providerNames: Record<string, string> = {
+  CME_GROUP: "CME Group",
+  CBOE_FX_SPOT: "Cboe FX Spot",
+  COINBASE_EXCHANGE: "Coinbase Exchange",
+  OPENAI_RESPONSES: "OpenAI Responses",
+  ANTHROPIC_MESSAGES: "Anthropic Messages"
+};
+
 function messageFor(result: ApiProblem): string {
   return result.detail ?? result.title ?? "TraderX could not complete that integration step.";
 }
@@ -301,6 +336,159 @@ export function Integrations({
         ))}
       </div>
       {integrations.length > 0 && !showNewConnection ? <button className="secondary-button" disabled={busy} onClick={() => setShowNewConnection(true)} type="button">Connect a different MT5 account</button> : null}
+      <ResearchProviders />
+    </section>
+  );
+}
+
+function ResearchProviders() {
+  const [catalogue, setCatalogue] = useState<ProviderDefinition[]>([]);
+  const [configured, setConfigured] = useState<ResearchIntegration[]>([]);
+  const [selected, setSelected] = useState("COINBASE_EXCHANGE");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string>();
+  const [error, setError] = useState<string>();
+
+  const load = useCallback(async () => {
+    try {
+      const [catalogueResponse, configuredResponse] = await Promise.all([
+        fetch("/api/v1/integrations/providers", { credentials: "same-origin" }),
+        fetch("/api/v1/integrations/non-broker", { credentials: "same-origin" })
+      ]);
+      if (!catalogueResponse.ok || !configuredResponse.ok) throw new Error("unavailable");
+      const all = (await catalogueResponse.json() as { items: ProviderDefinition[] }).items;
+      setCatalogue(all.filter((item) => providerNames[item.provider] && !item.verification_only));
+      setConfigured((await configuredResponse.json() as { items: ResearchIntegration[] }).items);
+      setError(undefined);
+    } catch { setError("TraderX could not load the reviewed research-provider catalogue."); }
+  }, []);
+
+  useEffect(() => { void Promise.resolve().then(load); }, [load]);
+  const definition = catalogue.find((item) => item.provider === selected);
+
+  async function connect(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!definition) return;
+    const form = new FormData(event.currentTarget);
+    const configuration = Object.fromEntries(definition.configuration_fields.map((field) => [field, form.get(`configuration-${field}`)]));
+    const credentials = Object.fromEntries(definition.credential_fields.map((field) => [field, form.get(`credential-${field}`)]));
+    setBusy(true); setError(undefined); setMessage(undefined);
+    try {
+      const response = await fetch("/api/v1/integrations/non-broker", {
+        method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({ provider: definition.provider, name: String(form.get("provider-name")), configuration, credentials, capabilities: [definition.category === "LLM" ? "LLM_ANALYSIS" : "MARKET_DATA_READ"], official_source: true, licensing_accepted: form.get("licensing-accepted") === "on", retention_accepted: form.get("retention-accepted") === "on", reason: form.get("provider-reason") })
+      });
+      const result = await response.json() as ApiProblem;
+      if (!response.ok) { setError(messageFor(result)); return; }
+      setMessage(`${providerNames[definition.provider]} was saved with write-only credentials. Test and qualify it before research use.`);
+      await load();
+    } catch { setError("TraderX could not connect this reviewed provider."); }
+    finally { setBusy(false); }
+  }
+
+  async function lifecycle(integration: ResearchIntegration, action: "ENABLE" | "DISABLE" | "RECONNECT") {
+    setBusy(true); setError(undefined); setMessage(undefined);
+    try {
+      const response = await fetch(`/api/v1/integrations/${integration.id}/non-broker/state`, {
+        method: "PUT", credentials: "same-origin", headers: { "Content-Type": "application/json", "If-Match": `"integration-${integration.version}"`, "Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({ action, reason: `${action.toLowerCase()} reviewed research provider` })
+      });
+      const result = await response.json() as ApiProblem;
+      if (!response.ok) { setError(messageFor(result)); return; }
+      setMessage(`${providerNames[integration.provider]} is ${action === "DISABLE" ? "disabled" : "verification required"}.`);
+      await load();
+    } catch { setError("TraderX could not change the provider lifecycle."); }
+    finally { setBusy(false); }
+  }
+
+  async function testProvider(integration: ResearchIntegration) {
+    setBusy(true); setError(undefined); setMessage(undefined);
+    try {
+      const response = await fetch(`/api/v1/integrations/${integration.id}/test`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Idempotency-Key": crypto.randomUUID() }
+      });
+      const result = await response.json() as ApiProblem & { id?: string };
+      if (!response.ok) { setError(messageFor(result)); return; }
+      setMessage(`Qualification job ${result.id ?? ""} was queued. TraderX will test only the reviewed endpoint and keep credentials redacted.`);
+      await load();
+    } catch { setError("TraderX could not queue the provider qualification test."); }
+    finally { setBusy(false); }
+  }
+
+  async function rotateCredential(event: FormEvent<HTMLFormElement>, integration: ResearchIntegration) {
+    event.preventDefault();
+    const provider = catalogue.find((item) => item.provider === integration.provider);
+    if (!provider) return;
+    const form = new FormData(event.currentTarget);
+    const credentials = Object.fromEntries(provider.credential_fields.map((field) => [field, form.get(`rotate-${field}`)]));
+    setBusy(true); setError(undefined); setMessage(undefined);
+    try {
+      const response = await fetch(`/api/v1/integrations/${integration.id}/credentials/rotate`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", "If-Match": `"integration-${integration.version}"`, "Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({ credentials })
+      });
+      const result = await response.json() as ApiProblem;
+      if (!response.ok) { setError(messageFor(result)); return; }
+      event.currentTarget.reset();
+      setMessage(`${providerNames[integration.provider]} credential rotated. Run the provider test before enabling research use.`);
+      await load();
+    } catch { setError("TraderX could not rotate the write-only credential."); }
+    finally { setBusy(false); }
+  }
+
+  async function declareEntitlement(event: FormEvent<HTMLFormElement>, integration: ResearchIntegration) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setBusy(true); setError(undefined); setMessage(undefined);
+    try {
+      const response = await fetch(`/api/v1/integrations/${integration.id}/entitlement`, {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", "If-Match": `"integration-${integration.version}"`, "Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({ confirmation: "CONFIRM_ENTITLEMENT", evidence_reference: form.get("entitlement-reference"), reason: form.get("entitlement-reason") })
+      });
+      const result = await response.json() as ApiProblem;
+      if (!response.ok) { setError(messageFor(result)); return; }
+      setMessage(`${providerNames[integration.provider]} entitlement evidence recorded. A successful live provider test is still required.`);
+      await load();
+    } catch { setError("TraderX could not record the entitlement evidence."); }
+    finally { setBusy(false); }
+  }
+
+  async function removeProvider(integration: ResearchIntegration) {
+    setBusy(true); setError(undefined); setMessage(undefined);
+    try {
+      const response = await fetch(`/api/v1/integrations/${integration.id}`, { method: "DELETE", credentials: "same-origin", headers: { "If-Match": `"integration-${integration.version}"`, "Idempotency-Key": crypto.randomUUID() } });
+      const result = await response.json() as ApiProblem;
+      if (!response.ok) { setError(messageFor(result)); return; }
+      setMessage(`${providerNames[integration.provider]} was removed and its credential revoked.`);
+      await load();
+    } catch { setError("TraderX could not remove the provider."); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <section aria-labelledby="research-providers">
+      <p className="section-kicker">Fixed catalogue</p>
+      <h2 id="research-providers">Reviewed research providers</h2>
+      <p>Configure specialist market data and advisory models here in the current Integrations workspace. Credentials are write-only. Licensing and retention must be reviewed before connection.</p>
+      <div className="active-market-grid">{catalogue.map((item) => <article key={item.provider}><span>{item.category === "LLM" ? "Advisory model" : item.asset_categories.join(", ") || "Market data"}</span><strong>{providerNames[item.provider]}</strong><small>{item.entitlement_required ? "Entitlement verification required" : "No paid entitlement declared"} · {item.retention_posture}</small>{item.permitted_models.length ? <small>Models: {item.permitted_models.join(", ")}</small> : null}</article>)}</div>
+      {definition ? <form aria-label="Connect reviewed research provider" className="integration-form" onSubmit={connect}><label htmlFor="provider-kind">Research provider<select id="provider-kind" onChange={(event) => setSelected(event.target.value)} value={selected}>{catalogue.map((item) => <option key={item.provider} value={item.provider}>{providerNames[item.provider]}</option>)}</select></label><label htmlFor="provider-name">Connection name<input defaultValue={`${providerNames[definition.provider]} research`} id="provider-name" name="provider-name" required /></label>{definition.configuration_fields.map((field) => <label key={field}>{field.replaceAll("_", " ")}<input name={`configuration-${field}`} required /></label>)}{definition.credential_fields.map((field) => <label key={field}>{field.replaceAll("_", " ")}<input autoComplete="new-password" name={`credential-${field}`} required type="password" /></label>)}<label className="confirmation-check"><input name="licensing-accepted" required={Boolean(definition.licensing_notice)} type="checkbox" /> I accept the licensing/data-use prerequisites.</label><label className="confirmation-check"><input name="retention-accepted" required={definition.retention_posture !== "NOT_APPLICABLE"} type="checkbox" /> I reviewed the provider retention posture.</label><label htmlFor="provider-reason">Reason<textarea id="provider-reason" minLength={8} name="provider-reason" required /></label><button disabled={busy} type="submit">Connect reviewed provider</button></form> : null}
+      <div className="integration-list">{configured.map((integration) => {
+        const provider = catalogue.find((item) => item.provider === integration.provider);
+        return <article className="integration-card" key={integration.id}>
+          <div><p className="section-kicker">{integration.category}</p><h3>{integration.name}</h3><p>{providerNames[integration.provider] ?? integration.provider} · {integration.state} · entitlement {integration.entitlement_status}</p><small>Catalogue {integration.catalogue_revision} · credential {integration.credential_status} · {integration.credential}</small></div>
+          <div className="integration-actions"><button disabled={busy} onClick={() => void testProvider(integration)} type="button">Test provider</button><button className="secondary-button" disabled={busy} onClick={() => void lifecycle(integration, integration.state === "DISABLED" ? "ENABLE" : "DISABLE")} type="button">{integration.state === "DISABLED" ? "Enable provider" : "Disable provider"}</button><button className="danger-button" disabled={busy} onClick={() => void removeProvider(integration)} type="button">Remove provider</button></div>
+          {provider?.credential_fields.length ? <details><summary>Rotate write-only credential</summary><form className="integration-form" onSubmit={(event) => void rotateCredential(event, integration)}>{provider.credential_fields.map((field) => <label key={field}>New {field.replaceAll("_", " ")}<input autoComplete="new-password" name={`rotate-${field}`} required type="password" /></label>)}<button disabled={busy} type="submit">Rotate credential</button></form></details> : null}
+          {provider?.entitlement_required && integration.entitlement_status !== "VERIFIED" ? <details><summary>Record paid entitlement evidence</summary><form className="integration-form" onSubmit={(event) => void declareEntitlement(event, integration)}><p>The reference is hashed in the audit ledger. TraderX marks the entitlement verified only after the reviewed provider endpoint accepts the live test.</p><label>Entitlement evidence reference<input name="entitlement-reference" required /></label><label>Reason<textarea minLength={8} name="entitlement-reason" required /></label><button disabled={busy} type="submit">Submit entitlement for verification</button></form></details> : null}
+        </article>;
+      })}</div>
+      {message ? <p className="status-message" data-tone="success" role="status">{message}</p> : null}
+      {error ? <p className="status-message" data-tone="error" role="alert">{error}</p> : null}
     </section>
   );
 }

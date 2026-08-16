@@ -21,6 +21,7 @@ from traderx.integrations.service import (
     transition_persisted_integration,
 )
 from traderx.shared.db import Base, load_model_metadata
+from traderx.shared.events import OutboxEvent
 
 
 def test_only_allowlisted_read_capabilities_can_be_enabled() -> None:
@@ -40,6 +41,7 @@ def test_provider_registry_is_deny_by_default_and_mt5_is_read_only() -> None:
         "INSTRUMENT_READ",
         "POSITION_READ",
         "DEAL_READ",
+        "MARKET_DATA_READ",
     }
     with pytest.raises(ValueError, match="not approved"):
         approved_provider("UNREVIEWED_BROKER")
@@ -144,5 +146,14 @@ def test_non_broker_lifecycle_rotation_and_reconnect_are_audited_and_write_only(
             public = integration_management_payload(database, integration)
             assert public["credential"] == "WRITE_ONLY"
             assert "rotated-private-token" not in json.dumps(public)
+            outbox = list(database.scalars(select(OutboxEvent).order_by(OutboxEvent.created_at)))
+            assert len(outbox) == 4
+            assert any(
+                item.event_type == "com.traderx.integration.credential-rotated.v1"
+                for item in outbox
+            )
+            assert "rotated-private-token" not in json.dumps(
+                [item.envelope for item in outbox]
+            )
     finally:
         engine.dispose()

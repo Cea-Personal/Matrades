@@ -1,22 +1,25 @@
 # Implementation Plan: TraderX Core Platform
 
 **Branch**: `001-traderx-core-platform` (Spec Kit feature context; current Git branch: `master`) |
-**Date**: 2026-08-13 | **Spec**: [spec.md](spec.md)
+**Date**: 2026-08-14 | **Spec**: [spec.md](spec.md)
 
 **Input**: Feature specification from `specs/001-traderx-core-platform/spec.md` and the attached
-TraderX Speckit Plan v1.0.0, reconciled with TraderX Constitution v1.1.0 and amended to select
-MetaTrader 5 as the initial and only broker-account integration.
+TraderX Speckit Plan v1.0.0, reconciled with TraderX Constitution v1.1.0 and amended for the
+native MetaTrader 5 bridge, layered official market-data catalogue, durable coordinated research
+schedule, and owner-selectable advisory LLM model.
 
 ## Summary
 
 Build TraderX as a modular monolith with an authenticated browser UI, one application API, and
 asynchronous workers sharing a deterministic domain core. PostgreSQL is the system of record;
 Redis coordinates transient jobs and events but never owns financial truth. Provider adapters
-normalize broker, market, economic, and notification integrations. The first broker-account
-adapter is a MetaTrader 5 (MT5) terminal bridge; it provides account truth only and exposes no
-trading operation. The delivery order establishes identity,
-audit, account truth, and risk controls before market selection, strategy research, paper
-trading, live recommendations, monitoring, journaling, and learning.
+normalize broker, market, economic, LLM, and notification integrations. The broker adapter is the
+native outbound MetaTrader 5 (MT5) Expert Advisor; it provides account truth, the broker-supported
+universe, instrument specifications, and broker-specific quote/activity evidence while exposing no
+trading operation. Reviewed CME Group, Cboe FX Spot, and Coinbase Exchange adapters supplement
+Commodity, Forex, and Cryptocurrency evidence respectively. A PostgreSQL-authoritative scheduler
+starts one coordinated three-category run, and a single owner-selected, run-pinned LLM provides
+non-authoritative analysis without controlling any gate, metric, score, rank, or proposal.
 
 The design has no real-money order submission capability. It admits one user-approved Commodity,
 Forex pair, and Cryptocurrency pair to the active universe only after data, liquidity, execution,
@@ -35,10 +38,11 @@ server-validated MFA session.
 24 LTS with TypeScript 5.9 for the web application; SQL and YAML for migrations and contracts
 
 **Primary Dependencies**: Next.js 16, React 19, TanStack Query, Tailwind CSS, Zod, Lightweight
-Charts; FastAPI, Pydantic 2, SQLAlchemy 2, Alembic, Celery 5, HTTPX for approved data adapters, Polars,
+Charts; FastAPI, Pydantic 2, SQLAlchemy 2, Alembic, Celery 5, HTTPX for reviewed market-data and
+LLM adapters, Polars,
 NumPy, SciPy, pandas only at compatibility boundaries, and vectorbt behind an internal backtesting
-port. The MT5 bridge is a separately deployed, small Python service that uses the official
-`MetaTrader5` terminal IPC package; the core API never imports that package.
+port. The MT5 bridge is `TraderXReadOnlyBridge.mq5`, compiled and attached inside the user's MT5
+terminal; the API and workers never import the `MetaTrader5` Python package.
 
 **Storage**: PostgreSQL 18 as the sole durable system of record; Redis 8 for job coordination,
 short-lived caching, distributed locks, and delivery queues; object storage or filesystem-backed
@@ -49,10 +53,9 @@ for Python; Vitest, Testing Library, Playwright, ESLint, and TypeScript checks f
 contract, integration, reproducibility, safety, security, data-quality, and end-to-end suites
 
 **Target Platform**: Linux server deployed as containers behind HTTPS; evergreen desktop and
-mobile browsers; workers and scheduled monitoring continue independently of browser sessions. The
-MT5 bridge initially runs beside one provisioned MT5 terminal on a managed Windows host, connected
-to TraderX over mutually authenticated HTTPS; Docker/headless MT5 is release-blocked pending a
-separate proof of compatibility.
+mobile browsers; workers and scheduled monitoring/research continue independently of browser
+sessions. The native MT5 EA runs inside a user-controlled MT5 terminal on macOS or Windows and
+makes outbound HTTPS requests authenticated by its enrolled bearer credential.
 
 **Project Type**: Authenticated web application with a modular-monolith backend and separately
 scalable asynchronous worker processes
@@ -70,14 +73,16 @@ theses; UTC storage with explicit account reset time zone; decimal arithmetic fo
 size, and risk; all ordinary operation through the authenticated UI; initial owner setup is
 one-time and UI-only; sessions expire after 30 idle minutes or 12 absolute hours; password reset
 requires TOTP or a one-time recovery code before an operational session is issued. MT5 credentials
-are restricted to an investor/read-only password and remain inside the isolated bridge, which must
-reject any terminal that reports trading as permitted.
+remain inside MT5, which must be signed in with investor/read-only authorization and report trading
+disabled. Market-data and LLM providers are deny-by-default reviewed catalogue entries with
+owner-managed credentials and explicit licensing/retention status. LLM output is structured,
+advisory, tool-free, and incapable of changing deterministic financial results.
 
 **Scale/Scope**: One manual trader or small role-controlled team, one live account, three active
 markets, up to 10,000 catalogued instruments, tens of millions of time-series observations,
 hundreds of strategy versions, and tens of concurrent long-running research or validation jobs;
-94 functional requirements across identity, risk, markets, research, validation, paper trading,
-recommendations, monitoring, journal, integrations, and audit
+105 functional requirements and 22 success criteria across identity, risk, markets, research,
+validation, paper trading, recommendations, monitoring, journal, integrations, and audit
 
 ## Constitution Check
 
@@ -88,13 +93,14 @@ recommendations, monitoring, journal, integrations, and audit
 | Capital preservation and Risk Manager veto | A pure deterministic risk decision service is the final live-recommendation gate; missing truth activates circuit breakers. | PASS |
 | Mandatory evidence lifecycle | Strategy transition rules require research, realistic historical testing, unseen-data validation, robustness, portfolio simulation, paper evidence, and human approval. | PASS |
 | Manual real-money execution | Broker ports expose account, market, position, and deal reads only; no live order command exists in application or provider contracts. | PASS |
-| Broker credentials and provider boundaries | MT5 runs behind a read-only terminal bridge and requires an investor password plus `trade_allowed = false`. It fails to `LOCKDOWN` on incomplete verification. | PASS |
-| Volatility plus deep-liquidity selection | Mandatory data, liquidity, execution, prop-firm, and sizing gates precede multi-horizon volatility and suitability scoring. | PASS |
+| Broker credentials and provider boundaries | The native MT5 EA enrolls outbound, never receives or stores an order capability, and requires investor authorization plus disabled account/terminal trading. It fails to `LOCKDOWN` on incomplete verification. | PASS |
+| Volatility plus deep-liquidity selection | MT5 broker eligibility precedes asset-aware data/liquidity/execution/prop/sizing gates. CME, Cboe FX, and Coinbase evidence retains actual/proxy/venue semantics and unchanged freshness limits before multi-horizon scoring. | PASS |
 | Shared equity and dynamic 0/1/2 capacity | One account aggregate owns risk snapshots; serializable decision transactions and invariants block a third live position. | PASS |
 | Authenticated and UI-first operation | Dedicated setup, sign-in, MFA, reset, and recovery routes use server-validated MFA sessions; every ordinary workflow has an authenticated UI/API contract and workers continue after the browser closes. | PASS |
 | Permanent knowledge and immutable versions | Instrument records are never cascade-deleted; strategy versions, run inputs, reports, decisions, and theses are append-only. | PASS |
-| Deterministic, explainable, auditable safety | Versioned rule inputs produce reason-coded outputs; high-risk commands require authorization, confirmation, reason, and audit. | PASS |
-| Official normalized data and fail-safe behavior | Provider ports admit only approved official connections/datasets, normalize quality metadata, and block live decisions when stale. | PASS |
+| Deterministic, explainable, auditable safety | Versioned rule inputs produce reason-coded outputs. The pinned LLM may explain but cannot alter eligibility, metrics, scores, ranks, proposals, risk, or approval. | PASS |
+| Official normalized data and fail-safe behavior | Fixed reviewed catalogues admit only official connections/datasets, preserve venue/capability/actual/proxy provenance, apply MT5-then-fresh-cache fallback, and block an unresolved category. | PASS |
+| Scheduled research and human activation | A database-authoritative schedule produces one coordinated run or one durable overlap skip; category recommendations never activate or replace a market automatically. | PASS |
 | Monitoring never rewrites history | Trade thesis snapshots are immutable; monitoring observations and journal annotations append separately. | PASS |
 
 ### Post-Design Re-evaluation
@@ -102,9 +108,11 @@ recommendations, monitoring, journal, integrations, and audit
 The data model makes safety evidence durable, including singleton owner bootstrap, sessions,
 factors, recovery, reset, and audit state. The HTTP and UI contracts separate authentication
 stages from operational access and opportunity score from risk authorization; the event contracts
-use transactional outbox delivery, and the broker port deliberately omits order submission. The MT5
-bridge accepts only an investor-password terminal with trading disallowed and publishes complete
-snapshots over the enrolled read-only channel. No design artifact introduces a constitutional exception.
+use transactional outbox delivery, and the broker port deliberately omits order submission. The
+native MT5 EA accepts only its enrolled account/server identity with trading disallowed and
+publishes complete snapshots over outbound HTTPS. Market-data and LLM catalogues are deny-by-default;
+each run freezes source, policy, model, and fallback evidence. No design artifact introduces a
+constitutional exception.
 
 ## Project Structure
 
@@ -120,7 +128,8 @@ specs/001-traderx-core-platform/
 │   ├── auth-ui.md
 │   ├── http-api.yaml
 │   ├── domain-events.md
-│   └── provider-ports.md
+│   ├── provider-ports.md
+│   └── market-research-ui.md
 ├── checklists/
 │   └── requirements.md
 └── tasks.md                 # Created later by $speckit-tasks
@@ -156,6 +165,7 @@ src/traderx/
 ├── market_data/
 ├── instruments/
 ├── market_research/
+├── llm/
 ├── research/
 ├── strategies/
 ├── backtesting/
@@ -208,10 +218,14 @@ as separate processes.
 - All timestamps are timezone-aware UTC. Account daily reset rules retain their named time zone
   and daylight-saving interpretation.
 
-### Provider Isolation
+### Provider Isolation and Reviewed Catalogues
 
-- Broker, market-data, economic-data, notification, artifact, and clock ports are defined by the
-  domain and implemented by adapters.
+- Broker, market-data, economic-data, LLM-analysis, notification, artifact, and clock ports are
+  defined by the domain and implemented by adapters.
+- Every provider integration references a reviewed catalogue entry and adapter revision declaring
+  configuration/credential schema, asset/venue coverage, capability, authoritative or proxy
+  semantics, freshness/retry policy, retention/licensing constraints, and lifecycle. Provider
+  discovery endpoints test credential access only; they never auto-admit arbitrary sources/models.
 - Broker capabilities are explicitly allowlisted. V1 supports account, symbol, quote, position,
   and historical-deal reads; live order create/change/cancel methods do not exist.
 - Raw provider payloads may be retained for reconciliation, but domain decisions consume only
@@ -219,26 +233,70 @@ as separate processes.
 - Repeated and out-of-order updates are deduplicated by provider identity and sequence/time,
   reconciled against current snapshots, and never allowed to double-count exposure.
 
-### Selected Broker-Account Adapters
+### Selected MT5 Broker and Market-Evidence Profile
 
-- **MT5** is not treated as a broker-hosted REST API. A dedicated bridge runs beside one provisioned
-  MT5 terminal and communicates with TraderX only through a narrow mutually authenticated HTTPS
-  contract. The bridge keeps the terminal's investor/read-only password locally; the core service
-  stores only the bridge registration/client secret. At connection and on every poll it verifies
-  terminal connectivity, exact account login/server, and that both terminal and account report
-  trading disallowed. It publishes complete account, position, deal, and instrument snapshots;
-  a failed or partial poll never means “no positions.”
-- The adapter uses a single-flight normal poll target of 15 seconds, bounded retries/backoff, and
-  periodic full reconciliation. Snapshot age, provider identity, schema validity, cursor/window
-  continuity, and completeness are risk inputs. Any failure degrades the integration and leaves
-  the account in `LOCKDOWN` until a fresh authoritative reconciliation succeeds through the
-  configured breaker lifecycle.
+- The native `TraderXReadOnlyBridge.mq5` EA runs inside the enrolled macOS or Windows MT5 terminal
+  and makes outbound HTTPS calls with a one-time enrollment followed by a rotated bearer agent
+  credential. TraderX stores only credential digests; the investor password stays inside MT5.
+- Every snapshot verifies the configured login/server, connection, and disabled account/terminal
+  trading. It carries account, positions, overlapping deal history, the visible broker universe,
+  specifications, current bid/ask/spread, broker H1 prices/tick activity, and optional broker DOM.
+  Tick volume and DOM are labelled broker-specific; unsupported DOM is `UNAVAILABLE`, never zero
+  and never a consolidated Forex book. Partial or failed snapshots never mean “no positions.”
+- Reconciliation is single-flight with a 15-second account target, overlapping deal-ticket
+  deduplication, bounded retries, and periodic full lookback. Account failures retain `LOCKDOWN`
+  until a complete fresh reconciliation clears the normal breaker lifecycle.
+
+### Layered Market-Data Authority and Fallback
+
+- MT5 is authoritative for broker support, symbol mapping, specifications, current broker trading
+  conditions, and sizing feasibility. External evidence cannot make an unsupported symbol eligible.
+- The initial specialist catalogue is `CME_GROUP` for commodity futures volume/open interest and
+  entitled depth, `CBOE_FX_SPOT` for explicitly venue-specific spot-FX volume/depth, and
+  `COINBASE_EXCHANGE` for crypto trades/candles/volume and L2/L3 books. `CFTC_COT`, CME FX futures,
+  and `KRAKEN_SPOT` are disabled-by-default verification profiles, never silent substitutes.
+- Each category records source/venue, capability, `ACTUAL`/`BROKER_PROXY`/`UNAVAILABLE` semantics,
+  mapping, entitlement, quality, and policy-specific age. Initial freshness defaults are 60 seconds
+  for MT5/current streams, one completed trading day for daily exchange statistics, and seven days
+  for contextual CFTC data; catalogue policy versions may tighten them but outages never extend them.
+- After three bounded specialist attempts, a category tries complete current MT5 evidence and then
+  its most recent complete external dataset within the unchanged freshness policy. If neither meets
+  every asset-specific gate, that category is blocked while independently valid categories complete.
+
+### Durable Coordinated Market-Research Scheduling
+
+- PostgreSQL owns the schedule, next due time, occurrence claim, overlap decision, and run state.
+  Celery Beat only wakes a due-schedule scanner. An enabled schedule uses a 1-hour-to-30-day repeat
+  interval, anchored local start, and the account IANA time zone; DST calculation is versioned.
+- A unique `(schedule_id, scheduled_for)` occurrence atomically creates one coordinated parent job
+  with exactly three category runs, or one `SKIPPED_OVERLAP` fact. No concurrent/catch-up run is
+  queued, and a lease/fencing token permits safe crash recovery without duplicate research.
+- Each category freezes method and source policies independently. Completed categories may publish
+  proposals while a blocked category preserves its active assignment. No run activates or replaces
+  a market without a separate authorized human command.
+
+### Advisory LLM Analysis Boundary
+
+- A provider-neutral `LlmAnalysisPort` starts with reviewed `OPENAI_RESPONSES/gpt-5.6-terra` and
+  `ANTHROPIC_MESSAGES/claude-sonnet-5` entries. The UI shows only the intersection of the fixed
+  catalogue and models accessible with the owner's tested credential.
+- One global selection applies to all categories. A coordinated run atomically pins provider,
+  exact model ID, catalogue/adapter revision, prompt template, output schema, and inference policy;
+  later configuration changes affect future runs only.
+- The LLM receives only bounded normalized evidence and deterministic outputs. Tools, web/file
+  search, MCP, shell/code execution, account/equity data, arbitrary URLs, and credentials are absent.
+  Strict structured output may contain summaries, anomalies, cautions, and method proposals only.
+- TraderX owns three auditable attempts, each capped at 180 seconds and a ten-minute overall
+  deadline, honoring `Retry-After`. Exhaustion marks analysis unavailable and alerts the owner;
+  deterministic results still complete, no other model is substituted, and explicit retry uses the
+  pinned model.
 
 ### Quantitative Reproducibility
 
-- Each run freezes strategy version, dataset manifest, provider/time coverage, quality report,
-  parameters, execution-cost model, risk policy version, engine version, code revision, and random
-  seed.
+- Each run freezes strategy version, dataset/source manifests, provider catalogue and capability
+  semantics, fallback path, schedule occurrence, methodology/quality/freshness/retry policy versions,
+  pinned LLM provider/model/catalogue/prompt/schema/inference versions, analysis status, engine/code
+  versions, parameters, execution-cost model, risk policy, and random seed where applicable.
 - Vectorized tools accelerate research and candidate screening. A TraderX-owned chronological
   portfolio simulator remains the qualification authority for fills, shared equity, stops,
   capacity, prop rules, and signal competition.
@@ -262,6 +320,9 @@ as separate processes.
   recent `OWNER`/`ADMIN` MFA, confirmation, reason, full target-session revocation, and audit.
 - CSRF protection, rate limiting, content-security policy, secure headers, authorization at the
   domain command boundary, dependency scanning, and permission tests are mandatory.
+- LLM prompts exclude secrets, account identity/equity, personal data, raw integration configuration,
+  and unrestricted prose. Provider retention is displayed as `STANDARD` or administrator-verified;
+  `store=false` is used where supported but is never misrepresented as zero-data retention.
 - Audit records are append-only and redact secrets while retaining actor, reason, correlation,
   previous/new values, and outcome.
 
@@ -275,9 +336,9 @@ password reset; TOTP and recovery-code enrollment/recovery; assisted MFA reset; 
 idle/12-hour absolute sessions; audit framework; one trading account, prop-firm profiles, internal
 policies, account snapshots, risk states, dynamic 0/1/2 capacity, circuit-breaker foundation,
 UI-managed integrations, health, and deployment/CI scaffolding. The integration UI supports the
-provider-specific configuration and verification states needed by MT5 bridge registration; it cannot
-become risk-authoritative until the broker adapter arrives
-in Milestone 2 and produce a complete validated snapshot.
+provider-specific configuration and verification states needed by MT5 bridge registration and the
+reviewed catalogue; no integration becomes authoritative until its Milestone 2 adapter produces a
+complete validated observation under its approved policy.
 
 Exit gate: a first owner can establish and recover MFA through the UI, then configure the account
 entirely through the UI. Deterministic tests prove duplicate bootstrap is impossible; reset/recovery
@@ -287,16 +348,21 @@ connection can make an account active.
 
 ### Milestone 2 — Broker and Market Intelligence Foundation
 
-Deliver the MT5 terminal-bridge read-only account-truth slice, normalized
-market-data contracts, incremental historical sync, freshness/quality tracking, Instrument
-Library, alias mapping, eligibility gates,
-multi-horizon volatility/liquidity measures, versioned suitability scoring, three active slots,
-human selection/replacement, and inactive-market research.
+Deliver the native MT5 EA account/broker-evidence slice; fixed CME Group, Cboe FX Spot, and Coinbase
+Exchange market-data adapters; provider/model catalogue and credential UI; normalized source,
+capability, actual/proxy, mapping, freshness, conflict, and fallback evidence; incremental history;
+the Instrument Library; asset-aware eligibility and multi-horizon volatility/liquidity methods; and
+versioned suitability scoring. Deliver the database-backed anchored recurring schedule, one
+coordinated three-category run, overlap skipping, three independently completable category results,
+one global OpenAI/Anthropic model selector, run-level model pinning, structured advisory analysis,
+and explicit same-model analysis retry inside the existing Markets workspace.
 
 Exit gate: the selected broker has completed a current, coherent account/position/deal
-reconciliation within the freshness SLO before it can provide risk truth; category reports rank
-only eligible candidates; one user-approved instrument may occupy each category; replacing a
-market preserves all knowledge; manually opened positions are visible.
+reconciliation within the freshness SLO before it can provide risk truth; source-entitlement and
+mapping gates pass; category reports rank only eligible candidates; exactly one due job or overlap
+skip is durable; LLM output changes no deterministic result; one user-approved instrument may
+occupy each category; replacing a market preserves all knowledge; manually opened positions are
+visible.
 
 ### Milestone 3 — Strategy Research and Validation Platform
 
@@ -336,8 +402,9 @@ existing positions stay monitored after strategy suspension; critical events not
 
 ### Milestone 7 — Learning, Reactivation, and Market Rotation
 
-Deliver rolling strategy health, journal-derived research proposals, periodic market-universe
-reruns, explainable replacement recommendations, incremental instrument reactivation, staleness
+Deliver rolling strategy health, journal-derived research proposals, results from the governed
+Milestone 2 market-research scheduler, explainable replacement recommendations, incremental
+instrument reactivation, staleness
 classification, selective revalidation, historical knowledge reuse, and final security,
 performance, resilience, and usability hardening.
 
@@ -367,9 +434,19 @@ scope. The following safety tests are release-blocking:
 12. no application, contract, worker, or integration path can submit a live real-money order;
 13. production connector registration rejects scraping-based providers;
 14. backtest and Monte Carlo runs reproduce identical results for identical frozen inputs/seeds;
-15. provider and worker failures recover idempotently without losing durable work or outbox events.
+15. provider and worker failures recover idempotently without losing durable work or outbox events;
 16. MT5 rejects a terminal with a mismatched account/server, disconnect, missing response, or any
-    trading-enabled flag.
+    trading-enabled flag;
+17. every due research occurrence creates exactly one coordinated job or one durable overlap skip,
+    never a catch-up job, and no result changes an active assignment automatically;
+18. MT5-unsupported candidates are excluded even when externally covered, and every liquidity
+    measure displays provider/venue plus `ACTUAL`, `BROKER_PROXY`, or `UNAVAILABLE` semantics;
+19. specialist failures apply bounded retries, current MT5, then still-fresh cached external
+    evidence without extending freshness; unresolved categories block while valid categories finish;
+20. changing the global model cannot alter an active run, and every invocation records its exact
+    provider/model/catalogue/prompt/schema/inference versions; and
+21. conflicting, refused, invalid, timed-out, or unavailable LLM output changes zero deterministic
+    gate, metric, score, rank, or proposal values and never triggers automatic model substitution.
 
 Production promotion also requires migration rehearsal, backup/restore validation, secret rotation
 validation, accessibility and usability checks, dependency/security scans, and a documented

@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from time import perf_counter
 from uuid import uuid4
@@ -10,6 +10,7 @@ from sqlalchemy.pool import StaticPool
 from traderx.integrations.model import Integration, IntegrationHealthObservation
 from traderx.jobs.model import BackgroundJob, JobState
 from traderx.market_research.eligibility import EligibilityInputs
+from traderx.market_research.scheduling import next_due_at
 from traderx.market_research.service import ResearchCandidate, rank_candidates
 from traderx.notifications.router import route
 from traderx.risk.manager import authorize
@@ -102,6 +103,22 @@ def test_large_market_ranking_notifications_and_job_progress_meet_worker_budgets
         {"volatility": Decimal("0.5"), "liquidity": Decimal("0.35"), "cost": Decimal("0.15")},
     )
     assert len(ranked) == 5_000
+    assert perf_counter() - started < 2
+
+
+def test_market_research_due_scanner_math_meets_wake_up_budget() -> None:
+    anchor = datetime(2026, 1, 1, 9, 0, tzinfo=UTC)
+    started = perf_counter()
+    values = [
+        next_due_at(
+            anchored_start_local=anchor,
+            account_timezone="UTC",
+            interval_seconds=3600 + (index % 24) * 3600,
+            after=anchor + timedelta(days=index % 30, minutes=index % 60),
+        )
+        for index in range(10_000)
+    ]
+    assert all(value > anchor for value in values)
     assert perf_counter() - started < 2
 
     started = perf_counter()

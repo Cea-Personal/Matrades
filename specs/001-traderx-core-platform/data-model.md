@@ -166,11 +166,37 @@ remain available.
 
 ## Integrations and Jobs
 
+### ProviderCatalogueEntry
+
+Immutable reviewed provider profile fields: `provider_key`, integration kind (`BROKER`,
+`MARKET_DATA`, `LLM`, `ECONOMIC`, `NOTIFICATION`), adapter and catalogue revisions, lifecycle
+(`DRAFT`, `APPROVED`, `DEPRECATED`, `RETIRED`), supported asset categories/venues, capability
+allowlist, authoritative/proxy semantics per capability, supported kinds/timeframes/history,
+configuration and write-only credential schema versions, rate/update profile, retention/licensing
+constraints, effective/retired times, evaluation evidence, and rollback entry.
+
+Constraint: deny by default. A production `Integration` or model selection must reference one
+effective `APPROVED` entry/revision; provider discovery never creates an entry.
+
+### FreshnessPolicyVersion
+
+Immutable fields: provider catalogue entry, capability, data kind/category/purpose, maximum age,
+calendar/completeness rules, fallback eligibility, conflict thresholds, version/effective interval,
+author, and reason. An outage cannot mutate or extend the version pinned to a run.
+
+### RetryPolicyVersion
+
+Immutable fields: scope (`MARKET_DATA`, `LLM`), classified retryable/non-retryable failures,
+maximum attempts, per-attempt timeout, delay/backoff/jitter, maximum elapsed duration, effective
+interval, author, and reason.
+
 ### Integration
 
-Fields: `id`, category (`BROKER`, `MARKET_DATA`, `ECONOMIC`, `MACRO`, `CRYPTO`, `EMAIL`,
-`MESSAGING`), provider type, display name, enabled state, capability allowlist, configuration
-without secrets, credential version reference, created/updated by, and concurrency version.
+Fields: `id`, category (`BROKER`, `MARKET_DATA`, `LLM`, `ECONOMIC`, `MACRO`, `CRYPTO`, `EMAIL`,
+`MESSAGING`), provider catalogue entry/revision, display name, enabled state, supported asset
+categories/venues, declared capabilities and semantics, configuration without secrets, credential
+version reference, configuration/credential verification, entitlement/licensing state,
+created/updated by, and concurrency version.
 
 For V1 broker connections, `provider_type` is exactly:
 
@@ -221,6 +247,28 @@ Transitions: `QUEUED -> RUNNING -> {PAUSED, COMPLETED, FAILED, CANCELLED}`; `PAU
 CANCELLED}`; retry creates a new attempt while preserving history. Cancellation is cooperative;
 completed checkpoints/results remain immutable.
 
+### MarketResearchModelConfiguration
+
+One effective global selection for all market categories. Fields: `id`, LLM integration,
+provider/model catalogue keys and revisions, exact model identifier, inference-policy version,
+effective interval, selection actor/time/reason, and optimistic version.
+
+Constraints: no per-category override. A new selection closes the previous effective interval and
+affects only coordinated runs that have not started.
+
+### LlmAnalysisAttempt
+
+Immutable fields: category research run, pinned provider/exact model/catalogue/adapter/inference/
+prompt/output-schema versions, normalized evidence-manifest hash, attempt number and provider
+request identity, state (`QUEUED`, `RUNNING`, `COMPLETED`, `RETRYABLE_FAILURE`, `UNAVAILABLE`),
+redacted failure category/reason, response hash/artifact and validated advisory analysis, input/
+cached/reasoning/output usage where returned, latency, estimated cost/currency/rate-card version,
+explicit-retry eligibility, and source attempt.
+
+Transitions: `QUEUED -> RUNNING -> {COMPLETED, RETRYABLE_FAILURE, UNAVAILABLE}`. A retry creates a
+new attempt and can use only the category run's pinned model. No attempt mutates deterministic
+evidence, assessments, ranks, proposals, or assignments.
+
 ## Instruments and Market Data
 
 ### Instrument
@@ -239,15 +287,21 @@ validity interval, and verification status. Unique for provider plus provider sy
 
 ### DataSetManifest
 
-Immutable manifest for reproducible analysis: instrument, provider/alias, data kind and interval,
-coverage bounds, row count, content/chunk hashes, calendar/time-zone normalization, quality report,
+Immutable manifest for reproducible analysis: instrument, integration, provider/alias, provider
+catalogue/adapter revision, venue, capability, data kind and interval, evidence semantics (`ACTUAL`,
+`BROKER_PROXY`, `UNAVAILABLE`), source role (`MT5_BROKER_AUTHORITY`, `SPECIALIST_PRIMARY`,
+`FALLBACK_MT5`, `FALLBACK_CACHED_EXTERNAL`), coverage bounds, row count, observed/as-of time,
+content/chunk hashes, calendar/time-zone normalization, freshness policy/version and age at run
+start, fallback reason/order, instrument-mapping verification, quality/conflict outcome,
 correction/supersession references, created time, and storage reference.
 
 ### MarketObservation
 
-Normalized candle, quote, tick, spread, volume, or order-book observation. Common fields include
-instrument, provider, event and receive times, sequence, quality flags, and raw reference. Kind-
-specific values are decimal. Deduplication key is provider/alias/kind/interval/event identity.
+Normalized candle, quote, tick, spread, volume/open-interest, or order-book observation. Common
+fields include instrument, provider/venue/capability, `ACTUAL`/`BROKER_PROXY` semantics, event and
+receive times, sequence, quality flags, and raw reference. Kind-specific values are decimal;
+unavailable values are null with reason, never numeric zero. Deduplication key is
+provider/alias/kind/interval/event identity.
 
 ### EconomicEvent
 
@@ -262,17 +316,53 @@ provider/instrument/time range.
 
 ## Market Selection
 
+### MarketResearchSchedule
+
+Fields: `id`, account/owner, repeat interval, anchored local start, account IANA time zone,
+enabled state, next/last due times, current active coordinated-run reference, pinned default
+methodology/freshness/retry policy references for future runs, created/updated actor/reason/times,
+and optimistic version.
+
+Transitions: `DISABLED <-> ENABLED`. Interval must be between one hour and 30 days. Schedule edits
+affect future occurrences only and recompute the next regular due time without creating catch-up work.
+
+### MarketResearchOccurrence
+
+Fields: schedule, unique `scheduled_for`, claimed/started/completed times, fencing token, status
+(`DUE`, `CLAIMED`, `STARTED`, `SKIPPED_OVERLAP`, `COMPLETED`, `PARTIAL`, `FAILED`), coordinated
+run/job, skip/failure reason, and next regular occurrence.
+
+Constraints: unique `(schedule_id, scheduled_for)`; exactly one coordinated job or one durable
+overlap skip; no catch-up occurrence.
+
+### CoordinatedMarketResearchRun
+
+Parent for one manual or scheduled three-category evaluation. Fields: trigger (`MANUAL`,
+`SCHEDULED`), schedule/occurrence, account, exactly three category child-run references, pinned
+methodology/freshness/retry/source-catalogue policy set, pinned global LLM provider/model/catalogue/
+adapter/prompt/schema/inference versions, state (`QUEUED`, `RUNNING`, `PARTIAL`, `COMPLETED`,
+`FAILED`), start/completion, initiator, and result summary.
+
+Constraint: exactly one child each for `COMMODITY`, `FOREX`, and `CRYPTO`; no child or parent can
+mutate an active assignment.
+
 ### MarketResearchRun
 
-Immutable run fields: category, candidate-universe definition, account, prop profile, methodology
-version, dataset manifests, lookback windows, eligibility thresholds, score weights, random seed if
-used, job/run state, started/completed times, initiator, and report reference.
+Immutable category-run fields: coordinated parent, category/candidate universe, account/prop
+profile, specialist integration/catalogue revision, dataset/source manifests, source-attempt and
+fallback trail, methodology plus eligibility/volatility/liquidity/suitability/freshness/retry policy
+versions, lookback windows, thresholds/weights, pinned LLM fields, advisory-analysis state, random
+seed if used, job/run state, outcome (`RECOMMENDED`, `NO_ELIGIBLE_CANDIDATE`, `BLOCKED`), block
+reason/evidence, started/completed times, initiator, and report reference.
 
 ### CandidateAssessment
 
-Belongs to a research run and instrument. Stores each gate result and reason, raw and normalized
-volatility/liquidity/execution/data/strategy/cost/gap/prop metrics, score components, final score,
-rank, confidence/coverage, and explanation. Ineligible candidates have no selectable final rank.
+Belongs to a category research run and instrument. Stores each gate result/reason; per-measure
+provider/venue/alias, actual/proxy/unavailable status, freshness/quality/conflict evidence; raw and
+normalized volatility/liquidity/execution/data/strategy/cost/gap/prop metrics; score components;
+final score/rank; confidence/coverage; deterministic explanation; and selection-proposal
+eligibility. Missing required values remain explicit `UNKNOWN`; ineligible candidates have no
+selectable final rank. LLM analysis is linked separately and cannot modify these fields.
 
 ### ActiveMarketAssignment
 
@@ -441,9 +531,13 @@ outcome so retries cannot apply a financial side effect twice.
 User -> AuthSession / MfaFactor / MfaRecoveryCode / PasswordResetChallenge / AssistedMfaResetRequest / AuditEvent
 IdentityBootstrapState -> User (exactly one initial OWNER)
 TradingAccount -> PropProfileVersion / RiskPolicyVersion / AccountSnapshot -> RiskSnapshot
+ProviderCatalogueEntry -> Integration / FreshnessPolicyVersion / RetryPolicyVersion
 Integration -> CredentialVersion / HealthObservation / InstrumentAlias / Provider observations
-Instrument -> DataSetManifest / MarketResearchRun / Strategy / ActiveMarketAssignment
-MarketResearchRun -> CandidateAssessment -> ActiveMarketAssignment (human approved)
+MarketResearchSchedule -> MarketResearchOccurrence -> CoordinatedMarketResearchRun
+MarketResearchModelConfiguration -> CoordinatedMarketResearchRun (pinned at start)
+CoordinatedMarketResearchRun -> three MarketResearchRun category children -> LlmAnalysisAttempt
+Instrument -> DataSetManifest / CandidateAssessment / Strategy / ActiveMarketAssignment
+MarketResearchRun -> CandidateAssessment -> ActiveMarketAssignment (human approved only)
 Strategy -> StrategyVersion -> BacktestRun / ValidationRun / PaperRun / StrategyApproval
 StrategyVersion + ActiveMarketAssignment -> Opportunity -> RiskDecision -> Recommendation
 TradingAccount -> Position -> TradeExecution / TradeThesis / MonitoringObservation / JournalEntry

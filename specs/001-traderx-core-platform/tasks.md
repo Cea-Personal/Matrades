@@ -26,20 +26,20 @@ and story-level validation.
 **Purpose**: Create the modular-monolith repository, toolchains, deployment skeleton, and test
 layout described in `plan.md`.
 
-- [ ] T001 Create the planned Python domain, API, worker, web, migration, test, deploy, and isolated MT5 bridge directory skeleton with package markers in `src/traderx/__init__.py` and `apps/mt5_bridge/traderx_mt5_bridge/__init__.py`
-- [ ] T002 Initialize the Python 3.13 core project and pin FastAPI, Pydantic, SQLAlchemy, Alembic, Celery, HTTPX, Polars, NumPy, SciPy, testing, linting, and typing dependencies in `pyproject.toml`
-- [ ] T003 [P] Initialize the Node.js 24, Next.js 16, React 19, TypeScript 5.9, TanStack Query, Zod, Tailwind, Vitest, and Playwright workspace in `apps/web/package.json`
-- [ ] T004 [P] Configure strict TypeScript, module aliases, generated contract types, and test compilation in `apps/web/tsconfig.json`
-- [ ] T005 [P] Configure Ruff, mypy strict safety-module overrides, pytest markers, coverage, and Hypothesis profiles in `pyproject.toml`
-- [ ] T006 Configure Alembic to import TraderX metadata and use transaction-safe migrations in `migrations/env.py`
-- [ ] T007 [P] Define non-secret typed runtime settings and startup validation in `src/traderx/shared/config.py`
-- [ ] T008 [P] Create the test package layout, shared markers, frozen clocks, and deterministic seeds in `tests/conftest.py`
-- [ ] T009 [P] Create reusable PostgreSQL, Redis, API, and non-eager Celery test fixtures in `tests/integration/conftest.py`
-- [ ] T010 [P] Define private-network local services for web, API, worker groups, scheduler, PostgreSQL, Redis, migration, and proxy roles, explicitly excluding the remote MT5 terminal bridge, in `deploy/compose.yaml`
-- [ ] T011 [P] Add non-root immutable container builds for the Python runtime roles in `deploy/containers/python.Dockerfile`
-- [ ] T012 [P] Add the production Next.js container build in `deploy/containers/web.Dockerfile`
-- [ ] T013 [P] Configure the single-origin HTTPS proxy for `/`, `/api/v1`, and `/events` in `deploy/proxy/Caddyfile`
-- [ ] T014 Configure CI jobs for static checks, migration checks, contract tests, safety tests, integration tests, web tests, and secret scanning in `.github/workflows/ci.yml`
+- [X] T001 Create the planned Python domain, API, worker, web, migration, test, deploy, and isolated MT5 bridge directory skeleton with package markers in `src/traderx/__init__.py` and `apps/mt5_bridge/traderx_mt5_bridge/__init__.py`
+- [X] T002 Initialize the Python 3.13 core project and pin FastAPI, Pydantic, SQLAlchemy, Alembic, Celery, HTTPX, Polars, NumPy, SciPy, testing, linting, and typing dependencies in `pyproject.toml`
+- [X] T003 [P] Initialize the Node.js 24, Next.js 16, React 19, TypeScript 5.9, TanStack Query, Zod, Tailwind, Vitest, and Playwright workspace in `apps/web/package.json`
+- [X] T004 [P] Configure strict TypeScript, module aliases, generated contract types, and test compilation in `apps/web/tsconfig.json`
+- [X] T005 [P] Configure Ruff, mypy strict safety-module overrides, pytest markers, coverage, and Hypothesis profiles in `pyproject.toml`
+- [X] T006 Configure Alembic to import TraderX metadata and use transaction-safe migrations in `migrations/env.py`
+- [X] T007 [P] Define non-secret typed runtime settings and startup validation in `src/traderx/shared/config.py`
+- [X] T008 [P] Create the test package layout, shared markers, frozen clocks, and deterministic seeds in `tests/conftest.py`
+- [X] T009 [P] Create reusable PostgreSQL, Redis, API, and non-eager Celery test fixtures in `tests/integration/conftest.py`
+- [X] T010 [P] Define private-network local services for web, API, worker groups, scheduler, PostgreSQL, Redis, migration, and proxy roles, explicitly excluding the remote MT5 terminal bridge, in `deploy/compose.yaml`
+- [X] T011 [P] Add non-root immutable container builds for the Python runtime roles in `deploy/containers/python.Dockerfile`
+- [X] T012 [P] Add the production Next.js container build in `deploy/containers/web.Dockerfile`
+- [X] T013 [P] Configure the single-origin HTTPS proxy for `/`, `/api/v1`, and `/events` in `deploy/proxy/Caddyfile`
+- [X] T014 Configure CI jobs for static checks, migration checks, contract tests, safety tests, integration tests, web tests, and secret scanning in `.github/workflows/ci.yml`
 
 **Checkpoint**: Both toolchains install reproducibly, containers build, migrations initialize, and
 the empty test suites execute.
@@ -53,28 +53,28 @@ primitives required by every story.
 
 **CRITICAL**: No user-story implementation starts until this phase is complete.
 
-- [ ] T015 [P] Write unit tests for exact decimal conversion, conservative volume rounding, UTC instants, nanosecond event ordering, and IANA reset zones in `tests/unit/shared/test_primitives.py`
-- [ ] T016 [P] Write integration tests for atomic aggregate, audit, idempotency, and outbox persistence plus consumer deduplication in `tests/integration/test_transactional_outbox.py`
-- [ ] T017 [P] Write contract tests for RFC 9457 errors, correlation IDs, ETags, `If-Match`, and `Idempotency-Key` semantics in `tests/contract/test_http_common.py`
-- [ ] T018 [P] Write integration tests for durable job leases, checkpoints, cooperative pause/cancel, bounded retries, and crash redelivery in `tests/integration/test_job_runtime.py`
-- [ ] T019 Implement opaque identifiers, exact decimal value objects, UTC/nanosecond time types, reason codes, and domain errors in `src/traderx/shared/types.py`
-- [ ] T020 Implement SQLAlchemy declarative bases, append-only mixins, optimistic versions, naming conventions, and UTC persistence types in `src/traderx/shared/db.py`
-- [ ] T021 Implement request/task-scoped units of work with explicit transactions and fixed lock-order helpers in `src/traderx/shared/unit_of_work.py`
-- [ ] T022 [P] Implement RFC 9457 problem mapping and stable domain error codes in `apps/api/traderx_api/middleware/problems.py`
-- [ ] T023 [P] Implement request, correlation, causation, trace, actor, and idempotency context propagation in `apps/api/traderx_api/middleware/context.py`
-- [ ] T024 Implement durable idempotency records, canonical request hashing, replay, and conflict handling in `src/traderx/shared/idempotency.py`
-- [ ] T025 Implement append-only audit records with redacted changes, actor assurance, outcome, reason, and integrity metadata in `src/traderx/audit/model.py`
-- [ ] T026 Implement CloudEvents-compatible domain envelopes, transactional outbox records, inbox receipts, and per-aggregate ordering in `src/traderx/shared/events.py`
-- [ ] T027 Implement outbox claiming, dispatch, failure visibility, and idempotent consumer helpers in `apps/worker/traderx_worker/runtime/outbox.py`
-- [ ] T028 Implement durable background jobs, attempts, leases, checkpoints, progress, and guarded state transitions in `src/traderx/jobs/model.py`
-- [ ] T029 Implement cooperative worker execution, fencing, cancellation, pause/resume, and retry policy in `apps/worker/traderx_worker/runtime/jobs.py`
-- [ ] T030 [P] Define broker, market-data, notification, artifact, clock, and calendar protocols, including complete snapshots and optional documented account changes, from the provider contract in `src/traderx/integrations/ports.py`
-- [ ] T031 [P] Implement AES-256-GCM envelope encryption, key versioning, rotation hooks, and central secret redaction in `src/traderx/integrations/crypto.py`
-- [ ] T032 Create the foundational idempotency, audit, outbox/inbox, background-job, and artifact-reference schema in `migrations/versions/0001_foundation.py`
-- [ ] T033 [P] Configure FastAPI application startup, middleware, dependency wiring, OpenAPI metadata, and versioned router registration in `apps/api/traderx_api/main.py`
-- [ ] T034 [P] Configure Celery queues for monitoring, data, research, paper, notification, and maintenance work with one scheduler in `apps/worker/traderx_worker/runtime/celery_app.py`
-- [ ] T035 [P] Implement the authenticated application shell, navigation, query provider, error boundary, and accessibility landmarks in `apps/web/src/app/layout.tsx`
-- [ ] T036 Generate and compile the TypeScript client/types from `specs/001-traderx-core-platform/contracts/http-api.yaml` into `apps/web/src/lib/api/generated.ts`
+- [X] T015 [P] Write unit tests for exact decimal conversion, conservative volume rounding, UTC instants, nanosecond event ordering, and IANA reset zones in `tests/unit/shared/test_primitives.py`
+- [X] T016 [P] Write integration tests for atomic aggregate, audit, idempotency, and outbox persistence plus consumer deduplication in `tests/integration/test_transactional_outbox.py`
+- [X] T017 [P] Write contract tests for RFC 9457 errors, correlation IDs, ETags, `If-Match`, and `Idempotency-Key` semantics in `tests/contract/test_http_common.py`
+- [X] T018 [P] Write integration tests for durable job leases, checkpoints, cooperative pause/cancel, bounded retries, and crash redelivery in `tests/integration/test_job_runtime.py`
+- [X] T019 Implement opaque identifiers, exact decimal value objects, UTC/nanosecond time types, reason codes, and domain errors in `src/traderx/shared/types.py`
+- [X] T020 Implement SQLAlchemy declarative bases, append-only mixins, optimistic versions, naming conventions, and UTC persistence types in `src/traderx/shared/db.py`
+- [X] T021 Implement request/task-scoped units of work with explicit transactions and fixed lock-order helpers in `src/traderx/shared/unit_of_work.py`
+- [X] T022 [P] Implement RFC 9457 problem mapping and stable domain error codes in `apps/api/traderx_api/middleware/problems.py`
+- [X] T023 [P] Implement request, correlation, causation, trace, actor, and idempotency context propagation in `apps/api/traderx_api/middleware/context.py`
+- [X] T024 Implement durable idempotency records, canonical request hashing, replay, and conflict handling in `src/traderx/shared/idempotency.py`
+- [X] T025 Implement append-only audit records with redacted changes, actor assurance, outcome, reason, and integrity metadata in `src/traderx/audit/model.py`
+- [X] T026 Implement CloudEvents-compatible domain envelopes, transactional outbox records, inbox receipts, and per-aggregate ordering in `src/traderx/shared/events.py`
+- [X] T027 Implement outbox claiming, dispatch, failure visibility, and idempotent consumer helpers in `apps/worker/traderx_worker/runtime/outbox.py`
+- [X] T028 Implement durable background jobs, attempts, leases, checkpoints, progress, and guarded state transitions in `src/traderx/jobs/model.py`
+- [X] T029 Implement cooperative worker execution, fencing, cancellation, pause/resume, and retry policy in `apps/worker/traderx_worker/runtime/jobs.py`
+- [X] T030 [P] Define broker, market-data, notification, artifact, clock, and calendar protocols, including complete snapshots and optional documented account changes, from the provider contract in `src/traderx/integrations/ports.py`
+- [X] T031 [P] Implement AES-256-GCM envelope encryption, key versioning, rotation hooks, and central secret redaction in `src/traderx/integrations/crypto.py`
+- [X] T032 Create the foundational idempotency, audit, outbox/inbox, background-job, and artifact-reference schema in `migrations/versions/0001_foundation.py`
+- [X] T033 [P] Configure FastAPI application startup, middleware, dependency wiring, OpenAPI metadata, and versioned router registration in `apps/api/traderx_api/main.py`
+- [X] T034 [P] Configure Celery queues for monitoring, data, research, paper, notification, and maintenance work with one scheduler in `apps/worker/traderx_worker/runtime/celery_app.py`
+- [X] T035 [P] Implement the authenticated application shell, navigation, query provider, error boundary, and accessibility landmarks in `apps/web/src/app/layout.tsx`
+- [X] T036 Generate and compile the TypeScript client/types from `specs/001-traderx-core-platform/contracts/http-api.yaml` into `apps/web/src/lib/api/generated.ts`
 
 **Checkpoint**: Foundation is ready; PostgreSQL is the durable truth, asynchronous delivery is
 idempotent, the common HTTP contract works, and all user stories may now be developed.
@@ -93,47 +93,47 @@ state/capacity; anonymous and unauthorized access fails, stale/unverified provid
 
 ### Tests for User Story 1
 
-- [ ] T037 [P] [US1] Write one-time owner-bootstrap concurrency, password-reset second-proof, recovery-code single-use, assisted-reset authorization, CSRF, TOTP replay, session rotation/revocation, and 30-minute idle/12-hour absolute-expiry tests in `tests/security/test_identity_security.py`
-- [ ] T038 [P] [US1] Write OWNER/ADMIN/VIEWER authorization-matrix and denied-attempt audit tests in `tests/security/test_rbac_matrix.py`
-- [ ] T039 [P] [US1] Write account, prop-profile, risk-policy, and Command Center HTTP contract tests in `tests/contract/test_accounts_risk_api.py`
-- [ ] T040 [P] [US1] Write property tests for stricter-rule precedence, loss monotonicity, reset semantics, and `NORMAL/CAUTION/DEFENSIVE/LOCKDOWN` transitions in `tests/safety/test_risk_properties.py`
-- [ ] T041 [P] [US1] Write integration tests for account snapshots, exact risk calculations, dynamic `2 -> 1 -> 0` capacity, and circuit-breaker persistence in `tests/integration/test_account_risk_flow.py`
-- [ ] T042 [P] [US1] Write keyboard-accessible deep-link journeys for `/setup`, `/sign-in`, `/mfa/enroll`, `/mfa/verify`, `/mfa-recovery`, `/password-reset`, session-expiry redirect, account setup, and Command Center access in `apps/web/tests/e2e/safe_account.spec.ts`
+- [X] T037 [P] [US1] Write one-time owner-bootstrap concurrency, password-reset second-proof, recovery-code single-use, assisted-reset authorization, CSRF, TOTP replay, session rotation/revocation, and 30-minute idle/12-hour absolute-expiry tests in `tests/security/test_identity_security.py`
+- [X] T038 [P] [US1] Write OWNER/ADMIN/VIEWER authorization-matrix and denied-attempt audit tests in `tests/security/test_rbac_matrix.py`
+- [X] T039 [P] [US1] Write account, prop-profile, risk-policy, and Command Center HTTP contract tests in `tests/contract/test_accounts_risk_api.py`
+- [X] T040 [P] [US1] Write property tests for stricter-rule precedence, loss monotonicity, reset semantics, and `NORMAL/CAUTION/DEFENSIVE/LOCKDOWN` transitions in `tests/safety/test_risk_properties.py`
+- [X] T041 [P] [US1] Write integration tests for account snapshots, exact risk calculations, dynamic `2 -> 1 -> 0` capacity, and circuit-breaker persistence in `tests/integration/test_account_risk_flow.py`
+- [X] T042 [P] [US1] Write keyboard-accessible deep-link journeys for `/setup`, `/sign-in`, `/mfa/enroll`, `/mfa/verify`, `/mfa-recovery`, `/password-reset`, session-expiry redirect, account setup, and Command Center access in `apps/web/tests/e2e/safe_account.spec.ts`
 
 ### Implementation for User Story 1
 
 - [X] T043 [P] [US1] Implement User, singleton IdentityBootstrapState, AuthSession, MfaFactor, MfaRecoveryCode, PasswordResetChallenge, and AssistedMfaResetRequest models in `src/traderx/identity/model.py`
-- [ ] T044 [P] [US1] Implement TradingAccount, versioned PropProfile, and versioned RiskPolicy models in `src/traderx/accounts/model.py`
-- [ ] T045 [P] [US1] Implement AccountSnapshot, RiskSnapshot, RiskDecision, and CircuitBreaker models and state enums in `src/traderx/risk/model.py`
+- [X] T044 [P] [US1] Implement TradingAccount, versioned PropProfile, and versioned RiskPolicy models in `src/traderx/accounts/model.py`
+- [X] T045 [P] [US1] Implement AccountSnapshot, RiskSnapshot, RiskDecision, and CircuitBreaker models and state enums in `src/traderx/risk/model.py`
 - [X] T046 [US1] Add singleton owner-bootstrap, identity, session, MFA/recovery/reset, account, prop-profile, risk-policy, snapshot, decision, and circuit-breaker tables with concurrency and single-use constraints in `migrations/versions/0002_identity_accounts_risk.py`
 - [X] T047 [US1] Implement atomic initial-owner bootstrap, Argon2id passwords, short-lived authentication challenges, opaque MFA-assured sessions, 30-minute idle/12-hour absolute expiry, revocation, and reset-token password replacement without automatic login in `src/traderx/identity/authentication.py`
 - [X] T048 [US1] Implement RFC 6238 TOTP enrollment/verification, timestep replay prevention, one-time recovery-code handoff/redemption, authorized assisted reset, fresh-enrollment enforcement, session revocation, and recent-assurance checks in `src/traderx/identity/mfa.py`
-- [ ] T049 [US1] Implement deny-by-default RBAC policies and high-risk command authorization at the domain boundary in `src/traderx/identity/authorization.py`
-- [ ] T050 [US1] Implement account setup, one-live-account enforcement, prop-profile versioning, and risk-policy versioning with audit/outbox writes in `src/traderx/accounts/service.py`
-- [ ] T051 [US1] Implement exact shared-equity loss, drawdown, remaining margin, open risk, risk-state, and capacity calculations in `src/traderx/risk/calculator.py`
-- [ ] T052 [US1] Implement deterministic circuit-breaker activation, acknowledgement, clearing, and fail-closed capability rules in `src/traderx/risk/circuit_breakers.py`
-- [ ] T053 [US1] Implement account-snapshot ingestion and transactional risk-snapshot projection in `src/traderx/risk/projection.py`
+- [X] T049 [US1] Implement deny-by-default RBAC policies and high-risk command authorization at the domain boundary in `src/traderx/identity/authorization.py`
+- [X] T050 [US1] Implement account setup, one-live-account enforcement, prop-profile versioning, and risk-policy versioning with audit/outbox writes in `src/traderx/accounts/service.py`
+- [X] T051 [US1] Implement exact shared-equity loss, drawdown, remaining margin, open risk, risk-state, and capacity calculations in `src/traderx/risk/calculator.py`
+- [X] T052 [US1] Implement deterministic circuit-breaker activation, acknowledgement, clearing, and fail-closed capability rules in `src/traderx/risk/circuit_breakers.py`
+- [X] T053 [US1] Implement account-snapshot ingestion and transactional risk-snapshot projection in `src/traderx/risk/projection.py`
 - [X] T054 [P] [US1] Implement bootstrap-status/bootstrap, login/logout, password-reset request/completion with second proof, MFA enrollment/verification/recovery, assisted-reset, session-list, and revocation routes from `contracts/http-api.yaml` in `apps/api/traderx_api/routes/identity.py`
-- [ ] T055 [P] [US1] Implement account, prop-profile, risk-policy, risk-snapshot, and circuit-breaker routes with ETags and idempotency in `apps/api/traderx_api/routes/accounts.py`
+- [X] T055 [P] [US1] Implement account, prop-profile, risk-policy, risk-snapshot, and circuit-breaker routes with ETags and idempotency in `apps/api/traderx_api/routes/accounts.py`
 - [X] T056 [P] [US1] Implement route-specific, state-guarded authentication screens and redirects in `apps/web/src/app/setup/page.tsx`, `apps/web/src/app/sign-in/page.tsx`, `apps/web/src/app/mfa/enroll/page.tsx`, `apps/web/src/app/mfa/verify/page.tsx`, `apps/web/src/app/mfa-recovery/page.tsx`, and `apps/web/src/app/password-reset/page.tsx`
-- [ ] T057 [P] [US1] Implement trading-account, prop-rule, and internal-risk setup forms with deliberate confirmation in `apps/web/src/features/risk/AccountRiskSetup.tsx`
-- [ ] T058 [US1] Implement the Command Center account, equity, loss-margin, risk-state, capacity, alert, and freshness panels in `apps/web/src/features/dashboard/CommandCenter.tsx`
-- [ ] T059 [US1] Wire account snapshots to risk recalculation, dashboard projection, circuit breakers, audit, and outbox consumers in `apps/worker/traderx_worker/tasks/risk.py`
+- [X] T057 [P] [US1] Implement trading-account, prop-rule, and internal-risk setup forms with deliberate confirmation in `apps/web/src/features/risk/AccountRiskSetup.tsx`
+- [X] T058 [US1] Implement the Command Center account, equity, loss-margin, risk-state, capacity, alert, and freshness panels in `apps/web/src/features/dashboard/CommandCenter.tsx`
+- [X] T059 [US1] Wire account snapshots to risk recalculation, dashboard projection, circuit breakers, audit, and outbox consumers in `apps/worker/traderx_worker/tasks/risk.py`
 
 ### MT5 Account-Truth Slice
 
 - [X] T060 [P] [US1] Write MT5 bridge create/test/discovered-account/bind HTTP contract tests, including masked enrollment credentials, in `tests/contract/test_broker_integrations_api.py`
 - [X] T061 [P] [US1] Write MT5 complete-snapshot, account/server mismatch, investor-mode, and fail-closed adapter tests in `tests/integration/test_mt5_bridge_adapter.py`
-- [ ] T062 [P] [US1] Write mTLS MT5 bridge tests for investor-password-only configuration, terminal/account `trade_allowed = false`, login/server match, null response, disconnect, and denied terminal APIs in `apps/mt5_bridge/tests/test_read_only_bridge.py`
+- [X] T062 [P] [US1] Write native outbound-EA tests for enrollment identity, investor-mode/trading-disabled proof, login/server match, incomplete snapshot rejection, HTTPS-only transport, and denied terminal trade APIs in `tests/safety/test_mt5_ea_bridge.py`
 - [X] T063 [P] [US1] Write end-to-end broker-account-truth tests proving a partial, stale, contradictory, or degraded MT5 snapshot remains non-authoritative and keeps capacity at zero in `tests/integration/test_broker_account_truth.py`
 - [X] T064 [P] [US1] Write the accessible MT5 bridge-registration/bind/LOCKDOWN browser journey in `apps/web/tests/e2e/broker_account_setup.spec.ts`
 - [X] T065 [P] [US1] Implement broker Integration, credential-version, health-observation, discovered-account, and reconciliation-checkpoint models for `MT5_TERMINAL_BRIDGE` in `src/traderx/integrations/broker_model.py`
 - [X] T066 [US1] Add broker integration, selected-account binding, encrypted credential, health, and append-only reconciliation-checkpoint tables in `migrations/versions/0013_broker_account_truth.py`
 - [X] T067 [US1] Enforce the MT5-only broker-provider allowlist in `migrations/versions/0015_mt5_only_broker_integrations.py`
-- [ ] T068 [US1] Implement the TraderX mTLS client for the narrow MT5 bridge health/snapshot/positions/deals/instruments contract and reject unverified or incomplete responses in `src/traderx/integrations/mt5_bridge.py`
-- [ ] T069 [US1] Implement the isolated MT5 bridge and its `MetaTrader5`-only dependency manifest with local investor-password storage, terminal/account verification, read-only allowlist, and explicit trade-method denylist in `apps/mt5_bridge/traderx_mt5_bridge/app.py` and `apps/mt5_bridge/pyproject.toml`
+- [X] T068 [US1] Implement the server-side native-EA enrollment and narrow account/positions/deals/instruments snapshot receiver with identity verification and fail-closed incomplete-response handling in `src/traderx/integrations/mt5_bridge.py`
+- [X] T069 [US1] Implement the outbound-only native MT5 Expert Advisor with local investor authorization, terminal/account verification, read-only snapshot allowlist, HTTPS enrollment, and explicit trade-method absence in `apps/mt5_bridge/mql5/TraderXReadOnlyBridge.mq5`
 - [X] T070 [US1] Implement atomic normalized broker snapshot/checkpoint commits, MT5 overlapping-deal reconciliation, and integration-scoped fail-closed outcomes in `src/traderx/integrations/reconciliation.py`
-- [ ] T071 [US1] Implement authorized create/test/discover/select/bind/disable/reconnect broker integration commands with audit, step-up assurance, and one-primary-account enforcement in `src/traderx/integrations/broker_service.py`
+- [X] T071 [US1] Implement authorized create/test/discover/select/bind/disable/reconnect broker integration commands with audit, step-up assurance, and one-primary-account enforcement in `src/traderx/integrations/broker_service.py`
 - [X] T072 [P] [US1] Implement the broker integration, test, discovered-account, credential, and primary-account binding operations from `contracts/http-api.yaml` in `apps/api/traderx_api/routes/integrations.py`
 - [X] T073 [P] [US1] Implement MT5 account-sync jobs with 15-second target cadence, bounded retry/backoff, health updates, breaker activation, and risk-projection handoff in `apps/worker/traderx_worker/tasks/broker_account_sync.py`
 - [X] T074 [P] [US1] Implement MT5 bridge registration, verification status, removal, and LOCKDOWN guidance in `apps/web/src/features/integrations/BrokerAccountIntegration.tsx`
@@ -478,7 +478,7 @@ security, deployment safety, and recoverability.
 - [X] T244 Implement one-shot migration, encrypted off-host backup, restore verification, and key-rotation operator procedures in `deploy/operations/runbook.md`
 - [ ] T245 Reconcile the generated server/client implementation with the OpenAPI, domain-event, and provider contracts and document compatibility in `specs/001-traderx-core-platform/contracts/compatibility-report.md`
 - [ ] T246 Execute every scenario in the validation guide and record evidence, deviations, and outcomes in `specs/001-traderx-core-platform/quickstart-results.md`
-- [ ] T247 Map all 94 functional requirements and 18 success criteria to implementation and passing evidence in `specs/001-traderx-core-platform/traceability.md`
+- [ ] T247 Map all 105 functional requirements and 22 success criteria to implementation and passing evidence in `specs/001-traderx-core-platform/traceability.md`
 - [ ] T248 Perform the pre-production Constitution Check and document that all governed rules and release-blocking tests pass in `specs/001-traderx-core-platform/constitution-compliance.md`
 - [X] T249 Update installation, owner bootstrap, UI-only operations, safety boundaries, and manual execution guidance in `README.md`
 
@@ -679,18 +679,241 @@ identity/account/MT5 slice. The existing user-story tasks remain the detailed im
 breakdown; these tasks establish the required convergence order and prevent the present route and
 UI scaffolding from being mistaken for complete product functionality.
 
-- [X] T250 [Convergence] Reconcile the MT5-only broker product decision across the specification, plan, provider contract, task references, and traceability. Remove stale retired-broker scope without adding another broker; preserve the MT5 investor-mode, read-only, fail-closed, and manual-execution constraints. [Source: product decision; Plan: Selected Broker-Account Adapters; Tasks: T060-T073]
-- [X] T251 [Convergence] Protect every operational API router with the established authenticated-session dependency, deny-by-default role authorization, required MFA/reauthentication for high-risk commands, and append-only denied-attempt audit records. Add coverage proving anonymous and unauthorized callers cannot read or mutate market, research, validation, paper, opportunity, position, journal, job, notification, or operations data. [Source: Constitution VI and VIII; Spec: FR-001, FR-004-FR-006, FR-089-FR-092]
-- [X] T252 [Convergence] Complete the shared authenticated application shell and Command Center as the current TraderX UI: mount navigation and live dashboard projections for account/risk, integration health, active markets, opportunities, alerts, and every existing feature area. Keep broker connection and all new workflows inside this UI; do not create a separate product surface. [Source: Constitution VI; Spec: FR-007, FR-092; Tasks: T035, T058, T230-T233]
-- [ ] T253 [Convergence] Complete the market-intelligence flow from durable provider ingestion through quality/eligibility gates, reproducible suitability reports, explicit Commodity/Forex/Cryptocurrency selection, and no-silent-replacement UI/API/worker behavior. Replace the current static market responses and disconnected components with persisted, authorized operations and the US2 acceptance evidence. [Source: Constitution IV, VII, IX; Spec: FR-015-FR-029; Tasks: T075-T096]
-- [ ] T254 [Convergence] Complete the no-code strategy, immutable-version, reproducible backtest, unseen-data, walk-forward, robustness, and portfolio-validation flow with durable jobs, reports, authorization, and the US3 browser journey. Replace static strategy and validation route responses with persisted lifecycle operations. [Source: Constitution II, VII, VIII; Spec: FR-030-FR-042; Tasks: T097-T127]
-- [ ] T255 [Convergence] Complete current-data paper execution, evidence comparison, required `AWAITING_APPROVAL` state, and step-up human approval/reject/return-to-research operations in the current UI. Prove no automatic promotion and replace static paper/approval route responses with durable, audited lifecycle decisions. [Source: Constitution II, III, VIII; Spec: FR-043-FR-052; Tasks: T128-T144]
-- [ ] T256 [Convergence] Complete opportunity evaluation, deterministic shared-account Risk Manager, correlation/exposure checks, conservative sizing, complete expiring recommendations, and visible `NO TRADE`/`BLOCKED` outcomes in the current UI. Prove a score cannot override risk and no code path submits a real-money order. [Source: Constitution I, III, V, VIII; Spec: FR-053-FR-066; Tasks: T145-T163]
-- [ ] T257 [Convergence] Complete read-only MT5 position reconciliation, recommendation matching/discretionary classification, immediate risk projection, frozen-thesis monitoring, and user correction flow. Replace static position/thesis responses with persisted observations while retaining the no-live-order boundary. [Source: Constitution III, V, X; Spec: FR-067-FR-073; Tasks: T164-T181]
-- [ ] T258 [Convergence] Complete automatic journaling, protected annotations/attachments, multidimensional R and financial analytics, non-mutating research hypotheses, retained market knowledge, and controlled market reactivation/replacement in the current UI. [Source: Constitution VII and X; Spec: FR-074-FR-078; Tasks: T182-T208]
-- [ ] T259 [Convergence] Complete authorized operations: durable jobs and progress, integration lifecycle/health, notification preferences and delivery, strategy health controls, redacted audit search, and system-health UI/API/worker flows. Replace fixed empty operations responses and prove routine management needs no technical interface. [Source: Constitution VI, VIII, IX; Spec: FR-079-FR-093; Tasks: T209-T233]
-- [ ] T260 [Convergence] Execute and record the cross-cutting production-readiness evidence: constitutional negative-capability and concurrency tests, migration/backup/restore rehearsal, performance and browser accessibility tests, full acceptance flows, OpenAPI/event/provider compatibility, requirement traceability, and final Constitution Check. Resolve the current Vitest configuration deprecation warning during this work. [Source: Constitution Engineering and Delivery Quality Gates; Spec: SC-001-SC-018; Tasks: T234-T249]
+- [X] T250 Reconcile the MT5-only broker product decision, remove retired-broker scope, and preserve investor-mode, read-only, fail-closed, and manual-execution constraints in `specs/001-traderx-core-platform/traceability.md`
+- [X] T251 Protect every operational router with authenticated-session and deny-by-default role checks and prove anonymous/unauthorized denials and audit evidence in `tests/security/test_operational_route_access.py`
+- [X] T252 Compose the shared authenticated Command Center shell with account/risk, integration health, markets, opportunities, alerts, and implemented workspaces without creating a second product surface in `apps/web/src/app/layout.tsx`
+- [ ] T253 Close the persisted, authorized US2 market-intelligence flow and record evidence for eligibility-before-ranking, three explicit selections, and no silent replacement in `specs/001-traderx-core-platform/traceability.md`
+- [ ] T254 Close the persisted US3 no-code strategy and reproducible validation flow and record its lifecycle and browser evidence in `specs/001-traderx-core-platform/traceability.md`
+- [ ] T255 Close the US4 current-data paper, evidence comparison, `AWAITING_APPROVAL`, and step-up human decision flow and record proof of no automatic promotion in `specs/001-traderx-core-platform/quickstart-results.md`
+- [ ] T256 Close the US5 deterministic opportunity, shared-account Risk Manager, conservative sizing, expiring recommendation, and visible `NO TRADE`/`BLOCKED` flow and record no-live-order proof in `specs/001-traderx-core-platform/quickstart-results.md`
+- [ ] T257 Close the US6 read-only MT5 position reconciliation, matching/classification, immediate risk projection, frozen-thesis monitoring, and correction flow and record evidence in `specs/001-traderx-core-platform/quickstart-results.md`
+- [ ] T258 Close the US7/US8 journal, analytics, non-mutating hypothesis, retained knowledge, and controlled reactivation/replacement flows and record evidence in `specs/001-traderx-core-platform/quickstart-results.md`
+- [ ] T259 Close the US9 durable jobs, integration lifecycle/health, notifications, strategy health, redacted audit, and system-health flows and record UI-only operation evidence in `specs/001-traderx-core-platform/quickstart-results.md`
+- [ ] T260 Execute and record SC-001 through SC-022 production-readiness evidence, including constitutional/concurrency, migration/restore, performance/accessibility, contract/traceability, and Vitest-warning closure in `specs/001-traderx-core-platform/quickstart-results.md`
 
 ## Phase 14: Convergence
 
-- [ ] T261 [Convergence] HIGH Restore an authorized Account & Risk workspace within the current Command Center after activation, so the primary account, prop profile, and internal risk policy remain visible and safely updatable with ETags, deliberate effect/confirmation and reason, MFA/role checks, audit evidence, and clear success/error states. [Source: Constitution VI and VIII; Spec: FR-008-FR-010, FR-089-FR-092] (partial)
+- [ ] T261 Restore the authorized Account & Risk workspace inside the current Command Center after activation with visible account/profile/policy state, ETags, deliberate effect/confirmation/reason, MFA/role checks, audit evidence, and clear result states in `apps/web/src/features/risk/AccountRiskSetup.tsx`
+
+---
+
+## Phase 15: Market-Research Amendment Foundation (Shared Infrastructure)
+
+**Purpose**: Add the reviewed provider catalogue, versioned source policies, durable scheduling,
+and advisory-model persistence required by both US2 market selection and US9 integration
+operations.
+
+**Critical**: Complete this phase before starting the amended US2 or US9 tasks. The migration and
+catalogue must not mark a provider usable until its entitlement, credential, capability, mapping,
+freshness, and qualification states pass.
+
+- [X] T262 [P] Extend the provider contracts with reviewed market-data capabilities, source semantics, bounded retry classifications, entitlement evidence, and the non-authoritative `LlmAnalysisPort` in `src/traderx/integrations/ports.py`
+- [X] T263 [P] Add `ProviderCatalogueEntry`, `FreshnessPolicyVersion`, `RetryPolicyVersion`, catalogue-bound integration configuration, credential version, and capability-health persistence models in `src/traderx/integrations/model.py`
+- [X] T264 [P] Extend dataset manifests, observations, and aliases with venue, capability, actual/proxy/unavailable semantics, mapping revision, entitlement, source times, freshness-policy version, conflict state, and immutable raw-evidence references in `src/traderx/market_data/model.py`
+- [X] T265 [P] Add the global model configuration, research schedule, occurrence, coordinated parent run, category-run source manifest, policy/model pins, and LLM attempt models in `src/traderx/market_research/model.py`
+- [X] T266 Create the provider catalogue, versioned policies, integration extensions, source evidence, model configuration, schedule/occurrence, coordinated run, and LLM attempt tables with unique occurrence and exactly-three-category constraints in `migrations/versions/0023_market_research_automation.py`
+- [X] T267 Seed deny-by-default MT5, CME Group, Cboe FX Spot, Coinbase Exchange, OpenAI Responses, and Anthropic Messages catalogue profiles plus disabled verification-only profiles and versioned freshness/retry defaults in `src/traderx/integrations/registry.py`
+- [X] T268 [P] Add typed provider endpoint, timeout, retry, retention, and scheduler bounds while rejecting arbitrary production source or model URLs in `src/traderx/shared/config.py`
+- [X] T269 Implement canonical source-evidence construction, capability-aware freshness evaluation, actual/proxy/unavailable labelling, and conflict quarantine inputs in `src/traderx/market_data/source_evidence.py`
+- [X] T270 [P] Create deterministic MT5, CME, Cboe, Coinbase, OpenAI, Anthropic, outage, entitlement, conflict, DST, and stale-cache fixtures without production secrets in `tests/fixtures/market_research.py`
+
+**Checkpoint**: The amended persistence and contracts can represent every source, schedule,
+fallback, category outcome, and LLM attempt without making any source or AI result authoritative by
+configuration alone.
+
+---
+
+## Phase 16: User Story 2 Amendment — Automated Three-Category Market Research (Priority: P1)
+
+**Goal**: Run one manual or scheduled research job across Commodity, Forex, and Cryptocurrency,
+using MT5 broker authority plus asset-specific specialist evidence, deterministic gates/ranking,
+ordered fail-closed fallback, and optional run-pinned LLM explanation inside the current Markets
+workspace.
+
+**Independent Test**: From a verified MT5 fixture account, close the browser and advance a due
+schedule. Exactly one parent with three category children—or one overlap skip—must persist. Each
+category must preserve source semantics and independently recommend or block; MT5-unsupported,
+stale, incomplete, or conflicting evidence must never rank. Changing or failing the selected LLM
+must alter no deterministic gate, metric, score, rank, proposal, or active assignment.
+
+### Tests for the User Story 2 Amendment
+
+- [X] T271 [P] [US2] Write qualification contract tests for CME, Cboe, and Coinbase authentication, entitlements, pagination/stream recovery, rate limits, revisions, capability declarations, redaction, and normalized outputs in `tests/contract/test_specialist_market_data_adapters.py`
+- [X] T272 [P] [US2] Extend native MT5 EA tests for broker-symbol authority, multi-window bars/activity, broker real-volume semantics, optional Depth of Market, unavailable-not-zero behavior, account binding, and the denied trade-call surface in `tests/safety/test_mt5_ea_bridge.py`
+- [X] T273 [P] [US2] Write source-authority and quality tests for mappings, provider/venue provenance, actual/proxy semantics, unchanged capability freshness, MT5 support veto, and material-conflict quarantine in `tests/data_quality/test_market_source_authority.py`
+- [X] T274 [P] [US2] Write deterministic asset-aware liquidity gate tests requiring Forex broker spread/activity proxies, Commodity venue volume/open interest and entitled depth, and Cryptocurrency venue volume/order-book depth in `tests/unit/market_research/test_asset_liquidity.py`
+- [X] T275 [P] [US2] Write ordered fallback tests proving three bounded specialist attempts, then current complete MT5, then still-fresh cached external evidence, with no weakened gate, extended freshness, silent substitution, or active-assignment change in `tests/safety/test_market_source_fallback.py`
+- [X] T276 [P] [US2] Write schedule tests for one-hour-to-30-day intervals, anchored local starts, IANA time zones/DST, unique due claims, overlap skips, no catch-up, lease fencing, and browser-independent execution in `tests/integration/test_market_research_scheduler.py`
+- [X] T277 [P] [US2] Write coordinated-run tests for one parent, exactly three category children, independent completion/blocking, immutable policy/source pins, crash recovery, idempotent redelivery, and preserved active assignments in `tests/integration/test_coordinated_market_research.py`
+- [X] T278 [P] [US2] Write LLM boundary tests for fixed provider/model allowlists, one global future-run selection, atomic run pinning, minimized prompts, strict output schema, three timed attempts, same-model explicit retry, no substitution, and deterministic-output immutability in `tests/safety/test_market_research_llm_boundary.py`
+- [X] T279 [P] [US2] Write authenticated HTTP contract tests for schedule, global model configuration, coordinated start/report, category evidence, overlap status, and pinned-analysis retry operations in `tests/contract/test_market_research_automation_api.py`
+- [X] T280 [P] [US2] Write the accessible in-place Markets journey for provider readiness, schedule/model controls, browser-closed execution, three category outcomes, provenance/fallback evidence, blocked states, LLM failure/retry, and separate activation confirmation in `apps/web/tests/e2e/market_research_automation.spec.ts`
+
+### Implementation for the User Story 2 Amendment
+
+- [ ] T281 [US2] Extend the native EA payload with bounded multi-window bars/activity, broker real volume, optional Depth of Market capability/status, source times, and explicit unavailable fields while retaining outbound-only HTTPS and no trade calls in `apps/mt5_bridge/mql5/TraderXReadOnlyBridge.mq5`
+- [ ] T282 [US2] Validate and normalize the extended EA market-evidence payload without treating partial/null sections as empty or globally authoritative in `src/traderx/integrations/mt5_bridge.py`
+- [ ] T283 [US2] Implement a persistent HTTP/stream transport with rate-limit handling, bounded retries, redaction, raw-response hashing, and normalized provider errors for reviewed specialist adapters in `src/traderx/market_data/providers/http.py`
+- [ ] T284 [P] [US2] Implement the CME Group adapter for entitled futures metadata, trades/top-of-book, cleared volume, open interest, settlement, and optional depth with licensing/capability enforcement in `src/traderx/market_data/providers/cme_group.py`
+- [ ] T285 [P] [US2] Implement the Cboe FX Spot adapter for explicitly venue-specific instruments, volume, prints, top-of-book, and entitled depth without claiming a consolidated Forex book in `src/traderx/market_data/providers/cboe_fx_spot.py`
+- [ ] T286 [P] [US2] Implement the Coinbase Exchange adapter for products, trades, candles, actual venue volume, and sequence-reconciled L2/L3 order books in `src/traderx/market_data/providers/coinbase_exchange.py`
+- [ ] T287 [US2] Implement owner-approved MT5-to-venue symbol mapping, contract-variant checks, entitlement verification, catalogue-revision binding, and unsupported-symbol vetoes in `src/traderx/market_data/mapping.py`
+- [ ] T288 [US2] Extend ingestion to retain provider-native batches, source/capability manifests, immutable revisions, cached-success eligibility metadata, and mapping versions before canonical normalization in `src/traderx/market_data/ingestion.py`
+- [ ] T289 [US2] Extend quality evaluation with capability-specific freshness, incomplete-versus-unavailable distinction, cross-source coherence checks, quarantine, and unchanged outage limits in `src/traderx/market_data/quality.py`
+- [ ] T290 [US2] Replace generic depth proxies with asset-aware Forex, Commodity, and Cryptocurrency liquidity evidence and explicit unknown mandatory measures in `src/traderx/market_research/liquidity.py`
+- [ ] T291 [US2] Enforce MT5 broker support before source, data, liquidity, execution, sizing, hours, gap, and prop-firm gates and preserve every reason before volatility ranking in `src/traderx/market_research/eligibility.py`
+- [ ] T292 [US2] Implement specialist-primary selection and the exact specialist-to-current-MT5-to-fresh-cache fallback state machine with reason-coded blocked outcomes in `src/traderx/market_research/source_selection.py`
+- [ ] T293 [US2] Rebuild category research orchestration around immutable source manifests, deterministic multi-horizon metrics, asset-aware gates, suitability versions, fallback trails, and no-activation proposals in `src/traderx/market_research/service.py`
+- [ ] T294 [P] [US2] Define the minimized normalized-evidence prompt envelope and strict advisory summary/anomaly/caution/method-proposal response schema in `src/traderx/market_research/llm_schema.py`
+- [ ] T295 [US2] Implement global-model validation, atomic provider/model/catalogue/prompt/schema/inference pinning, bounded same-model attempts, explicit retry, visible failure states, and deterministic-result independence in `src/traderx/market_research/llm_analysis.py`
+- [ ] T296 [P] [US2] Implement the reviewed OpenAI Responses adapter with `store=false` where supported, strict structured output, no tools, allowlisted model IDs, redacted errors, usage evidence, and no automatic substitution in `src/traderx/integrations/providers/openai_responses.py`
+- [ ] T297 [P] [US2] Implement the reviewed Anthropic Messages adapter with strict structured output, no tools, allowlisted model IDs, redacted errors, usage evidence, and no automatic substitution in `src/traderx/integrations/providers/anthropic_messages.py`
+- [ ] T298 [US2] Implement authorized, versioned global schedule and future-runs-only model configuration commands with ETags, idempotency, deliberate reason, audit, and outbox facts in `src/traderx/market_research/configuration.py`
+- [ ] T299 [US2] Implement PostgreSQL-authoritative due calculation, unique occurrence claims, anchored timezone/DST semantics, overlap skips, next-run advancement, and lease recovery in `src/traderx/market_research/scheduling.py`
+- [ ] T300 [US2] Implement coordinated parent creation, exactly-three category dispatch, immutable policy/model pins, independent outcome aggregation, partial completion, and preserved assignments in `src/traderx/market_research/coordinator.py`
+- [ ] T301 [US2] Implement specialist collection, source fallback, deterministic category evaluation, advisory analysis, durable progress, and idempotent checkpoint tasks in `apps/worker/traderx_worker/tasks/market_research.py`
+- [ ] T302 [US2] Replace the fixed daily rotation trigger with the due-schedule scanner, coordinated parent dispatch, overlap recording, and crash-safe resumption in `apps/worker/traderx_worker/tasks/market_rotation.py`
+- [ ] T303 [US2] Configure Celery Beat to wake only the database due scanner and route coordinated/category/LLM work without owning schedule truth in `apps/worker/traderx_worker/runtime/celery_app.py`
+- [ ] T304 [US2] Implement schedule, global model, coordinated run/report, source evidence, and pinned-analysis retry routes with authenticated OWNER mutations and read access from `contracts/http-api.yaml` in `apps/api/traderx_api/routes/markets.py`
+- [ ] T305 [US2] Define and transactionally emit schedule, occurrence, coordinated completion, category block, source fallback, model change, and LLM analysis facts from `contracts/domain-events.md` in `src/traderx/market_research/events.py`
+- [ ] T306 [US2] Regenerate the typed web client for the implemented schedule, catalogue, model, coordinated-run, evidence, and retry schemas in `apps/web/src/lib/api/generated.ts`
+- [ ] T307 [P] [US2] Build global model selection, anchored schedule configuration, next/last/overlap status, manual run-all, and valid permission/error states as an embedded Markets panel in `apps/web/src/features/markets/MarketResearchControls.tsx`
+- [ ] T308 [US2] Replace the category-only placeholder flow with the embedded controls, one coordinated run history, three result states, and existing activation/replacement components in `apps/web/src/features/markets/MarketsWorkspace.tsx`
+- [ ] T309 [P] [US2] Display asset-specific source/venue/mapping/capability semantics, observed age/policy, conflicts, fallback trail, deterministic metrics/ranks, pinned LLM status/advice, and same-model retry without conflating ranking and activation in `apps/web/src/features/markets/MarketResearchReport.tsx`
+- [ ] T310 [P] [US2] Expose source coverage, mapping, entitlement, freshness, and actual/proxy/unavailable states for researched and inactive instruments in `apps/web/src/features/markets/InstrumentLibrary.tsx`
+
+**Checkpoint**: User Story 2 meets FR-015–FR-029 and FR-095–FR-105 plus SC-004–SC-006 and
+SC-019–SC-022 without creating a second UI or granting the LLM financial authority.
+
+---
+
+## Phase 17: User Story 9 Amendment — Reviewed Provider Operations in the Current UI (Priority: P2)
+
+**Goal**: Let an authorized owner configure and operate the fixed market-data and LLM catalogues
+from the existing Integrations/System areas with protected credentials, qualification evidence,
+health, audit, and actionable failures.
+
+**Independent Test**: From the authenticated Integrations panel, connect, test, disable, re-enable,
+rotate, and remove each reviewed non-broker provider; reject arbitrary providers, URLs, or models;
+never return or log a credential; and reflect provider failure immediately in source/model
+eligibility while retaining historical evidence.
+
+### Tests for the User Story 9 Amendment
+
+- [ ] T311 [P] [US9] Write provider-catalogue and non-broker lifecycle contract tests for fixed entries, provider-specific schemas, licensing acceptance, masked responses, connect/test/enable/disable/rotate/remove, ETags, idempotency, and health in `tests/contract/test_provider_catalogue_api.py`
+- [ ] T312 [P] [US9] Write security and integration tests rejecting arbitrary endpoints/models, unauthorized secret operations, stale versions, secret exposure, unqualified entitlement/mapping, and retired adapters in `tests/security/test_provider_catalogue_security.py`
+- [ ] T313 [P] [US9] Write the existing-UI browser journey for CME/Cboe/Coinbase/OpenAI/Anthropic catalogue cards, credential lifecycle, licensing/retention notices, health/error recovery, and permission states in `apps/web/tests/e2e/provider_catalogue_operations.spec.ts`
+
+### Implementation for the User Story 9 Amendment
+
+- [ ] T314 [US9] Extend non-broker lifecycle commands with catalogue-bound configuration validation, write-only encrypted credentials, licensing/retention acknowledgement, qualification state, removal, rotation, step-up authorization, audit, and outbox writes in `src/traderx/integrations/service.py`
+- [ ] T315 [US9] Implement reviewed catalogue listing and non-broker create/test/enable/disable/rotate/remove endpoints without generic URLs or secret-bearing responses in `apps/api/traderx_api/routes/integrations.py`
+- [ ] T316 [P] [US9] Implement provider qualification, capability probing, entitlement checks, bounded health polling, credential-rotation verification, and redacted failure tasks in `apps/worker/traderx_worker/tasks/operations.py`
+- [ ] T317 [US9] Aggregate provider capability freshness, current error, entitlement, catalogue lifecycle, and research impact into `HEALTHY`, `DEGRADED`, `FAILED`, or `DISABLED` states in `src/traderx/integrations/health.py`
+- [ ] T318 [US9] Extend the existing integration cards with reviewed market-data and LLM provider-specific forms, masked credential actions, licensing/retention notices, test/enable/disable/rotate/remove controls, and accessible status guidance in `apps/web/src/features/integrations/Integrations.tsx`
+- [ ] T319 [P] [US9] Display specialist source, selected-model, schedule-worker, entitlement, freshness, and affected-category health without exposing sensitive configuration in `apps/web/src/features/system/SystemControl.tsx`
+- [ ] T320 [P] [US9] Route catalogue retirement, entitlement loss, stale/conflicting source, schedule overlap/failure, and unavailable LLM facts through durable user-selected notifications in `src/traderx/notifications/router.py`
+
+**Checkpoint**: User Story 9 satisfies FR-079–FR-094 and FR-097/FR-102 for the amended providers;
+routine operation remains authenticated, audited, secret-safe, and entirely inside the current UI.
+
+---
+
+## Phase 18: Market-Research Amendment Release Gates
+
+**Purpose**: Reconcile contracts and prove source, scheduling, LLM, security, accessibility,
+resilience, and constitutional behavior before enabling the amended feature in production.
+
+- [ ] T321 [P] Add static guards against scraping, arbitrary provider/model registration, LLM tools or account-data prompts, deterministic-result mutation by analysis, and any MT5/live-order capability in `tests/safety/test_constitutional_negative_capabilities.py`
+- [ ] T322 [P] Add SC-019–SC-022 end-to-end acceptance tests for unique scheduling, source authority, unchanged-gate fallback, exact run pinning, visible LLM failure, and no automatic activation/replacement in `tests/e2e/test_market_research_acceptance.py`
+- [ ] T323 [P] Add scheduler throughput, three-category completion, bounded provider/LLM retry, API report latency, and large evidence-table scenarios to `tests/performance/test_success_criteria.py`
+- [ ] T324 [P] Add keyboard, screen-reader, focus, live-region, non-colour status, responsive table, loading/empty/stale/conflict/rate-limit/permission, and recovery checks for the amended panels in `apps/web/tests/e2e/accessibility.spec.ts`
+- [ ] T325 Document provider entitlement acquisition, credential rotation, symbol-mapping approval, retention/licensing review, outage/fallback response, model retirement, and scheduler recovery in `deploy/operations/market-research-runbook.md`
+- [ ] T326 Reconcile runtime OpenAPI generation, typed client, provider ports, and market-research event schemas and update the authoritative status in `specs/001-traderx-core-platform/contracts/compatibility-report.md`
+- [ ] T327 Execute the amended integration, three-category, fallback, schedule, LLM, restart, and browser-closed scenarios and record evidence in `specs/001-traderx-core-platform/quickstart-results.md`
+- [ ] T328 Map FR-095–FR-105 and SC-019–SC-022 to code, migration, UI, audit/event, and passing test evidence while preserving the full 105/22 mapping in `specs/001-traderx-core-platform/traceability.md`
+- [ ] T329 Re-run the Constitution Check for official sources, deterministic authority, human activation, UI-first operation, preserved evidence, and manual execution and record the release decision in `specs/001-traderx-core-platform/constitution-compliance.md`
+- [ ] T330 Update user guidance for provider prerequisites, global model selection, recurring research, evidence/fallback interpretation, analysis retry, and human market approval in `README.md`
+
+**Checkpoint**: The amendment is production-eligible only when every required provider is legally
+usable and qualified for the deployed account, all SC-019–SC-022 evidence passes, and T245–T248
+plus T321–T330 are complete.
+
+---
+
+## Amendment Dependencies and Execution Order
+
+### Phase Dependencies
+
+- **Phase 15 — Amendment Foundation**: Depends on the existing Phase 2 foundation and blocks the
+  amended US2 and US9 work.
+- **Phase 16 — US2 Amendment**: Depends on Phase 15. Tests T271–T280 are authored first; adapters
+  T284–T286 may proceed in parallel after T283; provider and LLM adapters converge before T293,
+  T295, and coordinated execution.
+- **Phase 17 — US9 Amendment**: Depends on the Phase 15 catalogue/secret model. It may begin in
+  parallel with Phase 16 using qualification fixtures, then integrates with implemented provider
+  adapters and market-research health.
+- **Phase 18 — Release Gates**: Depends on the desired Phase 16 and Phase 17 scope and joins the
+  original release tasks T245–T248 and convergence task T260.
+
+### Amendment User Story Dependency Graph
+
+```text
+Existing Foundation -> Phase 15 Amendment Foundation
+Phase 15 -> US2 Amendment
+Phase 15 -> US9 Amendment
+US2 Amendment + US9 Amendment -> Phase 18 Release Gates
+US2 deterministic report -> existing human activation/replacement commands
+US9 health -> US2 provider/model eligibility, never deterministic financial authority
+```
+
+### Parallel Execution Examples
+
+#### User Story 2 Amendment
+
+```text
+Parallel tests: T271, T272, T273, T274, T275, T276, T277, T278, T279, T280
+Parallel specialist adapters after T283: T284, T285, T286
+Parallel LLM adapters after T294: T296, T297
+Parallel UI components after T304 and T306: T307, T309, T310
+```
+
+#### User Story 9 Amendment
+
+```text
+Parallel tests: T311, T312, T313
+Parallel worker/UI health surfaces after T314 and T315: T316, T319, T320
+```
+
+## Amendment Implementation Strategy
+
+### MVP First: Deterministic Scheduled Research
+
+1. Complete Phase 15.
+2. Write T271–T280 and confirm each fails for the intended missing behavior.
+3. Complete the MT5 evidence, source normalization, asset-aware gates, fallback, scheduler,
+   coordinator, API, and current-UI tasks needed for deterministic three-category reports.
+4. Validate manual and scheduled runs without enabling an LLM; a healthy LLM is not a prerequisite
+   for deterministic results.
+5. Add reviewed LLM analysis and explicit same-model retry, then prove zero deterministic drift.
+
+### Incremental Delivery
+
+1. Deliver MT5 broker authority plus synthetic/licensed specialist fixtures and blocked unknowns.
+2. Qualify one specialist adapter per category without relaxing any category gate.
+3. Deliver database scheduling and coordinated three-category reporting in the current Markets UI.
+4. Add the global reviewed model selector and non-authoritative analysis.
+5. Deliver complete provider lifecycle/health in the current Integrations/System UI.
+6. Enable production providers only after entitlement, licensing, symbol mapping, security, and
+   release evidence pass.
+
+### Amendment Notes
+
+- All new task descriptions name one exact repository-relative file path; task IDs remain
+  sequential after the preserved implementation history.
+- Tests are mandatory and precede implementation because the amendment affects financial evidence,
+  fail-closed eligibility, external secrets, scheduling concurrency, and AI boundaries.
+- Provider and model catalogue values are reviewed code/data, not user-entered arbitrary endpoints.
+- The LLM may fail completely without blocking publication of a valid deterministic research report.
+- No task may activate or replace a market, weaken a gate/freshness limit, or add a live-order
+  operation automatically.

@@ -208,6 +208,8 @@ string InstrumentsJson()
       if(StringLen(result)>1)
          result+=",";
       result+="{\"symbol\":\""+JsonString(symbol)+"\","+
+              "\"observed_at\":\""+IntegerToString((long)TimeCurrent())+"\","+
+              "\"source_semantics\":\"BROKER_PROXY\","+
               "\"description\":\""+JsonString(SymbolInfoString(symbol,SYMBOL_DESCRIPTION))+"\","+
               "\"path\":\""+JsonString(SymbolInfoString(symbol,SYMBOL_PATH))+"\","+
               "\"currency_base\":\""+JsonString(SymbolInfoString(symbol,SYMBOL_CURRENCY_BASE))+"\","+
@@ -222,8 +224,74 @@ string InstrumentsJson()
               "\"volume_min\":\""+DoubleToString(SymbolInfoDouble(symbol,SYMBOL_VOLUME_MIN),2)+"\","+
               "\"volume_max\":\""+DoubleToString(SymbolInfoDouble(symbol,SYMBOL_VOLUME_MAX),2)+"\","+
               "\"volume_step\":\""+DoubleToString(SymbolInfoDouble(symbol,SYMBOL_VOLUME_STEP),2)+"\","+
+              "\"bars_h1\":"+BarsJson(symbol,PERIOD_H1,digits)+","+
+              "\"bars_d1\":"+BarsJson(symbol,PERIOD_D1,digits)+","+
               "\"closes\":"+CloseSeriesJson(symbol,digits)+","+
-              "\"tick_volumes\":"+TickVolumeSeriesJson(symbol)+"}";
+              "\"tick_volumes\":"+TickVolumeSeriesJson(symbol)+","+
+              "\"real_volume\":"+RealVolumeJson(symbol)+","+
+              "\"depth_status\":\""+DepthStatus(symbol)+"\","+
+              "\"depth\":"+MarketDepthJson(symbol,digits)+"}";
+     }
+  return(result+"]");
+  }
+
+string BarsJson(const string symbol,const ENUM_TIMEFRAMES timeframe,const int digits)
+  {
+   MqlRates rates[];
+   int copied=CopyRates(symbol,timeframe,1,120,rates);
+   if(copied<=0)
+      return("[]");
+   string result="[";
+   for(int index=0;index<copied;index++)
+     {
+      if(index>0)
+         result+=",";
+      result+="{\"time\":\""+IntegerToString((long)rates[index].time)+"\","+
+              "\"open\":\""+DoubleToString(rates[index].open,digits)+"\","+
+              "\"high\":\""+DoubleToString(rates[index].high,digits)+"\","+
+              "\"low\":\""+DoubleToString(rates[index].low,digits)+"\","+
+              "\"close\":\""+DoubleToString(rates[index].close,digits)+"\","+
+              "\"tick_volume\":\""+IntegerToString((long)rates[index].tick_volume)+"\","+
+              "\"real_volume\":\""+IntegerToString((long)rates[index].real_volume)+"\"}";
+     }
+   return(result+"]");
+  }
+
+string RealVolumeJson(const string symbol)
+  {
+   long values[];
+   int copied=CopyRealVolume(symbol,PERIOD_H1,1,120,values);
+   if(copied<=0)
+      return("null");
+   string result="[";
+   for(int index=0;index<copied;index++)
+     {
+      if(index>0)
+         result+=",";
+      result+=IntegerToString(values[index]);
+     }
+   return(result+"]");
+  }
+
+string DepthStatus(const string symbol)
+  {
+   MqlBookInfo book[];
+   return(MarketBookGet(symbol,book) && ArraySize(book)>0 ? "AVAILABLE" : "UNAVAILABLE");
+  }
+
+string MarketDepthJson(const string symbol,const int digits)
+  {
+   MqlBookInfo book[];
+   if(!MarketBookGet(symbol,book) || ArraySize(book)==0)
+      return("null");
+   string result="[";
+   for(int index=0;index<ArraySize(book);index++)
+     {
+      if(index>0)
+         result+=",";
+      result+="{\"type\":"+IntegerToString((int)book[index].type)+","+
+              "\"price\":\""+DoubleToString(book[index].price,digits)+"\","+
+              "\"volume\":\""+IntegerToString((long)book[index].volume)+"\"}";
      }
    return(result+"]");
   }

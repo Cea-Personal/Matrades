@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: TraderX Core Platform API
-  version: 1.0.0
+  version: 1.1.0
   summary: Authenticated UI contract for conservative manual trading decision support
   description: |
     Contract for TraderX V1. The API exposes decision support and read-only broker visibility.
@@ -350,6 +350,36 @@ paths:
               schema:
                 type: array
                 items: {$ref: '#/components/schemas/Integration'}
+  /integrations/providers:
+    get:
+      tags: [Integrations]
+      operationId: listReviewedProviderCatalogue
+      responses:
+        '200':
+          description: Reviewed provider/model entries available to the current installation and their capability/licensing metadata
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/ProviderCatalogueEntry'}
+  /integrations/non-broker:
+    post:
+      tags: [Integrations]
+      operationId: createReviewedNonBrokerIntegration
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/NonBrokerIntegrationCommand'}
+      responses:
+        '201':
+          description: Reviewed market-data or LLM integration created; plaintext credentials are not returned
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Integration'}
+        '422': {$ref: '#/components/responses/Problem'}
   /integrations/mt5/enrollments:
     post:
       tags: [Integrations]
@@ -403,6 +433,20 @@ paths:
         - $ref: '#/components/parameters/IntegrationId'
       responses:
         '202': {$ref: '#/components/responses/AcceptedJob'}
+  /integrations/{integration_id}/credentials/rotate:
+    post:
+      tags: [Integrations]
+      operationId: rotateIntegrationCredential
+      parameters:
+        - $ref: '#/components/parameters/IntegrationId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/WriteOnlyCredentialCommand'}
+      responses:
+        '202': {$ref: '#/components/responses/AcceptedJob'}
   /integrations/{integration_id}/accounts:
     get:
       tags: [Integrations]
@@ -437,6 +481,99 @@ paths:
               schema:
                 type: array
                 items: {$ref: '#/components/schemas/Instrument'}
+  /markets/research/schedule:
+    get:
+      tags: [Markets]
+      operationId: getMarketResearchSchedule
+      responses:
+        '200':
+          description: Global coordinated market-research schedule
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MarketResearchSchedule'}
+    put:
+      tags: [Markets]
+      operationId: configureMarketResearchSchedule
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MarketResearchScheduleCommand'}
+      responses:
+        '200':
+          description: Schedule updated for future occurrences
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MarketResearchSchedule'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /markets/research/model-configuration:
+    get:
+      tags: [Markets]
+      operationId: getMarketResearchModelConfiguration
+      responses:
+        '200':
+          description: One global LLM selection for all market-research categories
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MarketResearchModelConfiguration'}
+    put:
+      tags: [Markets]
+      operationId: setMarketResearchModelConfiguration
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MarketResearchModelCommand'}
+      responses:
+        '200':
+          description: Global selection updated for runs that have not started
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MarketResearchModelConfiguration'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+  /markets/research/coordinated:
+    post:
+      tags: [Markets]
+      operationId: startCoordinatedMarketResearch
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CoordinatedMarketResearchCommand'}
+      responses:
+        '202': {$ref: '#/components/responses/AcceptedJob'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /markets/research/coordinated/{run_id}:
+    get:
+      tags: [Markets]
+      operationId: getCoordinatedMarketResearch
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '200':
+          description: Three-category deterministic results, source/fallback evidence, and optional advisory analysis
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CoordinatedMarketResearchReport'}
+  /markets/research/category-runs/{run_id}/llm-analysis/retry:
+    post:
+      tags: [Markets]
+      operationId: retryPinnedMarketResearchAnalysis
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '202': {$ref: '#/components/responses/AcceptedJob'}
+        '409': {$ref: '#/components/responses/Problem'}
   /market-research-runs:
     post:
       tags: [Markets]
@@ -953,19 +1090,54 @@ components:
         version: {type: integer}
         type: {type: string}
         state: {type: string, enum: [ARMED, TRIPPED, ACKNOWLEDGED, CLEARED]}
+    ProviderCatalogueEntry:
+      type: object
+      required: [provider_key, catalogue_revision, adapter_revision, category, status, capabilities]
+      properties:
+        provider_key: {type: string, enum: [MT5_TERMINAL_BRIDGE, CME_GROUP, CBOE_FX_SPOT, COINBASE_EXCHANGE, OPENAI_RESPONSES, ANTHROPIC_MESSAGES]}
+        catalogue_revision: {type: string}
+        adapter_revision: {type: string}
+        category: {type: string, enum: [BROKER, MARKET_DATA, LLM]}
+        status: {type: string, enum: [APPROVED, DEPRECATED, RETIRED]}
+        asset_categories: {type: array, items: {$ref: '#/components/schemas/MarketCategory'}}
+        venues: {type: array, items: {type: string}}
+        capabilities: {type: array, items: {type: string}}
+        capability_semantics: {type: object, additionalProperties: {type: string, enum: [AUTHORITATIVE, ACTUAL, BROKER_PROXY, UNAVAILABLE]}}
+        permitted_models: {type: array, items: {type: string}}
+        licensing_notice: {type: string}
+        retention_posture: {type: string, enum: [NOT_APPLICABLE, STANDARD, ADMIN_VERIFIED]}
+        credential_required: {type: boolean}
+    NonBrokerIntegrationCommand:
+      type: object
+      required: [provider_key, display_name, configuration]
+      additionalProperties: false
+      properties:
+        provider_key: {type: string}
+        display_name: {type: string, minLength: 1, maxLength: 128}
+        configuration: {type: object, additionalProperties: true}
+        credentials: {type: object, additionalProperties: true, writeOnly: true}
+        licensing_accepted: {type: boolean}
+    WriteOnlyCredentialCommand:
+      type: object
+      required: [credentials]
+      additionalProperties: false
+      properties:
+        credentials: {type: object, additionalProperties: true, writeOnly: true}
     Integration:
       type: object
-      required: [id, version, category, provider, name, mt5_account_login, mt5_server, status]
+      required: [id, version, category, provider, name, status]
       properties:
         id: {$ref: '#/components/schemas/Id'}
         version: {type: integer}
-        category: {type: string}
+        category: {type: string, enum: [BROKER, MARKET_DATA, LLM, ECONOMIC, MACRO, CRYPTO, EMAIL, MESSAGING]}
         name: {type: string}
         mt5_account_login: {type: string, description: MT5 account login selected for this managed bridge.}
         mt5_server: {type: string, description: Broker server selected for this managed bridge.}
-        provider:
-          const: MT5_TERMINAL_BRIDGE
-          description: TraderX supports MetaTrader 5 account truth through its managed read-only EA bridge.
+        provider: {type: string, description: Reviewed provider catalogue key.}
+        catalogue_revision: {type: string}
+        capabilities: {type: array, items: {type: string}}
+        entitlement_status: {type: string, enum: [NOT_REQUIRED, UNVERIFIED, VERIFIED, MISSING, EXPIRED]}
+        retention_posture: {type: string, enum: [NOT_APPLICABLE, STANDARD, ADMIN_VERIFIED]}
         status: {type: string, enum: [HEALTHY, DEGRADED, FAILED, DISABLED]}
         credential_hint: {type: string, description: Masked value only}
     ManagedMt5EnrollmentCommand:
@@ -1016,6 +1188,112 @@ components:
         category: {$ref: '#/components/schemas/MarketCategory'}
         status: {type: string, enum: [ACTIVE, INACTIVE, ARCHIVED]}
         specification_quality: {type: string, enum: [VERIFIED, INCOMPLETE, STALE]}
+    MarketResearchScheduleCommand:
+      type: object
+      required: [account_id, interval_seconds, anchored_start_local, account_timezone, enabled, reason]
+      additionalProperties: false
+      properties:
+        account_id: {$ref: '#/components/schemas/Id'}
+        interval_seconds: {type: integer, minimum: 3600, maximum: 2592000}
+        anchored_start_local: {type: string, format: date-time}
+        account_timezone: {type: string, description: IANA time-zone identifier}
+        enabled: {type: boolean}
+        reason: {type: string, minLength: 8}
+    MarketResearchSchedule:
+      allOf:
+        - $ref: '#/components/schemas/MarketResearchScheduleCommand'
+        - type: object
+          required: [id, version, next_run_at]
+          properties:
+            id: {$ref: '#/components/schemas/Id'}
+            version: {type: integer}
+            next_run_at: {$ref: '#/components/schemas/Instant'}
+            last_due_at: {$ref: '#/components/schemas/Instant'}
+            active_run_id: {$ref: '#/components/schemas/Id'}
+    MarketResearchModelCommand:
+      type: object
+      required: [llm_integration_id, provider_key, exact_model_id, reason]
+      additionalProperties: false
+      properties:
+        llm_integration_id: {$ref: '#/components/schemas/Id'}
+        provider_key: {type: string, enum: [OPENAI_RESPONSES, ANTHROPIC_MESSAGES]}
+        exact_model_id: {type: string, enum: [gpt-5.6-terra, claude-sonnet-5]}
+        reason: {type: string, minLength: 8}
+    MarketResearchModelConfiguration:
+      allOf:
+        - $ref: '#/components/schemas/MarketResearchModelCommand'
+        - type: object
+          required: [id, version, catalogue_revision, effective_at, provider_health]
+          properties:
+            id: {$ref: '#/components/schemas/Id'}
+            version: {type: integer}
+            catalogue_revision: {type: string}
+            effective_at: {$ref: '#/components/schemas/Instant'}
+            provider_health: {type: string, enum: [HEALTHY, DEGRADED, FAILED, DISABLED]}
+            applies_to: {type: string, const: FUTURE_RUNS_ONLY}
+    CoordinatedMarketResearchCommand:
+      type: object
+      required: [account_id, methodology_version]
+      additionalProperties: false
+      properties:
+        account_id: {$ref: '#/components/schemas/Id'}
+        methodology_version: {type: string}
+        windows: {type: array, items: {type: string}}
+    SourceEvidence:
+      type: object
+      required: [provider, capability, semantics, freshness, source_role]
+      properties:
+        provider: {type: string}
+        venue: {type: string}
+        capability: {type: string}
+        semantics: {type: string, enum: [ACTUAL, BROKER_PROXY, UNAVAILABLE]}
+        source_role: {type: string, enum: [MT5_BROKER_AUTHORITY, SPECIALIST_PRIMARY, FALLBACK_MT5, FALLBACK_CACHED_EXTERNAL]}
+        observed_at: {$ref: '#/components/schemas/Instant'}
+        freshness: {type: string, enum: [FRESH, STALE, UNKNOWN]}
+        freshness_policy_version: {type: string}
+        fallback_reason: {type: string}
+    LlmAnalysisStatus:
+      type: object
+      required: [provider, exact_model_id, catalogue_revision, state, authoritative]
+      properties:
+        provider: {type: string}
+        exact_model_id: {type: string}
+        catalogue_revision: {type: string}
+        prompt_template_version: {type: string}
+        output_schema_version: {type: string}
+        inference_policy_version: {type: string}
+        state: {type: string, enum: [PENDING, COMPLETED, UNAVAILABLE, RATE_LIMITED, TIMED_OUT, REFUSED, INVALID_OUTPUT, AUTH_FAILURE, PROVIDER_ERROR]}
+        authoritative: {type: boolean, const: false}
+        retry_eligible: {type: boolean}
+        reason: {type: string}
+        analysis: {type: object, additionalProperties: true, readOnly: true}
+    CategoryResearchResult:
+      type: object
+      required: [id, category, outcome, candidates, source_evidence, llm_analysis, active_assignment_changed]
+      properties:
+        id: {$ref: '#/components/schemas/Id'}
+        category: {$ref: '#/components/schemas/MarketCategory'}
+        outcome: {type: string, enum: [RECOMMENDED, NO_ELIGIBLE_CANDIDATE, BLOCKED]}
+        block_reasons: {type: array, items: {type: string}}
+        candidates: {type: array, items: {type: object, additionalProperties: true}}
+        source_evidence: {type: array, items: {$ref: '#/components/schemas/SourceEvidence'}}
+        llm_analysis: {$ref: '#/components/schemas/LlmAnalysisStatus'}
+        active_assignment_changed: {type: boolean, const: false}
+    CoordinatedMarketResearchReport:
+      type: object
+      required: [id, state, trigger, methodology_version, categories, ranking_is_not_activation]
+      properties:
+        id: {$ref: '#/components/schemas/Id'}
+        state: {type: string, enum: [QUEUED, RUNNING, PARTIAL, COMPLETED, FAILED]}
+        trigger: {type: string, enum: [MANUAL, SCHEDULED]}
+        methodology_version: {type: string}
+        occurrence_status: {type: string, enum: [STARTED, SKIPPED_OVERLAP, COMPLETED, PARTIAL, FAILED]}
+        categories:
+          type: array
+          minItems: 3
+          maxItems: 3
+          items: {$ref: '#/components/schemas/CategoryResearchResult'}
+        ranking_is_not_activation: {type: boolean, const: true}
     MarketResearchCommand:
       type: object
       required: [account_id, category, methodology_version]

@@ -34,8 +34,18 @@ def health(_: Viewer, database: DatabaseSession) -> dict[str, object]:
     integrations = database.scalars(select(Integration).where(Integration.state != "REMOVED")).all()
     components: dict[str, str] = {"database": "HEALTHY", "api": "HEALTHY"}
     for integration in integrations:
+        latest_observation = database.scalar(
+            select(IntegrationHealthObservation)
+            .where(IntegrationHealthObservation.integration_id == integration.id)
+            .order_by(IntegrationHealthObservation.observed_at.desc())
+            .limit(1)
+        )
         components[f"integration:{integration.name}"] = (
-            "HEALTHY" if integration.state == "HEALTHY" else "DEGRADED"
+            latest_observation.status
+            if latest_observation is not None
+            else "HEALTHY"
+            if integration.state == "HEALTHY"
+            else "DEGRADED"
         )
     failed_jobs = (
         database.scalar(
@@ -115,6 +125,11 @@ def health(_: Viewer, database: DatabaseSession) -> dict[str, object]:
                 "status": item.status,
                 "evidence": redact(item.evidence),
                 "observed_at": item.observed_at.isoformat(),
+                "last_success_at": item.last_success_at.isoformat()
+                if item.last_success_at
+                else None,
+                "current_error": item.current_error,
+                "affected_capabilities": item.affected_capabilities,
             }
             for item in observations
         ],

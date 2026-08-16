@@ -13,6 +13,8 @@ type Health = {
     status: string;
     evidence: Record<string, unknown>;
     observed_at: string;
+    affected_capabilities?: string[];
+    current_error?: string | null;
   }>;
   strategy_health: Array<{
     id: string;
@@ -79,7 +81,9 @@ export function SystemControl() {
         {integrationObservations.length ? <ol className="timeline">
           {integrationObservations.map((observation) => <li key={observation.id}>
             <strong>{observation.status} · {String(observation.evidence.provider ?? "integration")}</strong>
-            <span>{String(observation.evidence.integration_state ?? "UNKNOWN")} · credential redacted</span>
+            <span>{String(observation.evidence.category ?? "provider")} · {String(observation.evidence.integration_state ?? "UNKNOWN")} · entitlement {String(observation.evidence.entitlement_status ?? "not required")} · credential redacted</span>
+            {observation.affected_capabilities?.length ? <span>Affected: {observation.affected_capabilities.join(", ")}</span> : null}
+            {observation.current_error ? <span>Action required: {observation.current_error.replaceAll("_", " ")}</span> : null}
             <small>{new Date(observation.observed_at).toLocaleString()}</small>
           </li>)}
         </ol> : <p className="workspace-notice">No integration health observation has been recorded yet.</p>}
