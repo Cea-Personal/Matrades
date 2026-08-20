@@ -168,11 +168,13 @@ analyze(
 )
 ```
 
-The first reviewed profiles are `OPENAI_RESPONSES/gpt-5.6-terra` and
-`ANTHROPIC_MESSAGES/claude-sonnet-5`. Model-list operations verify credential access only and cannot
-admit a model outside the static catalogue. The normalized result includes exact requested/returned
-model ID, provider request ID, validated advisory analysis, anomalies/cautions/explanations/method
-proposals, usage/latency, output hash, and a redacted failure classification.
+The owner-configurable advisory profile is `LITELLM_PROXY`. Model-list operations verify credential
+access only and cannot admit an adapter outside the static catalogue. LiteLLM owns its
+upstream-provider and model-alias configuration; the owner-selected exact model ID is validated at
+the gateway adapter and pinned to each run. The
+normalized result includes exact requested/returned model ID, provider request ID, validated advisory
+analysis, anomalies/cautions/explanations/method proposals, usage/latency, output hash, and a
+redacted failure classification.
 
 The port exposes no tools, browsing, file/MCP/code/shell execution, credentials, arbitrary URLs,
 ranking operation, activation, risk change, or financial mutation. Response schemas contain no

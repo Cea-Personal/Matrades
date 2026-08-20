@@ -36,7 +36,7 @@ TraderX Speckit Specify v1.0.0 document."
 - Q: What liquidity evidence should be mandatory before ranking? → A: Apply asset-aware gates: broker spread, quote/tick activity, and execution proxies for Forex; official volume, open interest, and available depth for commodities; and venue volume plus order-book depth for cryptocurrency.
 - Q: If one category's specialist source remains unavailable after retries, what should the coordinated run do? → A: First attempt the affected category with current MT5 evidence, then try its most recent successful external dataset; use either fallback only if it remains complete, coherent, within its approved freshness limit, and satisfies the category's mandatory evidence gates, otherwise block that category.
 - Q: At what scope should the owner choose the LLM model used for market research? → A: Use one global model setting for every Commodity, Forex, and Cryptocurrency market-research agent.
-- Q: Where should the selectable LLM models come from? → A: Use a fixed catalogue of approved LLM providers and models, with owner-supplied provider credentials managed through the authenticated Integrations UI.
+- Q: Where should the selectable LLM models come from? → A: Allow direct reviewed providers and a reviewed LiteLLM gateway. LiteLLM owns the approved upstream provider credentials and model aliases; TraderX selects only a healthy gateway and one exposed exact alias.
 - Q: When should a change to the global LLM model take effect? → A: Apply it only to future runs; every run pins and records the provider and model selected when that run starts.
 - Q: Which parts of market research should the selected LLM be allowed to control? → A: The LLM may analyze evidence, identify anomalies, explain results, and propose improvements; deterministic versioned rules exclusively control eligibility, metrics, scoring, ranking, and selection proposals.
 - Q: What should happen when the selected LLM remains unavailable or returns invalid output after bounded retries? → A: Complete and publish the deterministic research result, mark LLM analysis unavailable, alert the owner, and require an explicit retry with the same selected model rather than switching models automatically.
@@ -504,7 +504,8 @@ through authenticated screens.
   Forex, and Cryptocurrency research for both manual and scheduled runs; V1 MUST NOT support
   category-specific model overrides.
 - **FR-102**: TraderX MUST maintain a fixed, deny-by-default catalogue of reviewed LLM provider
-  adapters and permitted model identifiers. Authorized owners MUST be able to connect, test,
+  adapters, including the LiteLLM gateway adapter. Direct provider model IDs and LiteLLM-exposed
+  model aliases MAY be selected only through a healthy configured integration. Authorized owners MUST be able to connect, test,
   disable, rotate credentials for, and remove an LLM provider through the authenticated
   Integrations UI. Provider secrets MUST be encrypted, masked after entry, excluded from prompts,
   evidence and logs, and unavailable to research agents. An arbitrary endpoint or unreviewed model

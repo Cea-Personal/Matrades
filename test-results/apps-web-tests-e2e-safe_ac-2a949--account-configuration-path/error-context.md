@@ -6,22 +6,21 @@
 
 # Test info
 
-- Name: apps/web/tests/e2e/safe_account.spec.ts >> first-owner signup advances directly to authenticator enrollment
-- Location: apps/web/tests/e2e/safe_account.spec.ts:39:5
+- Name: apps/web/tests/e2e/safe_account.spec.ts >> Command Center gives a new owner a safe account-configuration path
+- Location: apps/web/tests/e2e/safe_account.spec.ts:64:5
 
 # Error details
 
 ```
 Error: page.goto: Protocol error (Page.navigate): Cannot navigate to invalid URL
 Call log:
-  - navigating to "/setup", waiting until "load"
+  - navigating to "/command-center", waiting until "load"
 
 ```
 
 # Test source
 
 ```ts
-  1   | import { expect, test } from "@playwright/test";
   2   | 
   3   | test("unauthenticated visitors see the TraderX authentication entry routes", async ({ page }) => {
   4   |   await page.goto("/");
@@ -73,8 +72,7 @@ Call log:
   50  |     });
   51  |   });
   52  | 
-> 53  |   await page.goto("/setup");
-      |              ^ Error: page.goto: Protocol error (Page.navigate): Cannot navigate to invalid URL
+  53  |   await page.goto("/setup");
   54  |   await page.getByLabel("Email").fill("owner@example.com");
   55  |   await page.getByLabel("Password", { exact: true }).fill("a-long-unique-passphrase");
   56  |   await page.getByLabel("Confirm password").fill("a-long-unique-passphrase");
@@ -123,7 +121,8 @@ Call log:
   99  |     await route.fulfill({ contentType: "application/json", status: 201, body: JSON.stringify(account) });
   100 |   });
   101 | 
-  102 |   await page.goto("/command-center");
+> 102 |   await page.goto("/command-center");
+      |              ^ Error: page.goto: Protocol error (Page.navigate): Cannot navigate to invalid URL
   103 |   await expect(page.getByRole("heading", { name: "Command Center" })).toBeVisible();
   104 |   const activationSidebar = page.getByRole("complementary", { name: "Safe activation checklist" });
   105 |   await expect(activationSidebar).toBeVisible();

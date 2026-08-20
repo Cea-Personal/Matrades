@@ -14,7 +14,7 @@ export async function mockReadyCommandCenter(page: Page, options: { seedActiveMa
   const notificationPreferences: Array<Record<string, unknown>> = options.seedOperations ? [{ id: "preference-web", channel: "WEB", minimum_severity: "INFO", enabled: true }] : [];
   const notices: Array<Record<string, unknown>> = [];
   const mt5Integrations: Array<Record<string, unknown>> = options.seedOperations ? [{ id: "integration-1", version: 1, category: "BROKER", provider: "MT5_TERMINAL_BRIDGE", name: "MT5 MetaQuotes-Demo 5054425064", mt5_account_login: "5054425064", mt5_server: "MetaQuotes-Demo", status: "HEALTHY", credential_hint: "configured; verified" }] : [];
-  if (options.seedMarketAutomation) mt5Integrations.push({ id: "integration-openai-1", version: 1, category: "LLM", provider: "OPENAI_RESPONSES", name: "Research OpenAI", state: "HEALTHY", status: "HEALTHY", credential_hint: "configured; write only" });
+  if (options.seedMarketAutomation) mt5Integrations.push({ id: "integration-litellm-1", version: 1, category: "LLM", provider: "LITELLM_PROXY", name: "Research LiteLLM", state: "HEALTHY", status: "HEALTHY", credential_hint: "configured; write only" });
   let researchSchedule: Record<string, unknown> = { configured: false, enabled: false };
   let researchModel: Record<string, unknown> = { configured: false, applies_to: "FUTURE_RUNS_ONLY" };
   if (options.seedPaperEvidence) {
@@ -74,7 +74,26 @@ export async function mockReadyCommandCenter(page: Page, options: { seedActiveMa
         active_markets: [],
         opportunities: [],
         critical_alerts: [],
-        integration_health: []
+        integration_health: [],
+        research_connection_progress: [
+          { provider: "CME_GROUP", label: "CME Group", required: true, complete: false },
+          { provider: "CBOE_FX_SPOT", label: "Cboe FX Spot", required: false, complete: false },
+          { provider: "COINBASE_EXCHANGE", label: "Coinbase Exchange", required: true, complete: false },
+          { provider: "LITELLM_PROXY", label: "LiteLLM Gateway", required: false, complete: Boolean(options.seedMarketAutomation) }
+        ],
+        workspace_prerequisites: [
+          { label: "Active market selection", target: "markets", required: true, complete: Boolean(options.seedActiveMarket), purpose: "Strategies" },
+          { label: "Validated strategy", target: "strategies", required: true, complete: Boolean(options.seedPaperEvidence), purpose: "Paper trading" },
+          { label: "Paper-trading evidence", target: "paper", required: true, complete: Boolean(options.seedPaperEvidence), purpose: "live approval" },
+          { label: "Live-approved strategy", target: "opportunities", required: true, complete: false, purpose: "Opportunities" },
+          { label: "Open broker position", target: "monitoring", required: false, complete: Boolean(options.seedMonitoring), purpose: "Trade monitoring" }
+        ],
+        workflow_progress: {
+          healthy_integrations: 1,
+          published_market_research_runs: options.seedMarketAutomation ? 1 : 0,
+          successful_strategy_versions: options.seedPaperEvidence ? 1 : 0,
+          active_paper_runs: options.seedPaperEvidence ? 1 : 0
+        }
       };
     } else if (path.endsWith("/operations/health")) {
       body = {
@@ -137,17 +156,16 @@ export async function mockReadyCommandCenter(page: Page, options: { seedActiveMa
         { provider: "CME_GROUP", category: "MARKET_DATA", configuration_fields: ["project_id"], credential_fields: ["api_token"], asset_categories: ["COMMODITY"], permitted_models: [], licensing_notice: "CME terms apply", retention_posture: "NOT_APPLICABLE", entitlement_required: true, verification_only: false },
         { provider: "CBOE_FX_SPOT", category: "MARKET_DATA", configuration_fields: ["venue"], credential_fields: ["api_token"], asset_categories: ["FOREX"], permitted_models: [], licensing_notice: "Cboe terms apply", retention_posture: "NOT_APPLICABLE", entitlement_required: true, verification_only: false },
         { provider: "COINBASE_EXCHANGE", category: "MARKET_DATA", configuration_fields: [], credential_fields: [], asset_categories: ["CRYPTO"], permitted_models: [], licensing_notice: "Coinbase terms apply", retention_posture: "NOT_APPLICABLE", entitlement_required: false, verification_only: false },
-        { provider: "OPENAI_RESPONSES", category: "LLM", configuration_fields: [], credential_fields: ["api_key"], asset_categories: [], permitted_models: ["gpt-5.6-terra"], licensing_notice: "OpenAI terms apply", retention_posture: "STANDARD", entitlement_required: false, verification_only: false },
-        { provider: "ANTHROPIC_MESSAGES", category: "LLM", configuration_fields: [], credential_fields: ["api_key"], asset_categories: [], permitted_models: ["claude-sonnet-5"], licensing_notice: "Anthropic terms apply", retention_posture: "STANDARD", entitlement_required: false, verification_only: false }
+        { provider: "LITELLM_PROXY", category: "LLM", configuration_fields: ["base_url"], credential_fields: ["virtual_key"], asset_categories: [], permitted_models: ["*"], licensing_notice: "LiteLLM gateway terms apply", retention_posture: "CONFIGURED_BY_GATEWAY", entitlement_required: false, verification_only: false }
       ] };
-    } else if (path.includes("/integrations/integration-openai-1/credentials/rotate") && method === "POST") {
-      body = { id: "integration-openai-1", version: 2, name: "Research OpenAI", category: "LLM", provider: "OPENAI_RESPONSES", state: "DEGRADED", credential: "WRITE_ONLY", credential_status: "CONFIGURED", entitlement_status: "NOT_REQUIRED", catalogue_revision: "2026-08-14.v1", retention_posture: "STANDARD" };
-    } else if (path.includes("/integrations/integration-openai-1/test") && method === "POST") {
-      body = { id: "qualification-job-1", type: "PROVIDER_QUALIFICATION", state: "QUEUED", provider: "OPENAI_RESPONSES", credential: "REDACTED" };
-    } else if (path.includes("/integrations/integration-openai-1/non-broker/state") && method === "PUT") {
-      body = { id: "integration-openai-1", version: 2, state: "DISABLED", credential: "WRITE_ONLY" };
+    } else if (path.includes("/integrations/integration-litellm-1/credentials/rotate") && method === "POST") {
+      body = { id: "integration-litellm-1", version: 2, name: "Research LiteLLM", category: "LLM", provider: "LITELLM_PROXY", state: "DEGRADED", credential: "WRITE_ONLY", credential_status: "CONFIGURED", entitlement_status: "NOT_REQUIRED", catalogue_revision: "2026-08-20.v1", retention_posture: "CONFIGURED_BY_GATEWAY" };
+    } else if (path.includes("/integrations/integration-litellm-1/test") && method === "POST") {
+      body = { id: "qualification-job-1", type: "PROVIDER_QUALIFICATION", state: "QUEUED", provider: "LITELLM_PROXY", credential: "REDACTED" };
+    } else if (path.includes("/integrations/integration-litellm-1/non-broker/state") && method === "PUT") {
+      body = { id: "integration-litellm-1", version: 2, state: "DISABLED", credential: "WRITE_ONLY" };
     } else if (path.endsWith("/integrations/non-broker") && method === "GET") {
-      body = { items: options.seedMarketAutomation ? [{ id: "integration-openai-1", version: 1, name: "Research OpenAI", category: "LLM", provider: "OPENAI_RESPONSES", state: "HEALTHY", credential: "WRITE_ONLY", credential_status: "CONFIGURED", entitlement_status: "NOT_REQUIRED", catalogue_revision: "2026-08-14.v1", retention_posture: "STANDARD" }] : [] };
+      body = { items: options.seedMarketAutomation ? [{ id: "integration-litellm-1", version: 1, name: "Research LiteLLM", category: "LLM", provider: "LITELLM_PROXY", state: "HEALTHY", credential: "WRITE_ONLY", credential_status: "CONFIGURED", entitlement_status: "NOT_REQUIRED", catalogue_revision: "2026-08-20.v1", retention_posture: "CONFIGURED_BY_GATEWAY" }] : [] };
     } else if (path.endsWith("/integrations")) {
       body = mt5Integrations;
     } else if (path.includes("/integrations/integration-1/mt5/enrollment") && method === "POST") {

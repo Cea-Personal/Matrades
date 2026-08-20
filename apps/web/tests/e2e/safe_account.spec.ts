@@ -72,7 +72,20 @@ test("Command Center gives a new owner a safe account-configuration path", async
       prop_profile_configured: false,
       risk_policy_configured: false,
       account_data_verified: false
-    }
+    },
+    research_connection_progress: [
+      { provider: "CME_GROUP", label: "CME Group", required: true, complete: false },
+      { provider: "CBOE_FX_SPOT", label: "Cboe FX Spot", required: false, complete: false },
+      { provider: "COINBASE_EXCHANGE", label: "Coinbase Exchange", required: true, complete: false },
+      { provider: "LITELLM_PROXY", label: "LiteLLM Gateway", required: false, complete: false }
+    ],
+    workspace_prerequisites: [
+      { label: "Active market selection", target: "markets", required: true, complete: false, purpose: "Strategies" },
+      { label: "Validated strategy", target: "strategies", required: true, complete: false, purpose: "Paper trading" },
+      { label: "Paper-trading evidence", target: "paper", required: true, complete: false, purpose: "live approval" },
+      { label: "Live-approved strategy", target: "opportunities", required: true, complete: false, purpose: "Opportunities" },
+      { label: "Open broker position", target: "monitoring", required: false, complete: false, purpose: "Trade monitoring" }
+    ]
   };
   const account = {
     id: "93c4d259-3341-4d26-91d5-7891e3f1b340",
@@ -101,6 +114,19 @@ test("Command Center gives a new owner a safe account-configuration path", async
 
   await page.goto("/command-center");
   await expect(page.getByRole("heading", { name: "Command Center" })).toBeVisible();
+  const activationSidebar = page.getByRole("complementary", { name: "Safe activation checklist" });
+  await expect(activationSidebar).toBeVisible();
+  await expect(activationSidebar.getByText("Initial setup")).toBeVisible();
+  await expect(activationSidebar.getByText("Account identity")).toBeVisible();
+  await expect(activationSidebar.getByText("External loss rules")).toBeVisible();
+  await expect(activationSidebar.getByText("Internal guardrails")).toBeVisible();
+  await expect(activationSidebar.getByText("Verified account data")).toBeVisible();
+  await expect(activationSidebar.getByText("Coinbase Exchange connection")).toBeVisible();
+  await expect(activationSidebar.getByText("Required · not connected")).toHaveCount(2);
+  await expect(activationSidebar.getByText("Active market selection")).toBeVisible();
+  await expect(activationSidebar.getByText("Validated strategy")).toBeVisible();
+  await expect(activationSidebar.getByText("Live-approved strategy")).toBeVisible();
+  await expect(page.locator(".readiness-card")).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "New recommendations are blocked" })).toBeVisible();
   await expect(page.getByRole("form", { name: "Primary account setup" })).toBeVisible();
   await page.getByLabel("Account name").fill("Primary evaluation");

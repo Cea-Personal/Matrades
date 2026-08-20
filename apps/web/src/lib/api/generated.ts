@@ -21,7 +21,7 @@ export interface MarketResearchSchedule {
 export interface MarketResearchModelConfiguration {
   id?: string;
   llm_integration_id?: string;
-  provider_key?: "OPENAI_RESPONSES" | "ANTHROPIC_MESSAGES";
+  provider_key?: "LITELLM_PROXY";
   exact_model_id?: string;
   catalogue_revision?: string;
   applies_to: "FUTURE_RUNS_ONLY";

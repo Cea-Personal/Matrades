@@ -497,16 +497,12 @@ catch-up work, concurrent occurrences, and one independent schedule per category
 
 ## 28. Reviewed LLM Catalogue and Structured Advisory Port
 
-**Decision**: Implement a provider-neutral server-side port with a static reviewed allowlist. The
-initial catalogue contains `OPENAI_RESPONSES/gpt-5.6-terra` as the default and
-`ANTHROPIC_MESSAGES/claude-sonnet-5` as the alternative. Provider model-list APIs verify access;
-they do not auto-admit newly listed models. OpenAI uses Responses strict JSON Schema with
-`store=false`; Anthropic uses Messages `output_config.format` JSON Schema. Tools, web/file search,
-MCP, shell/code execution, and arbitrary endpoints are disabled. See
-[OpenAI model](https://developers.openai.com/api/docs/models/gpt-5.6-terra),
-[OpenAI structured output](https://developers.openai.com/api/docs/guides/structured-outputs),
-[Anthropic model versioning](https://platform.claude.com/docs/en/about-claude/models/model-ids-and-versions),
-and [Anthropic structured output](https://platform.claude.com/docs/en/build-with-claude/structured-outputs).
+**Decision**: Implement a provider-neutral server-side port with LiteLLM Gateway as the sole
+owner-configurable advisory connection. An owner enters a model alias exposed by that gateway; the
+ID is syntax-checked, pinned to future runs, and validated by the gateway adapter at use. LiteLLM
+owns upstream provider routing and credentials, while TraderX uses its OpenAI-compatible model and
+chat-completions surface. Tools, web/file search, MCP, shell/code execution, and arbitrary
+endpoints are disabled.
 
 One global selection applies to all categories. Each invocation records the exact requested and
 returned model, catalogue/adapter revision, evidence hash, deterministic method, prompt/schema and
@@ -514,12 +510,13 @@ inference-policy versions, attempts, provider request ID, stop/failure reason, t
 output hash, and estimated-cost rate-card version. Pinning improves reproducibility but does not
 promise bit-for-bit model output; deterministic research remains the authority.
 
-**Rationale**: A fixed evaluated catalogue provides real owner choice without allowing provider
-catalogue churn, incompatible output, or an arbitrary endpoint into a financial workflow.
+**Rationale**: Fixed reviewed adapters preserve the network and capability boundary while LiteLLM
+centralizes owner-approved upstream providers, model aliases, keys, and spend controls without
+placing those upstream credentials in TraderX.
 
-**Alternatives considered**: dynamic admission from model-list APIs, a generic OpenAI-compatible
-endpoint, locally hosted arbitrary models, provider web/tools, category overrides, and model changes
-during an active run are rejected.
+**Alternatives considered**: dynamic provider admission from model-list APIs, a generic
+OpenAI-compatible endpoint, locally hosted arbitrary models, provider web/tools, category overrides,
+and model changes during an active run are rejected.
 
 ## 29. LLM Privacy, Retry, and Deterministic Independence
 

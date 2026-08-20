@@ -50,17 +50,17 @@ def test_market_research_automation_routes_are_authenticated_and_operational() -
             starting_balance=Decimal("10000"),
         )
         llm = Integration(
-            name="Research OpenAI",
+            name="Research LiteLLM",
             category="LLM",
-            provider="OPENAI_RESPONSES",
+            provider="LITELLM_PROXY",
             state="HEALTHY",
             capabilities=["LLM_ANALYSIS"],
-            configuration={},
+            configuration={"base_url": "http://litellm:4000/v1"},
             official_source=True,
             catalogue_revision="2026-08-14.v1",
             adapter_revision="v1",
             entitlement_status="NOT_REQUIRED",
-            retention_posture="STANDARD",
+            retention_posture="CONFIGURED_BY_GATEWAY",
         )
         specialist = Integration(
             name="Coinbase market evidence",
@@ -213,13 +213,14 @@ def test_market_research_automation_routes_are_authenticated_and_operational() -
             },
             json={
                 "llm_integration_id": llm_id,
-                "provider_key": "OPENAI_RESPONSES",
-                "exact_model_id": "gpt-5.6-terra",
-                "reason": "Use the reviewed research model",
+                "provider_key": "LITELLM_PROXY",
+                "exact_model_id": "openrouter/google/gemini-2.5-pro",
+                "reason": "Use the configured LiteLLM research model",
             },
         )
         assert model.status_code == 200
         assert model.json()["applies_to"] == "FUTURE_RUNS_ONLY"
+        assert model.json()["exact_model_id"] == "openrouter/google/gemini-2.5-pro"
 
         started = client.post(
             "/api/v1/markets/research/coordinated",
@@ -236,7 +237,7 @@ def test_market_research_automation_routes_are_authenticated_and_operational() -
         assert all(
             item["llm_analysis"]["authoritative"] is False for item in report.json()["categories"]
         )
-        assert report.json()["model_pin"]["exact_model_id"] == "gpt-5.6-terra"
+        assert report.json()["model_pin"]["exact_model_id"] == "openrouter/google/gemini-2.5-pro"
         assert report.json()["freshness_policy_manifest"]
         assert all("policy_pins" in item for item in report.json()["categories"])
         assert all("selection_proposal" in item for item in report.json()["categories"])

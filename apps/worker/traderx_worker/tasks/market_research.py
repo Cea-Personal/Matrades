@@ -21,6 +21,7 @@ from traderx.integrations.ports import (
     SourceSemantics,
 )
 from traderx.integrations.providers.anthropic_messages import AnthropicMessagesAdapter
+from traderx.integrations.providers.litellm_proxy import LiteLlmProxyAdapter
 from traderx.integrations.providers.openai_responses import OpenAIResponsesAdapter
 from traderx.jobs.model import BackgroundJob, JobState
 from traderx.market_data.ingestion import ProviderBatch, persist_provider_observations
@@ -836,7 +837,8 @@ def _analysis_port(database: Session, run: MarketResearchRun) -> LlmAnalysisPort
     ):
         return None
     credentials = _credentials(database, integration)
-    api_key = str(credentials.get("api_key", ""))
+    credential_field = "virtual_key" if integration.provider == "LITELLM_PROXY" else "api_key"
+    api_key = str(credentials.get(credential_field, ""))
     if not api_key:
         return None
     client = httpx.Client(timeout=get_settings().llm_attempt_timeout_seconds)
@@ -844,6 +846,12 @@ def _analysis_port(database: Session, run: MarketResearchRun) -> LlmAnalysisPort
         return OpenAIResponsesAdapter(api_key, client=client)
     if integration.provider == "ANTHROPIC_MESSAGES":
         return AnthropicMessagesAdapter(api_key, client=client)
+    if integration.provider == "LITELLM_PROXY":
+        return LiteLlmProxyAdapter(
+            api_key,
+            base_url=str(integration.configuration["base_url"]),
+            client=client,
+        )
     client.close()
     return None
 

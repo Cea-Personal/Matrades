@@ -4,26 +4,40 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from traderx.accounts.model import AccountStatus, TradingAccount
 from traderx.integrations.model import Integration, IntegrationHealthObservation
 from traderx.market_data.model import Instrument
-from traderx.market_research.model import ActiveMarketAssignment, AssignmentState
+from traderx.market_research.model import (
+    ActiveMarketAssignment,
+    AssignmentState,
+    CoordinatedMarketResearchRun,
+)
+from traderx.monitoring.position_model import Position
 from traderx.notifications.model import NotificationEvent
 from traderx.opportunities.model import Opportunity
+from traderx.paper.model import PaperRun, PaperRunState
 from traderx.risk.model import AccountSnapshot, CircuitBreaker, CircuitBreakerState, RiskSnapshot
+from traderx.strategies.model import StrategyLifecycle, StrategyVersion
 from traderx_api.dependencies import get_database_session
 from traderx_api.routes.identity import AuthenticationContext, authenticated_context
 
 router = APIRouter(tags=["Command Center"])
 DatabaseSession = Annotated[Session, Depends(get_database_session)]
 
+_RESEARCH_CONNECTION_REQUIREMENTS = (
+    ("CME_GROUP", "CME Group", True),
+    ("CBOE_FX_SPOT", "Cboe FX Spot", False),
+    ("COINBASE_EXCHANGE", "Coinbase Exchange", True),
+    ("LITELLM_PROXY", "LiteLLM Gateway", False),
+)
+
 
 def _dashboard_projections(
     database: Session, account_id: UUID | None
-) -> dict[str, list[dict[str, object]]]:
+) -> dict[str, object]:
     active_assignments = database.execute(
         select(ActiveMarketAssignment, Instrument)
         .join(Instrument, Instrument.id == ActiveMarketAssignment.instrument_id)
@@ -91,6 +105,63 @@ def _dashboard_projections(
         }
         for notification in critical_notifications
     )
+    healthy_integrations = sum(
+        1
+        for integration, observation in latest_health
+        if integration.provider not in {"OPENAI_RESPONSES", "ANTHROPIC_MESSAGES"}
+        and (observation.status if observation else integration.state) == "HEALTHY"
+    )
+    published_market_research_runs = 0
+    if account_id is not None:
+        published_market_research_runs = database.scalar(
+            select(func.count())
+            .select_from(CoordinatedMarketResearchRun)
+            .where(
+                CoordinatedMarketResearchRun.account_id == account_id,
+                CoordinatedMarketResearchRun.state.in_(["COMPLETED", "PARTIAL"]),
+            )
+        ) or 0
+    successful_strategy_versions = database.scalar(
+        select(func.count())
+        .select_from(StrategyVersion)
+        .where(
+            StrategyVersion.lifecycle.in_(
+                [
+                    StrategyLifecycle.BACKTEST_PASSED,
+                    StrategyLifecycle.PAPER_READY,
+                    StrategyLifecycle.PAPER_TRADING,
+                    StrategyLifecycle.PAPER_PASSED,
+                    StrategyLifecycle.AWAITING_APPROVAL,
+                    StrategyLifecycle.LIVE_APPROVED,
+                    StrategyLifecycle.LIVE,
+                ]
+            )
+        )
+    ) or 0
+    active_paper_runs = database.scalar(
+        select(func.count()).select_from(PaperRun).where(PaperRun.state == PaperRunState.RUNNING)
+    ) or 0
+    active_market_count = len(active_assignments)
+    live_approved_strategies = database.scalar(
+        select(func.count()).select_from(StrategyVersion).where(
+            StrategyVersion.lifecycle.in_([StrategyLifecycle.LIVE_APPROVED, StrategyLifecycle.LIVE])
+        )
+    ) or 0
+    paper_evidence_count = database.scalar(
+        select(func.count()).select_from(PaperRun).where(PaperRun.state != PaperRunState.FAILED)
+    ) or 0
+    open_position_count = 0
+    if account_id is not None:
+        open_position_count = database.scalar(
+            select(func.count()).select_from(Position).where(
+                Position.account_id == account_id, Position.closed_at.is_(None)
+            )
+        ) or 0
+    provider_statuses = {
+        integration.provider: observation.status if observation else integration.state
+        for integration, observation in latest_health
+        if integration.provider not in {"OPENAI_RESPONSES", "ANTHROPIC_MESSAGES"}
+    }
     return {
         "active_markets": [
             {
@@ -121,6 +192,28 @@ def _dashboard_projections(
             }
             for integration, observation in latest_health
         ],
+        "research_connection_progress": [
+            {
+                "provider": provider,
+                "label": label,
+                "required": required,
+                "complete": provider_statuses.get(provider) == "HEALTHY",
+            }
+            for provider, label, required in _RESEARCH_CONNECTION_REQUIREMENTS
+        ],
+        "workspace_prerequisites": [
+            {"label": "Active market selection", "target": "markets", "required": True, "complete": active_market_count > 0, "purpose": "Strategies"},
+            {"label": "Validated strategy", "target": "strategies", "required": True, "complete": successful_strategy_versions > 0, "purpose": "Paper trading"},
+            {"label": "Paper-trading evidence", "target": "paper", "required": True, "complete": paper_evidence_count > 0, "purpose": "live approval"},
+            {"label": "Live-approved strategy", "target": "opportunities", "required": True, "complete": live_approved_strategies > 0, "purpose": "Opportunities"},
+            {"label": "Open broker position", "target": "monitoring", "required": False, "complete": open_position_count > 0, "purpose": "Trade monitoring"},
+        ],
+        "workflow_progress": {
+            "healthy_integrations": healthy_integrations,
+            "published_market_research_runs": published_market_research_runs,
+            "successful_strategy_versions": successful_strategy_versions,
+            "active_paper_runs": active_paper_runs,
+        },
     }
 
 

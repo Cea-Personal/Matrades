@@ -7,17 +7,15 @@ import type { CoordinatedMarketResearchReport, MarketResearchModelConfiguration,
 type Integration = { id: string; provider: string; category: string; state?: string; status?: string };
 type Dashboard = { account?: { id: string } | null };
 
-const models = [
-  { value: "OPENAI_RESPONSES:gpt-5.6-terra", label: "OpenAI · gpt-5.6-terra" },
-  { value: "ANTHROPIC_MESSAGES:claude-sonnet-5", label: "Anthropic · claude-sonnet-5" }
-];
+const providerLabels: Record<string, string> = { LITELLM_PROXY: "LiteLLM Gateway" };
 
 export function MarketResearchControls({ onReport, onStatus }: { onReport: (report: CoordinatedMarketResearchReport) => void; onStatus: (message: string, error?: boolean) => void }) {
   const [accountId, setAccountId] = useState("");
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [scheduleEtag, setScheduleEtag] = useState('"market-research-schedule-0"');
   const [modelEtag, setModelEtag] = useState('"market-research-model-0"');
-  const [model, setModel] = useState(models[0].value);
+  const [modelProvider, setModelProvider] = useState("");
+  const [exactModelId, setExactModelId] = useState("");
   const [interval, setInterval] = useState("86400");
   const [anchor, setAnchor] = useState("");
   const [timezone, setTimezone] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
@@ -56,7 +54,10 @@ export function MarketResearchControls({ onReport, onStatus }: { onReport: (repo
         setNextRun(schedule.next_run_at);
         setLastRun(schedule.last_due_at);
       }
-      if (configuredModel.provider_key && configuredModel.exact_model_id) setModel(`${configuredModel.provider_key}:${configuredModel.exact_model_id}`);
+      if (configuredModel.provider_key && configuredModel.exact_model_id) {
+        setModelProvider(configuredModel.provider_key);
+        setExactModelId(configuredModel.exact_model_id);
+      }
       setHistory(priorRuns.items);
       setError(undefined);
     } catch {
@@ -65,18 +66,23 @@ export function MarketResearchControls({ onReport, onStatus }: { onReport: (repo
   }, []);
 
   useEffect(() => { void Promise.resolve().then(load); }, [load]);
-  const availableModels = useMemo(() => models.filter((item) => integrations.some((integration) => {
-    const provider = item.value.split(":")[0];
-    return integration.provider === provider && integration.category === "LLM" && (integration.state === "HEALTHY" || integration.status === "HEALTHY");
-  })), [integrations]);
-  const effectiveModel = availableModels.some((item) => item.value === model) ? model : (availableModels[0]?.value ?? "");
+  const availableProviders = useMemo(() => Array.from(new Set(
+    integrations
+      .filter((integration) => integration.provider === "LITELLM_PROXY" && integration.category === "LLM" && (integration.state === "HEALTHY" || integration.status === "HEALTHY"))
+      .map((integration) => integration.provider)
+  )).map((value) => ({ value, label: providerLabels[value] ?? value.replaceAll("_", " ") })), [integrations]);
+  const effectiveProvider = availableProviders.some((provider) => provider.value === modelProvider)
+    ? modelProvider
+    : (availableProviders[0]?.value ?? "");
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const [provider, exactModel] = effectiveModel.split(":");
-    const integration = integrations.find((item) => item.provider === provider && item.category === "LLM");
+    const provider = effectiveProvider;
+    const exactModel = exactModelId.trim();
+    const integration = integrations.find((item) => item.provider === provider && item.category === "LLM" && (item.state === "HEALTHY" || item.status === "HEALTHY"));
     if (!accountId) { setError("Configure the trading account before scheduling market research."); return; }
-    if (!integration) { setError(`Connect and qualify ${provider === "OPENAI_RESPONSES" ? "OpenAI" : "Anthropic"} in Integrations first.`); return; }
+    if (!integration) { setError("Connect and qualify an advisory-model provider in Integrations first."); return; }
+    if (!exactModel) { setError("Enter the exact model ID that your selected provider makes available to your credential."); return; }
     setBusy(true); setError(undefined);
     try {
       const commonHeaders = { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() };
@@ -129,5 +135,5 @@ export function MarketResearchControls({ onReport, onStatus }: { onReport: (repo
     } finally { setBusy(false); }
   }
 
-  return <section aria-labelledby="market-research-automation"><p className="section-kicker">Browser-independent schedule</p><h3 id="market-research-automation">Market research automation</h3><p>One database-owned occurrence coordinates Commodity, Forex, and Cryptocurrency. The LLM explains evidence only; deterministic gates and ranking retain authority.</p><form className="setup-form" onSubmit={save}><label htmlFor="research-model">Global research model<select id="research-model" onChange={(event) => setModel(event.target.value)} required value={effectiveModel}>{availableModels.length === 0 ? <option value="">Qualify OpenAI or Anthropic first</option> : availableModels.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label><label htmlFor="research-interval">Research interval<input id="research-interval" min="3600" max="2592000" onChange={(event) => setInterval(event.target.value)} required type="number" value={interval} /></label><label htmlFor="research-anchor">Anchor start<input id="research-anchor" onChange={(event) => setAnchor(event.target.value)} required type="datetime-local" value={anchor} /></label><label htmlFor="research-timezone">Account time zone<input id="research-timezone" onChange={(event) => setTimezone(event.target.value)} required value={timezone} /></label><label className="confirmation-check" htmlFor="research-enabled"><input checked={enabled} id="research-enabled" onChange={(event) => setEnabled(event.target.checked)} type="checkbox" /> Enable recurring research</label><label htmlFor="research-reason">Reason for research settings<textarea id="research-reason" minLength={8} onChange={(event) => setReason(event.target.value)} required value={reason} /></label><div className="integration-form-actions"><button disabled={busy || !anchor || !effectiveModel} type="submit">Save research settings</button><button className="secondary-button" disabled={busy} onClick={() => void runAll()} type="button">Run all three categories</button></div></form><dl className="evidence-metrics"><div><dt>Next occurrence</dt><dd>{nextRun ? new Date(nextRun).toLocaleString() : "Not scheduled"}</dd></div><div><dt>Last occurrence</dt><dd>{lastRun ? new Date(lastRun).toLocaleString() : "Not run"}</dd></div><div><dt>Overlap policy</dt><dd>Skip; no catch-up</dd></div></dl><section aria-labelledby="research-run-history"><h4 id="research-run-history">Coordinated run history</h4>{history.length ? <ol className="timeline">{history.map((item) => <li key={item.id}><strong>{item.state} · {item.trigger}</strong><span>{item.categories.map((category) => `${category.category}: ${category.outcome}`).join(" · ")}</span><button className="secondary-button" onClick={() => onReport(item)} type="button">View run</button></li>)}</ol> : <p className="workspace-notice">No coordinated market-research run has been recorded yet.</p>}</section>{error ? <p className="status-message" data-tone="error" role="alert">{error}</p> : null}</section>;
+  return <section aria-labelledby="market-research-automation"><p className="section-kicker">Browser-independent schedule</p><h3 id="market-research-automation">Market research automation</h3><p>One database-owned occurrence coordinates Commodity, Forex, and Cryptocurrency. The LLM explains evidence only; deterministic gates and ranking retain authority.</p><form className="setup-form" onSubmit={save}><label htmlFor="research-provider">AI provider<select id="research-provider" onChange={(event) => setModelProvider(event.target.value)} required value={effectiveProvider}>{availableProviders.length === 0 ? <option value="">Qualify LiteLLM Gateway first</option> : availableProviders.map((provider) => <option key={provider.value} value={provider.value}>{provider.label}</option>)}</select></label><label htmlFor="research-model-id">Model ID<input id="research-model-id" maxLength={128} onChange={(event) => setExactModelId(event.target.value)} pattern="[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}" placeholder="Configured LiteLLM model alias" required value={exactModelId} /></label><p className="field-hint">LiteLLM Gateway is the advisory-model connection. Enter one of its configured model aliases (for example, provider/model). The exact ID is pinned to future runs; unsupported models fail advisory analysis without changing deterministic research results.</p><label htmlFor="research-interval">Research interval<input id="research-interval" min="3600" max="2592000" onChange={(event) => setInterval(event.target.value)} required type="number" value={interval} /></label><label htmlFor="research-anchor">Anchor start<input id="research-anchor" onChange={(event) => setAnchor(event.target.value)} required type="datetime-local" value={anchor} /></label><label htmlFor="research-timezone">Account time zone<input id="research-timezone" onChange={(event) => setTimezone(event.target.value)} required value={timezone} /></label><label className="confirmation-check" htmlFor="research-enabled"><input checked={enabled} id="research-enabled" onChange={(event) => setEnabled(event.target.checked)} type="checkbox" /> Enable recurring research</label><label htmlFor="research-reason">Reason for research settings<textarea id="research-reason" minLength={8} onChange={(event) => setReason(event.target.value)} required value={reason} /></label><div className="integration-form-actions"><button disabled={busy || !anchor || !effectiveProvider || !exactModelId.trim()} type="submit">Save research settings</button><button className="secondary-button" disabled={busy} onClick={() => void runAll()} type="button">Run all three categories</button></div></form><dl className="evidence-metrics"><div><dt>Next occurrence</dt><dd>{nextRun ? new Date(nextRun).toLocaleString() : "Not scheduled"}</dd></div><div><dt>Last occurrence</dt><dd>{lastRun ? new Date(lastRun).toLocaleString() : "Not run"}</dd></div><div><dt>Overlap policy</dt><dd>Skip; no catch-up</dd></div></dl><section aria-labelledby="research-run-history"><h4 id="research-run-history">Coordinated run history</h4>{history.length ? <ol className="timeline">{history.map((item) => <li key={item.id}><strong>{item.state} · {item.trigger}</strong><span>{item.categories.map((category) => `${category.category}: ${category.outcome}`).join(" · ")}</span><button className="secondary-button" onClick={() => onReport(item)} type="button">View run</button></li>)}</ol> : <p className="workspace-notice">No coordinated market-research run has been recorded yet.</p>}</section>{error ? <p className="status-message" data-tone="error" role="alert">{error}</p> : null}</section>;
 }

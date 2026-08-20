@@ -61,7 +61,8 @@ test("market automation exposes labelled controls and non-colour evidence states
   await page.goto("/command-center");
   await page.getByRole("button", { name: "Markets" }).click();
 
-  await expect(page.getByLabel("Global research model")).toBeVisible();
+  await expect(page.getByLabel("AI provider")).toBeVisible();
+  await expect(page.getByLabel("Model ID")).toBeVisible();
   await expect(page.getByLabel("Research interval")).toBeVisible();
   await expect(page.getByLabel("Anchor start")).toBeVisible();
   await expect(page.getByLabel("Account time zone")).toBeVisible();

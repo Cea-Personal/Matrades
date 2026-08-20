@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
+from urllib.parse import quote
 
 import httpx
 
 from traderx.integrations.ports import LlmAnalysisRequest, LlmAnalysisResponse
-from traderx.integrations.registry import approved_provider
+from traderx.integrations.registry import approved_provider, validate_llm_model_id
 from traderx.market_research.llm_schema import advisory_json_schema
 
 
@@ -25,14 +26,19 @@ class AnthropicMessagesAdapter:
         assert definition.fixed_base_url is not None
         self._api_key = api_key
         self._base_url = definition.fixed_base_url.rstrip("/")
-        self._models = definition.permitted_models
         self._client = client or httpx.Client(timeout=timeout_seconds)
 
-    def test_connection(self, exact_model_id: str) -> dict[str, object]:
-        self._require_model(exact_model_id)
+    def test_connection(self, exact_model_id: str | None = None) -> dict[str, object]:
+        if exact_model_id is None:
+            try:
+                response = self._client.get(f"{self._base_url}/models", headers=self._headers())
+            except (httpx.TimeoutException, httpx.NetworkError):
+                return {"healthy": False, "reason": "NETWORK_FAILURE"}
+            return {"healthy": response.status_code < 400, "status_code": response.status_code}
+        exact_model_id = self._require_model(exact_model_id)
         try:
             response = self._client.get(
-                f"{self._base_url}/models/{exact_model_id}", headers=self._headers()
+                f"{self._base_url}/models/{quote(exact_model_id, safe='')}", headers=self._headers()
             )
         except (httpx.TimeoutException, httpx.NetworkError):
             return {"healthy": False, "model": exact_model_id, "reason": "NETWORK_FAILURE"}
@@ -98,9 +104,8 @@ class AnthropicMessagesAdapter:
             "content-type": "application/json",
         }
 
-    def _require_model(self, model: str) -> None:
-        if model not in self._models:
-            raise ValueError("model is outside the reviewed Anthropic allowlist")
+    def _require_model(self, model: str) -> str:
+        return validate_llm_model_id(self.provider, model)
 
     def _validate_request(self, request: LlmAnalysisRequest) -> None:
         if request.provider != self.provider:

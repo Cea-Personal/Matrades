@@ -95,8 +95,10 @@ class ResearchScheduleCommand(BaseModel):
 
 class ResearchModelCommand(BaseModel):
     llm_integration_id: UUID
-    provider_key: str = Field(pattern="^(OPENAI_RESPONSES|ANTHROPIC_MESSAGES)$")
-    exact_model_id: str = Field(min_length=1, max_length=128)
+    provider_key: str = Field(min_length=1, max_length=128)
+    exact_model_id: str = Field(
+        min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
+    )
     reason: str = Field(min_length=8, max_length=2000)
 
 

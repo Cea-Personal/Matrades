@@ -62,8 +62,7 @@ const providerNames: Record<string, string> = {
   CME_GROUP: "CME Group",
   CBOE_FX_SPOT: "Cboe FX Spot",
   COINBASE_EXCHANGE: "Coinbase Exchange",
-  OPENAI_RESPONSES: "OpenAI Responses",
-  ANTHROPIC_MESSAGES: "Anthropic Messages"
+  LITELLM_PROXY: "LiteLLM Gateway"
 };
 
 function messageFor(result: ApiProblem): string {
@@ -291,8 +290,8 @@ export function Integrations({
       <header className="integration-heading">
         <div>
           <p className="section-kicker">Step 4 of 4</p>
-          <h2 id="integrations-heading">Connect verified account data</h2>
-          <p>TraderX reads balances, equity, positions, and deals. It never submits, changes, or closes an order.</p>
+          <h2 id="integrations-heading">Verified account data</h2>
+          <p>Connect the read-only MT5 bridge to verify balance, equity, positions, and deals. TraderX never submits, changes, or closes an order.</p>
         </div>
         <button className="secondary-button" disabled={busy} onClick={() => void loadIntegrations()} type="button">Refresh</button>
       </header>
@@ -358,13 +357,18 @@ function ResearchProviders() {
       if (!catalogueResponse.ok || !configuredResponse.ok) throw new Error("unavailable");
       const all = (await catalogueResponse.json() as { items: ProviderDefinition[] }).items;
       setCatalogue(all.filter((item) => providerNames[item.provider] && !item.verification_only));
-      setConfigured((await configuredResponse.json() as { items: ResearchIntegration[] }).items);
+      setConfigured((await configuredResponse.json() as { items: ResearchIntegration[] }).items.filter((item) => providerNames[item.provider]));
       setError(undefined);
     } catch { setError("TraderX could not load the reviewed research-provider catalogue."); }
   }, []);
 
   useEffect(() => { void Promise.resolve().then(load); }, [load]);
   const definition = catalogue.find((item) => item.provider === selected);
+  const healthyProviders = catalogue.filter((item) =>
+    configured.some(
+      (integration) => integration.provider === item.provider && integration.state === "HEALTHY"
+    )
+  );
 
   async function connect(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -474,11 +478,11 @@ function ResearchProviders() {
 
   return (
     <section aria-labelledby="research-providers">
-      <p className="section-kicker">Fixed catalogue</p>
+      <p className="section-kicker">Provider connections</p>
       <h2 id="research-providers">Reviewed research providers</h2>
       <p>Configure specialist market data and advisory models here in the current Integrations workspace. Credentials are write-only. Licensing and retention must be reviewed before connection.</p>
-      <div className="active-market-grid">{catalogue.map((item) => <article key={item.provider}><span>{item.category === "LLM" ? "Advisory model" : item.asset_categories.join(", ") || "Market data"}</span><strong>{providerNames[item.provider]}</strong><small>{item.entitlement_required ? "Entitlement verification required" : "No paid entitlement declared"} · {item.retention_posture}</small>{item.permitted_models.length ? <small>Models: {item.permitted_models.join(", ")}</small> : null}</article>)}</div>
-      {definition ? <form aria-label="Connect reviewed research provider" className="integration-form" onSubmit={connect}><label htmlFor="provider-kind">Research provider<select id="provider-kind" onChange={(event) => setSelected(event.target.value)} value={selected}>{catalogue.map((item) => <option key={item.provider} value={item.provider}>{providerNames[item.provider]}</option>)}</select></label><label htmlFor="provider-name">Connection name<input defaultValue={`${providerNames[definition.provider]} research`} id="provider-name" name="provider-name" required /></label>{definition.configuration_fields.map((field) => <label key={field}>{field.replaceAll("_", " ")}<input name={`configuration-${field}`} required /></label>)}{definition.credential_fields.map((field) => <label key={field}>{field.replaceAll("_", " ")}<input autoComplete="new-password" name={`credential-${field}`} required type="password" /></label>)}<label className="confirmation-check"><input name="licensing-accepted" required={Boolean(definition.licensing_notice)} type="checkbox" /> I accept the licensing/data-use prerequisites.</label><label className="confirmation-check"><input name="retention-accepted" required={definition.retention_posture !== "NOT_APPLICABLE"} type="checkbox" /> I reviewed the provider retention posture.</label><label htmlFor="provider-reason">Reason<textarea id="provider-reason" minLength={8} name="provider-reason" required /></label><button disabled={busy} type="submit">Connect reviewed provider</button></form> : null}
+      {healthyProviders.length > 0 ? <><h3>Healthy connections</h3><div className="active-market-grid">{healthyProviders.map((item) => <article key={item.provider}><span>{item.category === "LLM" ? "Advisory model" : item.asset_categories.join(", ") || "Market data"}</span><strong>{providerNames[item.provider]}</strong><small>Connected and healthy · {item.retention_posture}</small>{item.category === "LLM" ? <small>Models: choose any compatible model ID in Markets</small> : item.permitted_models.length ? <small>Models: {item.permitted_models.join(", ")}</small> : null}</article>)}</div></> : <p className="empty-state">No healthy research-provider connections yet. Select a reviewed provider below to configure and test it.</p>}
+      {definition ? <form aria-label="Connect reviewed research provider" className="integration-form" onSubmit={connect}><label htmlFor="provider-kind">Research provider<select id="provider-kind" onChange={(event) => setSelected(event.target.value)} value={selected}>{catalogue.map((item) => <option key={item.provider} value={item.provider}>{providerNames[item.provider]}</option>)}</select></label><label htmlFor="provider-name">Connection name<input defaultValue={`${providerNames[definition.provider]} research`} id="provider-name" name="provider-name" required /></label>{definition.provider === "LITELLM_PROXY" ? <p className="field-hint">LiteLLM keeps the underlying provider credentials, routing, and configured model aliases in one gateway. For the bundled service use <code>http://litellm:4000/v1</code>; for a remote gateway use its HTTPS API base URL.</p> : null}{definition.configuration_fields.map((field) => <label key={field}>{field.replaceAll("_", " ")}<input defaultValue={definition.provider === "LITELLM_PROXY" && field === "base_url" ? "http://litellm:4000/v1" : undefined} name={`configuration-${field}`} required /></label>)}{definition.credential_fields.map((field) => <label key={field}>{field.replaceAll("_", " ")}<input autoComplete="new-password" name={`credential-${field}`} required type="password" /></label>)}<label className="confirmation-check"><input name="licensing-accepted" required={Boolean(definition.licensing_notice)} type="checkbox" /> I accept the licensing/data-use prerequisites.</label><label className="confirmation-check"><input name="retention-accepted" required={definition.retention_posture !== "NOT_APPLICABLE"} type="checkbox" /> I reviewed the provider retention posture.</label><label htmlFor="provider-reason">Reason<textarea id="provider-reason" minLength={8} name="provider-reason" required /></label><button disabled={busy} type="submit">Connect reviewed provider</button></form> : null}
       <div className="integration-list">{configured.map((integration) => {
         const provider = catalogue.find((item) => item.provider === integration.provider);
         return <article className="integration-card" key={integration.id}>

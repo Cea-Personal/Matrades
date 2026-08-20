@@ -277,9 +277,9 @@ as separate processes.
 
 ### Advisory LLM Analysis Boundary
 
-- A provider-neutral `LlmAnalysisPort` starts with reviewed `OPENAI_RESPONSES/gpt-5.6-terra` and
-  `ANTHROPIC_MESSAGES/claude-sonnet-5` entries. The UI shows only the intersection of the fixed
-  catalogue and models accessible with the owner's tested credential.
+- A provider-neutral `LlmAnalysisPort` supports the reviewed LiteLLM Gateway adapter and a
+  reviewed LiteLLM gateway adapter. The UI selects any healthy configured LLM integration and pins
+  an exact model ID (or LiteLLM alias); LiteLLM owns its upstream provider routing and credentials.
 - One global selection applies to all categories. A coordinated run atomically pins provider,
   exact model ID, catalogue/adapter revision, prompt template, output schema, and inference policy;
   later configuration changes affect future runs only.

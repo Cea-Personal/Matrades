@@ -2,7 +2,6 @@
 
 import { FormEvent, useState } from "react";
 
-import { BrokerAccountIntegration } from "@/features/integrations/BrokerAccountIntegration";
 
 export type AccountSummary = {
   id: string;
@@ -149,7 +148,7 @@ export function AccountRiskSetup({
 
   if (!account) {
     return (
-      <section className="setup-card" aria-labelledby="account-setup-heading">
+      <section className="setup-card" aria-labelledby="account-setup-heading" id="account-risk-setup" tabIndex={-1}>
         <p className="section-kicker">Step 1 of 3</p>
         <h2 id="account-setup-heading">Register the primary account</h2>
         <p>Record the account identity and its declared starting balance. This does not connect a broker or enable recommendations.</p>
@@ -171,7 +170,7 @@ export function AccountRiskSetup({
 
   if (!account.prop_profile_configured) {
     return (
-      <section className="setup-card" aria-labelledby="prop-profile-heading">
+      <section className="setup-card" aria-labelledby="prop-profile-heading" id="account-risk-setup" tabIndex={-1}>
         <p className="section-kicker">Step 2 of 3</p>
         <h2 id="prop-profile-heading">Record external loss rules</h2>
         <p>Enter the limits that apply to <strong>{account.name}</strong>. TraderX uses the stricter rule whenever an internal limit also applies.</p>
@@ -194,7 +193,7 @@ export function AccountRiskSetup({
 
   if (!account.risk_policy_configured) {
     return (
-      <section className="setup-card" aria-labelledby="internal-risk-heading">
+      <section className="setup-card" aria-labelledby="internal-risk-heading" id="account-risk-setup" tabIndex={-1}>
         <p className="section-kicker">Step 3 of 3</p>
         <h2 id="internal-risk-heading">Set internal risk guardrails</h2>
         <p>These limits are deliberate constraints. They never expand the external rules you entered in the previous step.</p>
@@ -233,12 +232,11 @@ export function AccountRiskSetup({
   }
 
   return (
-    <section className="setup-card setup-complete" aria-labelledby="verification-heading">
-      <p className="section-kicker">Final safety gate</p>
-      <h2 id="verification-heading">Awaiting verified account data</h2>
-      <p>Your account and risk limits are recorded. TraderX stays in LOCKDOWN until a permitted account integration supplies a verified balance, equity, and position snapshot.</p>
+      <section className="setup-card setup-complete" aria-labelledby="verification-heading" id="account-risk-setup" tabIndex={-1}>
+      <p className="section-kicker">Account & risk complete</p>
+      <h2 id="verification-heading">Verified account data is managed in Integrations</h2>
+      <p>Open Integrations to connect the read-only MT5 bridge and verify the balance, equity, and position snapshot that clears this final safety gate.</p>
       {message ? <p className="status-message" data-tone="success" role="status">{message}</p> : null}
-      <BrokerAccountIntegration account={account} onAccountChanged={onAccountChanged} />
     </section>
   );
 }

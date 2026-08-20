@@ -1215,7 +1215,7 @@ components:
       type: object
       required: [provider, catalogue_revision, adapter_revision, category, lifecycle, capabilities]
       properties:
-        provider: {type: string, enum: [MT5_TERMINAL_BRIDGE, CME_GROUP, CBOE_FX_SPOT, COINBASE_EXCHANGE, OPENAI_RESPONSES, ANTHROPIC_MESSAGES]}
+        provider: {type: string, enum: [MT5_TERMINAL_BRIDGE, CME_GROUP, CBOE_FX_SPOT, COINBASE_EXCHANGE, LITELLM_PROXY]}
         catalogue_revision: {type: string}
         adapter_revision: {type: string}
         category: {type: string, enum: [BROKER_ACCOUNT_DATA, MARKET_DATA, LLM]}
@@ -1368,8 +1368,8 @@ components:
       additionalProperties: false
       properties:
         llm_integration_id: {$ref: '#/components/schemas/Id'}
-        provider_key: {type: string, enum: [OPENAI_RESPONSES, ANTHROPIC_MESSAGES]}
-        exact_model_id: {type: string, enum: [gpt-5.6-terra, claude-sonnet-5]}
+        provider_key: {type: string, enum: [LITELLM_PROXY]}
+        exact_model_id: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'}
         reason: {type: string, minLength: 8}
     MarketResearchModelConfiguration:
       allOf:

@@ -121,6 +121,18 @@ def test_owner_can_record_account_and_risk_configuration_but_not_bypass_verifica
         }
         assert dashboard.json()["risk"]["state"] == "LOCKDOWN"
         assert dashboard.json()["risk"]["reason_codes"] == ["NO_VERIFIED_ACCOUNT_SNAPSHOT"]
+        assert dashboard.json()["workflow_progress"] == {
+            "healthy_integrations": 0,
+            "published_market_research_runs": 0,
+            "successful_strategy_versions": 0,
+            "active_paper_runs": 0,
+        }
+        assert dashboard.json()["research_connection_progress"] == [
+            {"provider": "CME_GROUP", "label": "CME Group", "required": True, "complete": False},
+            {"provider": "CBOE_FX_SPOT", "label": "Cboe FX Spot", "required": False, "complete": False},
+            {"provider": "COINBASE_EXCHANGE", "label": "Coinbase Exchange", "required": True, "complete": False},
+            {"provider": "LITELLM_PROXY", "label": "LiteLLM Gateway", "required": False, "complete": False},
+        ]
     finally:
         app.dependency_overrides.clear()
         engine.dispose()

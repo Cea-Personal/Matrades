@@ -65,6 +65,18 @@ services:
     # granting this worker (and no other application service) outbound access.
     networks: [private, provider-egress]
 
+  litellm:
+    # Optional multi-provider gateway. Enable only after setting LITELLM_MASTER_KEY
+    # and configuring one or more model aliases in deploy/litellm/config.yaml.
+    profiles: ["llm-gateway"]
+    image: ghcr.io/berriai/litellm:main-latest
+    command: ["--config", "/app/config.yaml"]
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-}
+    volumes:
+      - ./litellm/config.yaml:/app/config.yaml:ro
+    networks: [private, provider-egress]
+
   worker-notifications:
     build: { context: "..", dockerfile: deploy/containers/python.Dockerfile }
     command: ["celery", "-A", "traderx_worker.runtime.celery_app", "worker", "-Q", "notification", "--loglevel=INFO"]

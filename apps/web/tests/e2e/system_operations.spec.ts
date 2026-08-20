@@ -4,7 +4,7 @@ import { mockReadyCommandCenter } from "./support";
 test("an owner operates integrations, jobs, notifications, health, and audit from the UI", async ({ page }) => {
   await mockReadyCommandCenter(page, { seedOperations: true });
   await page.goto("/command-center");
-  await page.getByRole("button", { name: "Integrations" }).click();
+  await page.getByRole("button", { name: "Integrations", exact: true }).click();
   await expect(page.getByRole("heading", { name: "MT5 account 5054425064" })).toBeVisible();
   await page.getByRole("button", { name: "Reconnect MT5 bridge" }).click();
   await expect(page.getByText("rotated-operations-setup-code", { exact: true })).toBeVisible();

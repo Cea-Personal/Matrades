@@ -8,7 +8,8 @@ test("scheduled three-category research stays in Markets and keeps analysis advi
   await page.getByRole("button", { name: "Markets" }).click();
 
   await expect(page.getByRole("heading", { name: "Market research automation" })).toBeVisible();
-  await page.getByLabel("Global research model").selectOption("OPENAI_RESPONSES:gpt-5.6-terra");
+  await page.getByLabel("AI provider").selectOption("LITELLM_PROXY");
+  await page.getByLabel("Model ID").fill("openrouter/google/gemini-2.5-pro");
   await page.getByLabel("Research interval").fill("3600");
   await page.getByLabel("Anchor start").fill("2026-08-14T09:00");
   await page.getByLabel("Account time zone").fill("UTC");

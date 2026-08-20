@@ -13,13 +13,14 @@ catalogue revision, asset/venue coverage, capabilities, actual/proxy semantics, 
 retention/licensing notice, configuration status, health, last success, and freshness.
 
 An authorized owner can connect, test, enable, disable, rotate credentials, and remove CME Group,
-Cboe FX Spot, Coinbase Exchange, OpenAI, and Anthropic integrations. Credentials are write-only on
-entry and masked thereafter. Arbitrary URLs, provider keys, and model IDs are never accepted.
+Cboe FX Spot, Coinbase Exchange, OpenAI, Anthropic, and LiteLLM Gateway integrations. Credentials are write-only on
+entry and masked thereafter. Arbitrary URLs and provider keys are never accepted.
 
 ## Global LLM Model Control
 
-The Markets workspace displays one global selector containing only approved models accessible with
-a healthy connected credential. V1 initially offers `gpt-5.6-terra` and `claude-sonnet-5`.
+The Markets workspace displays one global provider selector containing healthy configured direct
+providers and LiteLLM Gateway connections, plus an exact model-ID input. An owner may enter a
+compatible direct model ID or a LiteLLM model alias exposed by the selected healthy integration.
 
 The selector shows exact provider/model, health, catalogue revision, retention posture, estimated
 pricing basis, and “applies to future runs” guidance. Saving requires owner authorization, a reason,

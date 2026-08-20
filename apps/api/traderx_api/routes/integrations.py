@@ -346,6 +346,7 @@ def provider_catalog(
                 "verification_only": definition.verification_only,
             }
             for definition in approved_providers()
+            if definition.provider not in {"OPENAI_RESPONSES", "ANTHROPIC_MESSAGES"}
         ]
     }
 

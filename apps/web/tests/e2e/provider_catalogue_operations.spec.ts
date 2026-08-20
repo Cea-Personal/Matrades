@@ -5,15 +5,28 @@ import { mockReadyCommandCenter } from "./support";
 test("reviewed provider cards operate inside the existing Integrations workspace", async ({ page }) => {
   await mockReadyCommandCenter(page, { seedMarketAutomation: true });
   await page.goto("/command-center");
-  await page.getByRole("button", { name: "Integrations" }).click();
+  await expect(page.getByRole("complementary", { name: "Safe activation checklist" }).getByText("LiteLLM Gateway connection")).toBeVisible();
+  await expect(page.getByRole("complementary", { name: "Safe activation checklist" }).getByText("Optional · done")).toBeVisible();
+  const checklist = page.getByRole("complementary", { name: "Safe activation checklist" });
+  await checklist.getByRole("button", { name: "Open Integrations workspace" }).click();
 
   await expect(page.getByRole("heading", { name: "Reviewed research providers" })).toBeVisible();
-  for (const provider of ["CME Group", "Cboe FX Spot", "Coinbase Exchange", "OpenAI Responses", "Anthropic Messages"]) {
-    await expect(page.locator(".active-market-grid strong", { hasText: provider })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Healthy connections" })).toBeVisible();
+  await expect(page.locator(".active-market-grid strong", { hasText: "LiteLLM Gateway" })).toBeVisible();
+  for (const provider of ["CME Group", "Cboe FX Spot", "Coinbase Exchange"]) {
+    await expect(page.locator(".active-market-grid strong", { hasText: provider })).toHaveCount(0);
+    await expect(page.getByRole("option", { name: provider })).toHaveCount(1);
   }
   await expect(page.getByText(/credentials are write-only/i)).toBeVisible();
   await expect(page.getByText(/licensing and retention/i)).toBeVisible();
-  await expect(page.getByText(/Research OpenAI/)).toBeVisible();
+  await expect(page.getByText(/Research LiteLLM/)).toBeVisible();
+  await expect(page.getByRole("option", { name: "OpenAI Responses" })).toHaveCount(0);
+  await expect(page.getByRole("option", { name: "Anthropic Messages" })).toHaveCount(0);
+
+  await page.locator("#provider-kind").selectOption("LITELLM_PROXY");
+  await expect(page.getByText(/LiteLLM keeps the underlying provider credentials/i)).toBeVisible();
+  await expect(page.locator('input[name="configuration-base_url"]')).toHaveValue("http://litellm:4000/v1");
+  await expect(page.locator('input[name="credential-virtual_key"]')).toBeVisible();
 
   await page.getByRole("button", { name: "Test provider" }).click();
   await expect(page.getByRole("status")).toContainText("Qualification job qualification-job-1");

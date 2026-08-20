@@ -54,21 +54,23 @@ def test_reviewed_catalogue_and_non_broker_lifecycle_are_secret_safe() -> None:
             "CME_GROUP",
             "CBOE_FX_SPOT",
             "COINBASE_EXCHANGE",
-            "OPENAI_RESPONSES",
-            "ANTHROPIC_MESSAGES",
+            "LITELLM_PROXY",
         }
         assert items["CME_GROUP"]["entitlement_required"] is True
-        assert items["OPENAI_RESPONSES"]["permitted_models"] == ["gpt-5.6-terra"]
-        assert items["OPENAI_RESPONSES"]["credentials_are_write_only"] is True
+        assert items["LITELLM_PROXY"]["configuration_fields"] == ["base_url"]
+        assert items["LITELLM_PROXY"]["credential_fields"] == ["virtual_key"]
+        assert items["LITELLM_PROXY"]["credentials_are_write_only"] is True
+        assert "OPENAI_RESPONSES" not in items
+        assert "ANTHROPIC_MESSAGES" not in items
 
         created = client.post(
             "/api/v1/integrations/non-broker",
-            headers={**headers, "Idempotency-Key": "catalog-openai-create-0001"},
+            headers={**headers, "Idempotency-Key": "catalog-litellm-create-0001"},
             json={
-                "provider": "OPENAI_RESPONSES",
-                "name": "Research OpenAI",
-                "configuration": {},
-                "credentials": {"api_key": "never-return-openai-secret"},
+                "provider": "LITELLM_PROXY",
+                "name": "Research LiteLLM",
+                "configuration": {"base_url": "http://litellm:4000/v1"},
+                "credentials": {"virtual_key": "never-return-litellm-secret"},
                 "capabilities": ["LLM_ANALYSIS"],
                 "official_source": True,
                 "licensing_accepted": True,
@@ -78,18 +80,18 @@ def test_reviewed_catalogue_and_non_broker_lifecycle_are_secret_safe() -> None:
         )
         assert created.status_code == 201
         assert created.json()["credential"] == "WRITE_ONLY"
-        assert created.json()["catalogue_revision"] == "2026-08-14.v1"
-        assert "never-return-openai-secret" not in created.text
+        assert created.json()["catalogue_revision"] == "2026-08-20.v1"
+        assert "never-return-litellm-secret" not in created.text
         integration_id = created.json()["id"]
 
         created_replay = client.post(
             "/api/v1/integrations/non-broker",
-            headers={**headers, "Idempotency-Key": "catalog-openai-create-0001"},
+            headers={**headers, "Idempotency-Key": "catalog-litellm-create-0001"},
             json={
-                "provider": "OPENAI_RESPONSES",
-                "name": "Research OpenAI",
-                "configuration": {},
-                "credentials": {"api_key": "never-return-openai-secret"},
+                "provider": "LITELLM_PROXY",
+                "name": "Research LiteLLM",
+                "configuration": {"base_url": "http://litellm:4000/v1"},
+                "credentials": {"virtual_key": "never-return-litellm-secret"},
                 "capabilities": ["LLM_ANALYSIS"],
                 "official_source": True,
                 "licensing_accepted": True,
@@ -101,12 +103,12 @@ def test_reviewed_catalogue_and_non_broker_lifecycle_are_secret_safe() -> None:
         assert created_replay.json() == created.json()
         conflicting_create = client.post(
             "/api/v1/integrations/non-broker",
-            headers={**headers, "Idempotency-Key": "catalog-openai-create-0001"},
+            headers={**headers, "Idempotency-Key": "catalog-litellm-create-0001"},
             json={
-                "provider": "OPENAI_RESPONSES",
+                "provider": "LITELLM_PROXY",
                 "name": "A different integration",
-                "configuration": {},
-                "credentials": {"api_key": "never-return-openai-secret"},
+                "configuration": {"base_url": "http://litellm:4000/v1"},
+                "credentials": {"virtual_key": "never-return-litellm-secret"},
                 "capabilities": ["LLM_ANALYSIS"],
                 "official_source": True,
                 "licensing_accepted": True,
@@ -121,50 +123,50 @@ def test_reviewed_catalogue_and_non_broker_lifecycle_are_secret_safe() -> None:
             headers={
                 **headers,
                 "If-Match": created.headers["etag"],
-                "Idempotency-Key": "catalog-openai-rotate-0001",
+                "Idempotency-Key": "catalog-litellm-rotate-0001",
             },
-            json={"credentials": {"api_key": "second-never-return-openai-secret"}},
+            json={"credentials": {"virtual_key": "second-never-return-litellm-secret"}},
         )
         assert rotated.status_code == 200
         assert rotated.json()["credential_status"] == "CONFIGURED"
-        assert "second-never-return-openai-secret" not in rotated.text
+        assert "second-never-return-litellm-secret" not in rotated.text
         rotated_replay = client.post(
             f"/api/v1/integrations/{integration_id}/credentials/rotate",
             headers={
                 **headers,
                 "If-Match": created.headers["etag"],
-                "Idempotency-Key": "catalog-openai-rotate-0001",
+                "Idempotency-Key": "catalog-litellm-rotate-0001",
             },
-            json={"credentials": {"api_key": "second-never-return-openai-secret"}},
+            json={"credentials": {"virtual_key": "second-never-return-litellm-secret"}},
         )
         assert rotated_replay.status_code == 200
         assert rotated_replay.json() == rotated.json()
 
         qualification = client.post(
             f"/api/v1/integrations/{integration_id}/test",
-            headers={**headers, "Idempotency-Key": "catalog-openai-test-0001"},
+            headers={**headers, "Idempotency-Key": "catalog-litellm-test-0001"},
         )
         assert qualification.status_code == 202
         assert qualification.json()["state"] == "QUEUED"
         assert qualification.json()["credential"] == "REDACTED"
         qualification_replay = client.post(
             f"/api/v1/integrations/{integration_id}/test",
-            headers={**headers, "Idempotency-Key": "catalog-openai-test-0001"},
+            headers={**headers, "Idempotency-Key": "catalog-litellm-test-0001"},
         )
         assert qualification_replay.status_code == 202
         assert qualification_replay.json() == qualification.json()
 
         listed = client.get("/api/v1/integrations/non-broker", headers=headers)
         assert listed.status_code == 200
-        assert listed.json()["items"][0]["provider"] == "OPENAI_RESPONSES"
-        assert "never-return-openai-secret" not in listed.text
+        assert listed.json()["items"][0]["provider"] == "LITELLM_PROXY"
+        assert "never-return-litellm-secret" not in listed.text
 
         disabled = client.put(
             f"/api/v1/integrations/{integration_id}/non-broker/state",
             headers={
                 **headers,
                 "If-Match": rotated.headers["etag"],
-                "Idempotency-Key": "catalog-openai-disable-0001",
+                "Idempotency-Key": "catalog-litellm-disable-0001",
             },
             json={"action": "DISABLE", "reason": "Pause advisory analysis provider"},
         )
@@ -175,7 +177,7 @@ def test_reviewed_catalogue_and_non_broker_lifecycle_are_secret_safe() -> None:
             headers={
                 **headers,
                 "If-Match": rotated.headers["etag"],
-                "Idempotency-Key": "catalog-openai-disable-0001",
+                "Idempotency-Key": "catalog-litellm-disable-0001",
             },
             json={"action": "DISABLE", "reason": "Pause advisory analysis provider"},
         )
@@ -187,7 +189,7 @@ def test_reviewed_catalogue_and_non_broker_lifecycle_are_secret_safe() -> None:
             headers={
                 **headers,
                 "If-Match": disabled.headers["etag"],
-                "Idempotency-Key": "catalog-openai-remove-0001",
+                "Idempotency-Key": "catalog-litellm-remove-0001",
             },
         )
         assert removed.status_code == 200
@@ -197,7 +199,7 @@ def test_reviewed_catalogue_and_non_broker_lifecycle_are_secret_safe() -> None:
             headers={
                 **headers,
                 "If-Match": disabled.headers["etag"],
-                "Idempotency-Key": "catalog-openai-remove-0001",
+                "Idempotency-Key": "catalog-litellm-remove-0001",
             },
         )
         assert removed_replay.status_code == 200

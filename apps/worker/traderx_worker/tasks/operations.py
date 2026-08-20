@@ -14,6 +14,7 @@ from traderx.integrations.broker_model import Mt5BridgeAgent
 from traderx.integrations.crypto import EncryptedSecret, SecretBox
 from traderx.integrations.model import CredentialVersion, Integration, IntegrationHealthObservation
 from traderx.integrations.providers.anthropic_messages import AnthropicMessagesAdapter
+from traderx.integrations.providers.litellm_proxy import LiteLlmProxyAdapter
 from traderx.integrations.providers.openai_responses import OpenAIResponsesAdapter
 from traderx.integrations.registry import approved_provider
 from traderx.jobs.model import BackgroundJob, JobState
@@ -365,14 +366,19 @@ def _probe(integration: Integration, credentials: dict[str, object]) -> None:
                 result = CoinbaseExchangeAdapter(transport).test_connection()
         finally:
             transport.close()
-    elif integration.provider in {"OPENAI_RESPONSES", "ANTHROPIC_MESSAGES"}:
+    elif integration.provider in {"OPENAI_RESPONSES", "ANTHROPIC_MESSAGES", "LITELLM_PROXY"}:
         assert token is not None
         with httpx.Client(timeout=get_settings().provider_read_timeout_seconds) as client:
-            model = sorted(definition.permitted_models)[0]
             if integration.provider == "OPENAI_RESPONSES":
-                result = OpenAIResponsesAdapter(token, client=client).test_connection(model)
+                result = OpenAIResponsesAdapter(token, client=client).test_connection()
+            elif integration.provider == "ANTHROPIC_MESSAGES":
+                result = AnthropicMessagesAdapter(token, client=client).test_connection()
             else:
-                result = AnthropicMessagesAdapter(token, client=client).test_connection(model)
+                result = LiteLlmProxyAdapter(
+                    token,
+                    base_url=str(integration.configuration["base_url"]),
+                    client=client,
+                ).test_connection()
     else:
         raise ValueError("provider does not expose a reviewed qualification probe")
     if not bool(result.get("healthy")):

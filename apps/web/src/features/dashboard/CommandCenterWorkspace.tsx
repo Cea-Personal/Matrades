@@ -26,7 +26,7 @@ type Workspace =
   | "operations";
 
 const workspaces: Array<{ id: Workspace; label: string; description: string }> = [
-  { id: "integrations", label: "Integrations", description: "Manage the MT5 read-only account connection and reviewed research providers." },
+  { id: "integrations", label: "Integrations", description: "Connect verified account data and manage reviewed market-data and advisory-model providers." },
   { id: "account-risk", label: "Account & risk", description: "Review account identity and deliberately version governed risk limits." },
   { id: "markets", label: "Markets", description: "Research and explicitly approve eligible active markets." },
   { id: "strategies", label: "Strategies", description: "Build, test, and validate immutable strategy evidence." },

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from traderx.audit.model import AuditEvent
 from traderx.identity.authorization import Actor, Role, require_role
 from traderx.integrations.model import Integration
-from traderx.integrations.registry import approved_provider
+from traderx.integrations.registry import approved_provider, validate_llm_model_id
 from traderx.market_research.events import (
     MODEL_CONFIGURATION_CHANGED,
     SCHEDULE_CHANGED,
@@ -159,6 +159,10 @@ def configure_model(
     now: datetime,
 ) -> MarketResearchModelConfiguration:
     require_role(actor, {Role.OWNER}, "market-research.model.configure", require_mfa=True)
+    try:
+        exact_model_id = validate_llm_model_id(provider_key, exact_model_id)
+    except ValueError as exc:
+        raise InvalidTransition(str(exc)) from exc
     idempotency, replay_id = _start_configuration_request(
         database,
         actor,
@@ -194,8 +198,6 @@ def configure_model(
     ):
         raise InvalidTransition("the selected LLM integration is not qualified and healthy")
     definition = approved_provider(provider_key)
-    if definition.category != "LLM" or exact_model_id not in definition.permitted_models:
-        raise InvalidTransition("the exact model is outside the reviewed global catalogue")
     previous = _model_payload(current) if current else None
     values = {
         "llm_integration_id": integration.id,

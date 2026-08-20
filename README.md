@@ -83,11 +83,16 @@ and qualify the fixed sources:
 - CME Group for Commodity venue volume, open interest, and entitled book evidence;
 - Cboe FX Spot for venue-specific Forex prints/volume/book evidence;
 - Coinbase Exchange for Cryptocurrency venue volume and order-book evidence; and
-- either OpenAI Responses (`gpt-5.6-terra`) or Anthropic Messages (`claude-sonnet-5`) for optional
-  advisory explanation.
+- one advisory-model connection through a LiteLLM gateway that routes across the model providers
+  and aliases you configure.
+
+You can instead connect a [LiteLLM gateway](deploy/litellm/README.md) to route advisory requests
+to the approved model aliases and providers configured there. LiteLLM keeps the upstream provider
+credentials; TraderX stores only its write-only virtual key.
 
 Provider licensing, entitlement, and retention prerequisites remain the operator’s responsibility.
-Credentials are encrypted and write-only. Arbitrary providers, URLs, and model IDs are rejected.
+Credentials are encrypted and write-only. Arbitrary providers and URLs are rejected; model IDs stay
+within the selected reviewed provider boundary.
 MT5 remains the authority for broker support and provides explicitly labelled broker activity,
 spread, real-volume-when-available, and Depth of Market proxy evidence.
 

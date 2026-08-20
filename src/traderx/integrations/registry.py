@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime
+from urllib.parse import urlparse
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -118,7 +120,9 @@ _APPROVED: dict[str, ProviderDefinition] = {
         official_source_required=True,
         configuration_fields=frozenset(),
         credential_fields=frozenset({"api_key"}),
-        permitted_models=frozenset({"gpt-5.6-terra"}),
+        catalogue_revision="2026-08-20.v2",
+        adapter_revision="openai-responses-v2",
+        permitted_models=frozenset({"*"}),
         licensing_notice="Provider retention and pricing posture must be reviewed before use.",
         retention_posture="STANDARD",
         credential_required=True,
@@ -131,11 +135,27 @@ _APPROVED: dict[str, ProviderDefinition] = {
         official_source_required=True,
         configuration_fields=frozenset(),
         credential_fields=frozenset({"api_key"}),
-        permitted_models=frozenset({"claude-sonnet-5"}),
+        catalogue_revision="2026-08-20.v2",
+        adapter_revision="anthropic-messages-v2",
+        permitted_models=frozenset({"*"}),
         licensing_notice="Provider retention and pricing posture must be reviewed before use.",
         retention_posture="STANDARD",
         credential_required=True,
         fixed_base_url="https://api.anthropic.com/v1",
+    ),
+    "LITELLM_PROXY": ProviderDefinition(
+        provider="LITELLM_PROXY",
+        category="LLM",
+        capabilities=frozenset({"LLM_ANALYSIS"}),
+        official_source_required=False,
+        configuration_fields=frozenset({"base_url"}),
+        credential_fields=frozenset({"virtual_key"}),
+        catalogue_revision="2026-08-20.v1",
+        adapter_revision="litellm-openai-compatible-v1",
+        permitted_models=frozenset({"*"}),
+        licensing_notice="The owner must review the LiteLLM gateway's provider, logging, retention, and spend policies.",
+        retention_posture="CONFIGURED_BY_GATEWAY",
+        credential_required=True,
     ),
     "CFTC_COT": ProviderDefinition(
         provider="CFTC_COT",
@@ -224,6 +244,25 @@ def approved_providers(*, category: str | None = None) -> tuple[ProviderDefiniti
 
 def capability_semantics(definition: ProviderDefinition) -> dict[str, str]:
     return dict(definition.capability_semantics)
+
+
+_MODEL_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
+
+
+def validate_llm_model_id(provider: str, exact_model_id: str) -> str:
+    """Validate a model ID without opening the reviewed provider or endpoint boundary."""
+
+    definition = approved_provider(provider)
+    if definition.category != "LLM":
+        raise ValueError("model selection requires a reviewed LLM provider")
+    normalized = exact_model_id.strip()
+    if not _MODEL_ID_PATTERN.fullmatch(normalized) or "://" in normalized or "//" in normalized:
+        raise ValueError(
+            "model identifier must be 1-128 letters, numbers, dots, underscores, colons, slashes, or hyphens"
+        )
+    if "*" not in definition.permitted_models and normalized not in definition.permitted_models:
+        raise ValueError("model identifier is not permitted for the reviewed provider")
+    return normalized
 
 
 def selectable_models() -> tuple[tuple[str, str], ...]:
@@ -346,4 +385,23 @@ def validate_provider_configuration(
         raise ValueError("provider credentials do not match the approved write-only fields")
     if any(not str(value).strip() for value in (*configuration.values(), *credentials.values())):
         raise ValueError("provider configuration and credentials cannot contain blank values")
+    if definition.provider == "LITELLM_PROXY":
+        _validate_litellm_base_url(str(configuration["base_url"]))
     return definition
+
+
+def _validate_litellm_base_url(value: str) -> None:
+    parsed = urlparse(value)
+    if parsed.scheme == "http" and parsed.hostname == "litellm" and not parsed.username:
+        return
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError(
+            "LiteLLM gateway base URL must be HTTPS, or the included http://litellm internal service"
+        )
