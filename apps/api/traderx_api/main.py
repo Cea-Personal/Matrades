@@ -20,7 +20,7 @@ from traderx_api.routes.integrations import router as integrations_router
 from traderx_api.routes.jobs import router as jobs_router
 from traderx_api.routes.journal import router as journal_router
 from traderx_api.routes.market_rotation import router as market_rotation_router
-from traderx_api.routes.markets import router as markets_router
+from traderx_api.routes.markets import calendar_router, router as markets_router
 from traderx_api.routes.notifications import router as notifications_router
 from traderx_api.routes.operations import router as operations_router
 from traderx_api.routes.opportunities import router as opportunities_router
@@ -54,6 +54,7 @@ app.include_router(identity_user_router, prefix="/api/v1")
 app.include_router(accounts_router, prefix="/api/v1")
 app.include_router(dashboard_router, prefix="/api/v1")
 app.include_router(markets_router, prefix="/api/v1")
+app.include_router(calendar_router, prefix="/api/v1")
 app.include_router(strategies_router, prefix="/api/v1")
 app.include_router(research_router, prefix="/api/v1")
 app.include_router(validation_router, prefix="/api/v1")

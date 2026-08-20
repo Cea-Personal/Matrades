@@ -10,7 +10,8 @@ ports/catalogue, the market-research domain-event catalogue, and the typed web b
 | Generated FastAPI OpenAPI | PASS | 89 paths, 102 operations, and 102 unique operation IDs; authentication and negative-capability tests pass |
 | Market-research HTTP amendment | PASS | Runtime exposes schedule, model configuration, coordinated start/history/report, category retry, owner-approved mapping, provider catalogue, and non-broker lifecycle routes at the documented `/api/v1` paths |
 | Typed web boundary | PASS | Generated schedule/model/source/coordinated schemas compile under strict TypeScript; Vitest, ESLint, and production build pass |
-| Provider ports/catalogue | PASS | Fixed MT5/CME/Cboe/Coinbase/OpenAI/Anthropic definitions, exact endpoints/models, semantics, error classes, and deny-by-default validation agree with adapter tests |
+| Provider ports/catalogue | PARTIAL | Runtime now registers Twelve Data as an `AGGREGATED_PROXY`, retires Cboe from new connections, marks CME optional, and preserves MT5/Coinbase roles; full provider lifecycle/browser coverage remains open |
+| Economic calendar/event-risk amendment | PARTIAL | Runtime now persists calendar/event-risk evidence, exposes authenticated calendar/policy routes, schedules documented BLS/BEA ICS sync, supports cited owner entries, and applies deterministic new-recommendation blocks; released-value/EIA and full browser/contract coverage remain open |
 | Market-research events | PASS | Schedule, occurrence/overlap, coordinated completion, category block, fallback, model change, analysis completion/unavailability/retry use the catalogued event names and transactional outbox |
 | Full hand-authored HTTP catalogue | PARTIAL | 64 design paths/70 operations remain broader and use several legacy resource names; runtime OpenAPI remains authoritative for executable clients |
 | Full domain-event catalogue | PARTIAL | Amendment facts are implemented, but many pre-amendment catalog entries still have durable state/audit without a corresponding outbox fact |
@@ -85,7 +86,8 @@ account balances/equity, or order intent.
 
 ## Release consequence
 
-The FR-095–FR-105 amendment contract is reconciled. The broader original T245 gate remains
-partial because the entire 64-path hand-authored design and pre-amendment event catalogue have not
-been collapsed into one generated source. Production approval therefore remains blocked even
-though the amendment’s runtime/client/provider/event boundary passes its focused contract tests.
+The FR-095–FR-105 amendment contract is reconciled. FR-106–FR-107 now have an initial runtime
+implementation, but their value-ingestion, generated-client, complete contract/browser, and release
+evidence tasks remain open. The broader original T245 gate remains partial because the entire 64-path
+hand-authored design and pre-amendment event catalogue have not been collapsed into one generated
+source. Production approval remains blocked.

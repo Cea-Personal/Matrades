@@ -67,7 +67,13 @@ class ProviderHttpTransport:
             raise ValueError("provider paths must be relative to the reviewed fixed endpoint")
         request_headers = {"Accept": "application/json", **(headers or {})}
         if self._credential:
-            request_headers["Authorization"] = f"Bearer {self._credential}"
+            # Twelve Data documents its server-side API-key authorization scheme.
+            # Other reviewed market-data adapters currently use bearer credentials.
+            request_headers["Authorization"] = (
+                f"apikey {self._credential}"
+                if self.provider == "TWELVE_DATA"
+                else f"Bearer {self._credential}"
+            )
         last_error: ProviderTransportError | None = None
         for attempt in range(1, self._maximum_attempts + 1):
             try:

@@ -31,7 +31,6 @@ from traderx.market_data.model import (
     InstrumentAlias,
     MarketObservation,
 )
-from traderx.market_data.providers.cboe_fx_spot import CboeFxSpotAdapter
 from traderx.market_data.providers.cme_group import CmeGroupAdapter
 from traderx.market_data.providers.coinbase_exchange import CoinbaseExchangeAdapter
 from traderx.market_data.providers.http import ProviderHttpTransport, ProviderTransportError
@@ -349,7 +348,10 @@ def retry_pinned_analysis(self: object, category_run_id: str) -> dict[str, str]:
 
 _SPECIALISTS = {
     "COMMODITY": "CME_GROUP",
-    "FOREX": "CBOE_FX_SPOT",
+    # Forex execution/liquidity evidence is MT5 broker-proxy evidence. Twelve
+    # Data supplements only exact price/candle fields and is not a specialist
+    # liquidity venue; retired Cboe data remains historical metadata only.
+    "FOREX": "MT5_TERMINAL_BRIDGE",
     "CRYPTO": "COINBASE_EXCHANGE",
 }
 _REQUIRED_CAPABILITIES = {
@@ -442,8 +444,6 @@ def _market_data_adapter(
     transport = ProviderHttpTransport(integration.provider, credential=token)
     if integration.provider == "CME_GROUP":
         return CmeGroupAdapter(transport, entitlement_verified=True), transport
-    if integration.provider == "CBOE_FX_SPOT":
-        return CboeFxSpotAdapter(transport, entitlement_verified=True), transport
     if integration.provider == "COINBASE_EXCHANGE":
         return CoinbaseExchangeAdapter(transport), transport
     transport.close()
@@ -659,8 +659,9 @@ def _observations_are_coherent(observations: Sequence[ProviderObservation]) -> b
 def _mt5_fallback_evidence(
     database: Session, *, category: str, evaluated_at: datetime
 ) -> list[SourceEvidence]:
-    # Commodity and crypto liquidity require actual specialist measures in V1.
-    if category != "FOREX":
+    # MT5 is an explicit broker-proxy path for commodity and Forex research.
+    # Crypto remains venue-authoritative and must not use broker proxies.
+    if category not in {"FOREX", "COMMODITY"}:
         return []
     evidence: list[SourceEvidence] = []
     for instrument in database.scalars(select(Instrument).where(Instrument.category == category)):

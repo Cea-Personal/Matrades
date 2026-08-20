@@ -788,6 +788,7 @@ def _research_inputs(
             item.conflict_state == ConflictState.MATERIAL_CONFLICT for item in source_evidence
         )
         actual = any(item.semantics == SourceSemantics.ACTUAL for item in qualified)
+        broker_proxy = any(item.semantics == SourceSemantics.BROKER_PROXY for item in qualified)
         category = MarketCategory(instrument.category)
         specialist_metrics: dict[str, str] = {}
         for item in source_evidence:
@@ -815,6 +816,19 @@ def _research_inputs(
                 )
                 liquidity = assessed.execution_quality
                 liquidity_evidence = assessed.evidence
+            elif broker_proxy and broker_turnover > 0 and broker_depth > 0:
+                turnover = broker_turnover
+                depth = broker_depth
+                assessed = assess_asset_liquidity(
+                    category=category,
+                    turnover=turnover,
+                    spread_bps=spread_bps,
+                    tick_volume=broker_depth,
+                    commodity_broker_proxy=True,
+                )
+                liquidity = assessed.execution_quality
+                liquidity_evidence = assessed.evidence
+                actual_liquidity_required_met = True
         elif category == MarketCategory.CRYPTO:
             if actual and external_turnover is not None:
                 turnover = external_turnover
@@ -830,7 +844,7 @@ def _research_inputs(
                 liquidity = assessed.execution_quality
                 liquidity_evidence = assessed.evidence
         elif mandatory_source_complete and broker_turnover > 0 and broker_depth > 0:
-            # Forex liquidity remains broker-account specific even when Cboe evidence
+            # Forex liquidity remains broker-account specific even when aggregate evidence
             # supplements the run. Venue volume/depth never replaces MT5 spread and
             # quote/tick activity or becomes a claimed consolidated FX order book.
             turnover = broker_turnover

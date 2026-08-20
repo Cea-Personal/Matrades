@@ -139,14 +139,39 @@ corrections create superseding canonical revisions. Missing intervals and transf
 reported, not silently hidden.
 
 Every response also identifies catalogue/adapter/integration/venue, declared capability,
-`ACTUAL`/`BROKER_PROXY`/`UNAVAILABLE` semantics, instrument mapping revision, entitlement tier,
-source/event/receive time, freshness-policy reference, completeness, and revision. Initial reviewed
-profiles are `CME_GROUP` for Commodity, `CBOE_FX_SPOT` for Forex, and `COINBASE_EXCHANGE` for
-Cryptocurrency. MT5 remains authoritative for broker eligibility.
+`ACTUAL`/`BROKER_PROXY`/`AGGREGATED_PROXY`/`UNAVAILABLE` semantics, instrument mapping revision,
+entitlement tier, source/event/receive time, freshness-policy reference, completeness, and revision.
+Initial reviewed profiles are `MT5_TERMINAL_BRIDGE` for broker authority, `COINBASE_EXCHANGE` for
+Cryptocurrency venue evidence, and `TWELVE_DATA` for Forex/crypto field-level aggregate fallback.
+MT5 remains authoritative for broker eligibility. Twelve Data declares only provider-documented
+fields, never `ORDER_BOOK` or venue-executed volume.
 
-Ordered failure handling is per category: bounded specialist retries, current complete MT5
-evidence, then complete cached external evidence inside the unchanged freshness policy, otherwise
-`BLOCKED`. Adapters cannot weaken a gate or extend freshness during an outage.
+Ordered failure handling is per category: bounded primary retries, current complete MT5 evidence,
+then a complete fresh exact Twelve Data field when its pinned fallback policy permits it, then
+complete cached external evidence inside the unchanged freshness policy, otherwise `BLOCKED`.
+Adapters cannot weaken a gate, synthesize an unsupported field, or extend freshness during an outage.
+
+## Economic Calendar Port
+
+```text
+describe_catalogue_profile()
+test_connection()
+sync_schedule(cursor_or_range)
+sync_published_values(event_identity_or_range)
+get_coverage(scope, instant)
+```
+
+The port admits only documented official machine feeds/APIs. It returns source origin
+`OFFICIAL_MACHINE`, official URL, external identity, retrieval time, schedule/release revisions,
+affected scope, and null/`UNKNOWN` consensus when the official source does not publish it. BLS,
+BEA, and EIA adapters are V1 profiles; FOMC and EIA schedule entries may instead be owner-cited.
+The port never extracts provider HTML.
+
+Owner-cited schedule commands are domain commands, not provider calls. They require an official URL,
+event time, impact, scope, actor, reason, reviewer, and append-only audit revision. A machine event
+is never edited in place: an owner creates a cited correction, cancellation, or superseding event.
+The deterministic event-risk service maps event scope to active instruments and returns either
+`CLEAR`, `IN_GUARD_WINDOW`, or `CALENDAR_COVERAGE_DEGRADED` plus the remaining buffer.
 
 ## LLM Analysis Port
 
@@ -237,6 +262,10 @@ Every adapter MUST pass contract tests for:
   account/server match, overlapping-deal reconciliation, broker-specific evidence labels, optional
   DOM, and denied terminal API surface;
 - specialist entitlement loss, provider retirement, capability negotiation, asset-aware mandatory
-  evidence, source conflicts, unchanged freshness during outage, and ordered fallback; and
+  evidence, Twelve Data field-level `AGGREGATED_PROXY` provenance, source conflicts, unchanged
+  freshness during outage, and ordered fallback;
+- official schedule/value synchronization, owner-cited event validation/audit, explicit no-scraping
+  rejection, event-to-instrument mapping, guard-window recommendation blocks, and degraded coverage;
+  and
 - LLM model allowlisting/pinning, secret/data minimization, strict local schema validation, refusal,
   truncation, rate limit/timeout, deterministic-output immutability, and no automatic substitution.

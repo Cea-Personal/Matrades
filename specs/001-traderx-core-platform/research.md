@@ -420,55 +420,56 @@ reconnect from silently changing portfolio risk.
 merging simultaneous broker accounts, clearing a breaker on transport recovery alone, storing a
 cursor outside the snapshot transaction, and automatic provider failover are rejected.
 
-## 25. Fixed Specialist Market-Data Catalogue
+## 25. Low-Cost Market-Data Catalogue
 
-**Decision**: Ship reviewed catalogue profiles for `CME_GROUP` (Commodity), `CBOE_FX_SPOT`
-(Forex), and `COINBASE_EXCHANGE` (Cryptocurrency). An entry is selectable only after the owner has
-accepted applicable licensing, supplied any required entitlement/credential through the UI,
-passed connection/capability tests, and approved versioned MT5-to-venue symbol mappings.
+**Decision**: Ship `MT5_TERMINAL_BRIDGE` as the broker authority for Forex and commodities,
+`COINBASE_EXCHANGE` as the cryptocurrency venue authority, and `TWELVE_DATA` as a reviewed
+Forex/crypto field-level fallback. CME remains a disabled optional future entitlement, not a V1
+gate. An entry is selectable only after the owner supplies a credential where required, passes
+connection/capability tests, and approves versioned MT5-to-provider symbol mappings.
 
-- CME's cloud feed supplies top of book, trades, cleared volume, open interest, and settlement;
-  DataMine adds entitled historical MBO/depth/BBO/time-and-sales files through its download API.
-  See [CME real-time API](https://www.cmegroup.com/market-data/real-time-futures-and-options-data-api.html),
-  [DataMine API](https://www.cmegroup.com/datamine/datamine-api.html), and
-  [licensing](https://www.cmegroup.com/market-data/license-data.html).
-- Cboe publishes official venue/instrument spot-FX volume and offers licensed TOP, prints, and
-  full-depth/history. It is one institutional venue, never a consolidated global FX book. See
-  [Cboe FX volume](https://www.cboe.com/global/fx/spot/volume/) and
-  [Cboe FX resources](https://www.cboe.com/global/fx/resources/).
+- MT5 provides the broker-supported universe, specifications, prices, spread, tick activity,
+  execution proxies, and available DOM. All such activity and depth is `BROKER_PROXY`, including
+  for broker-supported commodities; it can support an explicitly versioned proxy gate and manual
+  recommendation after every other safety gate passes.
 - Coinbase REST/WebSocket supplies trades, candles, actual venue volume, and L2/L3 books. WebSocket
   is used for live depth; REST candles are paged and gap-checked. See
   [product candles](https://docs.cdp.coinbase.com/api-reference/exchange-api/rest-api/products/get-product-candles),
   [product book](https://docs.cdp.coinbase.com/api-reference/exchange-api/rest-api/products/get-product-book),
   and [WebSocket feed](https://docs.cdp.coinbase.com/exchange/websocket-feed/overview).
 
-`CFTC_COT`, CME FX futures, and `KRAKEN_SPOT` are verification-only profiles disabled by default.
-CME/Cboe commercial access and raw-data display/retention rights are release gates; tests use
-licensed recorded or synthetic fixtures, never scraped substitutes.
+`TWELVE_DATA` provides Forex and crypto price/candle continuity through `time_series` and latest
+prices through documented REST endpoints. Its composite currency feed is aggregated, so every
+returned field is `AGGREGATED_PROXY`. Volume is accepted only when the provider supplies it;
+Twelve Data has no documented venue-order-book endpoint and cannot supply actual venue volume or
+broker-executable liquidity. See [Twelve Data API docs](https://twelvedata.com/docs) and
+[composite-feed explanation](https://support.twelvedata.com/en/articles/12528665-how-the-composite-currency-feed-works).
 
-**Rationale**: Venue-native sources provide actual volume, open interest, and depth with explicit
-provenance. A single multi-asset aggregator would obscure evidence semantics and licensing.
+**Rationale**: This supports useful research without a paid CME/Cboe dependency while preserving
+the evidence semantics needed for safe decisions.
 
-**Alternatives considered**: MT5-only research, CFTC as a current commodity source, one universal
-aggregator, Kraken as the primary crypto source, and arbitrary REST URLs are rejected.
+**Alternatives considered**: treating aggregated data as venue authority, scraping exchange pages,
+or claiming global Forex volume are rejected. A paid CME depth entitlement remains a future upgrade.
 
 ## 26. Source Authority, Asset-Aware Gates, and Fallback
 
 **Decision**: MT5 is authoritative for broker support/specifications/current execution feasibility;
-specialists are authoritative only for catalogue-declared capabilities. Every measure records
-provider, venue, mapping, capability, `ACTUAL`/`BROKER_PROXY`/`UNAVAILABLE`, event/receive time,
-freshness-policy version, entitlement, and quality/conflict result.
+Coinbase is authoritative only for declared selected-venue crypto capabilities; Twelve Data is never
+authoritative. Every measure records provider, venue, mapping, capability,
+`ACTUAL`/`BROKER_PROXY`/`AGGREGATED_PROXY`/`UNAVAILABLE`, event/receive time, freshness-policy
+version, entitlement, and quality/conflict result.
 
 Forex gates use broker spread, quote/tick activity, freshness, and execution proxies without a
-global-book claim. Commodity gates require official traded volume and open interest plus depth when
-entitled. Crypto gates require actual selected-venue volume and order-book depth. Conflicting or
-missing mandatory evidence is `UNKNOWN`, not zero.
+global-book claim. Commodities use official volume/open interest/depth when entitled, otherwise an
+explicit versioned MT5 broker-proxy gate; unavailable venue authority remains visible. Crypto uses
+Coinbase venue volume/book where available. Twelve Data may replace an exact unavailable Forex or
+crypto field only where it supplies that field and the pinned policy permits `AGGREGATED_PROXY`.
+Conflicting or unavailable required evidence is `UNKNOWN`, not zero.
 
-After three specialist attempts with versioned exponential backoff/jitter, the category tries
-current complete MT5 evidence and then the most recent complete external dataset that is still
-within the same capability-specific freshness limit. An outage never extends freshness or weakens
-a gate. Otherwise that category blocks and preserves its active assignment while valid categories
-may finish.
+After bounded primary attempts, the category tries current complete MT5 evidence, then a fresh
+exact Twelve Data field when the policy permits it, then still-fresh cached external evidence. An
+outage never extends freshness, fills an unsupported field, or weakens a gate. Otherwise the
+category blocks and preserves its active assignment while valid categories may finish.
 
 **Rationale**: Explicit authority and semantics prevent broker proxies, venue data, and missing
 values from becoming misleadingly comparable while honoring the requested fallback order.
@@ -545,9 +546,39 @@ independent deterministic completion keeps an LLM outage from becoming a market-
 automatic cross-model failover, failing valid deterministic research, and claiming ZDR from a
 request flag are rejected.
 
+## 30. Official Economic Calendar and Guard Windows
+
+**Decision**: Use documented official machine feeds for BLS and BEA schedules, their official APIs
+for published values, and EIA API v2 for published petroleum values. Use owner-maintained,
+official-URL-cited entries for FOMC and EIA schedules because V1 must not scrape their HTML
+calendars. The owner can enable high-impact event types and pre/post buffers; the Risk Manager blocks
+new live recommendations for affected active markets inside either buffer. Existing positions,
+research, paper trading, and journaling continue.
+
+- BLS publishes an official ICS schedule that includes national-office releases; filter it to CPI,
+  PPI, and Employment Situation/NFP. See [BLS schedule](https://www.bls.gov/schedule/news_release/empsit.htm)
+  and [BLS developer resources](https://www.bls.gov/developers/home.htm).
+- BEA publishes machine-readable schedule formats; use GDP and Personal Income and Outlays/PCE.
+  See [BEA calendar](https://www.bea.gov/news/schedule/icalendar) and
+  [BEA API guide](https://apps.bea.gov/api/_pdf/bea_web_service_api_user_guide.pdf).
+- EIA published petroleum values use its free API; the owner-cited WPSR schedule records standard
+  Wednesday releases and explicit holiday overrides. See [EIA API documentation](https://www.eia.gov/opendata/documentation.php)
+  and [WPSR schedule](https://www.eia.gov/petroleum/supply/weekly/schedule.php).
+- Owner-cited entries require the official URL, event time, impact, scope, reviewer, reason, and
+  audit trail. Machine imports are immutable; a cancellation or correction creates a superseding
+  revision. Missing consensus remains `UNKNOWN`, never inferred.
+
+**Rationale**: Separate schedule and release-value imports preserve provenance, avoid scraping, and
+turn calendar risk into a deterministic guard rather than LLM judgement. Stale/unverified coverage
+inside a relevant guard window fails closed.
+
+**Alternatives considered**: a paid generic calendar, scraping official pages, inferred consensus,
+and warning-only event treatment are rejected for V1.
+
 ## Resolution Status
 
 All Technical Context questions are resolved. Production enablement remains gated—not ambiguous—on
-MT5 investor-mode verification, CME/Cboe/Coinbase entitlement and use rights, reviewed symbol
-mappings, and successful LLM provider/model qualification with the owner's actual account access.
-Until a gate passes, its catalogue entry stays unavailable and affected categories fail closed.
+MT5 investor-mode verification, Coinbase/Twelve Data entitlement and permitted-use rights, reviewed
+symbol mappings, official-calendar coverage, and successful LLM provider/model qualification with
+the owner's actual account access. Until a gate passes, its catalogue entry stays unavailable and
+affected categories fail closed. A paid CME entitlement is optional future work.

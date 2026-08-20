@@ -37,6 +37,7 @@ def select_market_source(
     mt5_evidence: list[SourceEvidence],
     cached_external_evidence: list[SourceEvidence],
     required_capabilities: set[str],
+    twelve_data_evidence: list[SourceEvidence] | None = None,
 ) -> SourceSelection:
     """Select one complete evidence set without weakening gates or freshness.
 
@@ -92,6 +93,19 @@ def select_market_source(
             _evidence_reasons(mt5_evidence, required_capabilities),
         )
     )
+
+    if twelve_data_evidence is not None:
+        twelve = _qualifying(twelve_data_evidence, required_capabilities)
+        if twelve is not None:
+            trail.append(SourceTrailStep(SourceRole.FALLBACK_TWELVE_DATA, True, ()))
+            return SourceSelection(SourceRole.FALLBACK_TWELVE_DATA, twelve, False, (), tuple(trail))
+        trail.append(
+            SourceTrailStep(
+                SourceRole.FALLBACK_TWELVE_DATA,
+                False,
+                _evidence_reasons(twelve_data_evidence, required_capabilities),
+            )
+        )
 
     cached = _qualifying(cached_external_evidence, required_capabilities)
     if cached is not None:

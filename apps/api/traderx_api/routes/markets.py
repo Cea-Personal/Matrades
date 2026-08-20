@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Query, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -16,7 +16,9 @@ from traderx.integrations.model import Integration
 from traderx.integrations.registry import approved_provider
 from traderx.jobs.model import BackgroundJob, JobState
 from traderx.market_data.mapping import approve_symbol_mapping
-from traderx.market_data.model import Instrument
+from traderx.market_data.model import EconomicEvent, Instrument
+from traderx.economic_calendar.service import coverage_payload, create_owner_cited_event, event_payload
+from traderx.shared.config import get_settings
 from traderx.market_research.configuration import (
     configure_model,
     configure_schedule,
@@ -61,6 +63,9 @@ from traderx_api.routes.identity import AuthenticationContext
 
 router = APIRouter(
     prefix="/markets", tags=["Markets"], dependencies=[Depends(authenticated_operation_context)]
+)
+calendar_router = APIRouter(
+    prefix="/economic-calendar", tags=["Markets"], dependencies=[Depends(authenticated_operation_context)]
 )
 Operator = Annotated[AuthenticationContext, Depends(operator_context)]
 DatabaseSession = Annotated[Session, Depends(get_database_session)]
@@ -116,10 +121,112 @@ class SymbolMappingCommand(BaseModel):
     reason: str = Field(min_length=8, max_length=2000)
 
 
+class OwnerCitedEconomicEventCommand(BaseModel):
+    provider: str = Field(default="FEDERAL_RESERVE", min_length=1, max_length=128)
+    official_url: str = Field(min_length=12, max_length=2048)
+    title: str = Field(min_length=1, max_length=256)
+    event_type: str = Field(min_length=1, max_length=128)
+    importance: str = Field(pattern="^(HIGH|MEDIUM|LOW)$")
+    scheduled_at: datetime
+    affected_categories: list[str] = Field(default_factory=lambda: ["FOREX", "COMMODITY", "CRYPTO"])
+    supersedes_event_id: UUID | None = None
+    reason: str = Field(min_length=8, max_length=2000)
+
+
+class ExperimentalCalendarImportCommand(BaseModel):
+    acknowledge_non_production: bool
+    start_date: date
+    end_date: date
+    sources: list[str] = Field(default_factory=list, max_length=4)
+    limit: int = Field(default=100, ge=1, le=500)
+    offset: int = Field(default=0, ge=0, le=10000)
+
+
 def _actor(context: AuthenticationContext) -> Actor:
     return Actor(
         role=Role(context.user.role), assurance=context.session.assurance, id=context.user.id
     )
+
+
+@calendar_router.get("/events")
+def list_economic_calendar_events(database: DatabaseSession) -> list[dict[str, object]]:
+    events = database.scalars(select(EconomicEvent).order_by(EconomicEvent.event_at)).all()
+    return [event_payload(event) for event in events]
+
+
+@calendar_router.get("/coverage")
+def get_economic_calendar_coverage(database: DatabaseSession) -> dict[str, object]:
+    return coverage_payload(database)
+
+
+@calendar_router.post("/experimental/forex-factory/import", status_code=202)
+def import_experimental_forex_factory_calendar(
+    payload: ExperimentalCalendarImportCommand,
+    context: Operator,
+) -> dict[str, object]:
+    """Queue a development-only scraper import on the isolated worker."""
+    require_role(
+        _actor(context), {Role.OWNER}, "economic-calendar.experimental-import", require_mfa=True
+    )
+    if not payload.acknowledge_non_production:
+        raise HTTPException(
+            status_code=422, detail="explicit non-production acknowledgement is required"
+        )
+    if get_settings().environment == "production":
+        raise HTTPException(
+            status_code=403, detail="experimental calendar imports are disabled in production"
+        )
+    if payload.end_date < payload.start_date:
+        raise HTTPException(status_code=422, detail="end_date must not be before start_date")
+    if (payload.end_date - payload.start_date).days > 31:
+        raise HTTPException(status_code=422, detail="experimental imports are limited to 31 days")
+    sources = [source.strip().lower() for source in payload.sources if source.strip()]
+    unsupported = set(sources).difference({"forex", "cryptocraft", "energyexch", "metalsmine"})
+    if unsupported:
+        raise HTTPException(
+            status_code=422,
+            detail=f"unsupported scraper sources: {', '.join(sorted(unsupported))}",
+        )
+    from traderx_worker.tasks.economic_calendar import synchronize_forex_factory_experimental
+
+    task = synchronize_forex_factory_experimental.delay(
+        start_date=payload.start_date.isoformat(),
+        end_date=payload.end_date.isoformat(),
+        sources=sources or ["forex"],
+        limit=payload.limit,
+        offset=payload.offset,
+    )
+    return {
+        "status": "QUEUED_EXPERIMENTAL_NOT_FOR_GATING",
+        "task_id": task.id,
+        "provider": "FOREX_FACTORY_SCRAPER",
+        "request": {
+            "start_date": payload.start_date.isoformat(),
+            "end_date": payload.end_date.isoformat(),
+            "sources": sources or ["forex"],
+            "limit": payload.limit,
+            "offset": payload.offset,
+        },
+    }
+
+
+@calendar_router.post("/owner-cited-events", status_code=201)
+def post_owner_cited_event(
+    payload: OwnerCitedEconomicEventCommand,
+    context: Operator,
+    database: DatabaseSession,
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=16, max_length=200),
+) -> dict[str, object]:
+    actor = _actor(context)
+    require_role(actor, {Role.OWNER}, "economic-calendar.owner-cited-event", require_mfa=True)
+    event = create_owner_cited_event(
+        database, actor_id=context.user.id, provider=payload.provider, official_url=payload.official_url,
+        title=payload.title, event_type=payload.event_type, impact=payload.importance,
+        scheduled_at=payload.scheduled_at, affected_categories=payload.affected_categories,
+        reason=payload.reason, now=utc_now(), supersedes_event_id=payload.supersedes_event_id,
+    )
+    database.commit()
+    return {**event_payload(event), "idempotency_key": idempotency_key}
 
 
 @router.get("/instruments")

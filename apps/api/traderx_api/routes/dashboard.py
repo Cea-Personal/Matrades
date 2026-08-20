@@ -28,8 +28,7 @@ router = APIRouter(tags=["Command Center"])
 DatabaseSession = Annotated[Session, Depends(get_database_session)]
 
 _RESEARCH_CONNECTION_REQUIREMENTS = (
-    ("CME_GROUP", "CME Group", True),
-    ("CBOE_FX_SPOT", "Cboe FX Spot", False),
+    ("TWELVE_DATA", "Twelve Data", False),
     ("COINBASE_EXCHANGE", "Coinbase Exchange", True),
     ("LITELLM_PROXY", "LiteLLM Gateway", False),
 )

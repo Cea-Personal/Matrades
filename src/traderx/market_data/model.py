@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import UUID
 
-from sqlalchemy import JSON, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from traderx.shared.db import Base, FinancialDecimal, IdentifiedMixin
@@ -138,10 +138,67 @@ class MarketObservation(IdentifiedMixin, Base):
 
 class EconomicEvent(IdentifiedMixin, Base):
     __tablename__ = "economic_events"
+    __table_args__ = (UniqueConstraint("source_provider", "external_id", name="uq_economic_event_source"),)
+
     event_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     currency_or_region: Mapped[str] = mapped_column(String(32), nullable=False)
     impact: Mapped[str] = mapped_column(String(16), nullable=False)
     payload: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
+    source_provider: Mapped[str] = mapped_column(String(128), nullable=False, default="OWNER")
+    external_id: Mapped[str] = mapped_column(String(256), nullable=False, default="")
+    source_origin: Mapped[str] = mapped_column(String(32), nullable=False, default="OWNER_CITED")
+    source_url: Mapped[str] = mapped_column(String(2048), nullable=False, default="")
+    canonical_type: Mapped[str] = mapped_column(String(128), nullable=False, default="OTHER")
+    scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    affected_categories: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    affected_instruments: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="UPCOMING")
+    source_retrieved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    stale_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reviewed_by: Mapped[UUID | None] = mapped_column(nullable=True)
+    revision_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+
+class CalendarCoverage(IdentifiedMixin, Base):
+    __tablename__ = "calendar_coverages"
+    __table_args__ = (UniqueConstraint("source_provider", "scope_key", name="uq_calendar_coverage_scope"),)
+
+    source_provider: Mapped[str] = mapped_column(String(128), nullable=False)
+    scope_key: Mapped[str] = mapped_column(String(256), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="COVERAGE_DEGRADED")
+    covered_through: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    source_url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    evidence: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class EconomicEventRevision(IdentifiedMixin, Base):
+    __tablename__ = "economic_event_revisions"
+
+    economic_event_id: Mapped[UUID] = mapped_column(ForeignKey("economic_events.id"), nullable=False)
+    revision_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    reason: Mapped[str] = mapped_column(String(2000), nullable=False)
+    source_url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
+    changed_by: Mapped[UUID | None] = mapped_column(nullable=True)
+    changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class EventRiskPolicyVersion(IdentifiedMixin, Base):
+    __tablename__ = "event_risk_policy_versions"
+
+    account_id: Mapped[UUID] = mapped_column(ForeignKey("trading_accounts.id"), nullable=False)
+    policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    enabled_event_types: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    pre_buffer_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
+    post_buffer_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
+    coverage_required: Mapped[bool] = mapped_column(nullable=False, default=True)
+    reason: Mapped[str] = mapped_column(String(2000), nullable=False)
+    configured_by: Mapped[UUID | None] = mapped_column(nullable=True)
+    effective_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    retired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class DataQualityObservation(IdentifiedMixin, Base):

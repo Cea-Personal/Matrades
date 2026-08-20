@@ -11,15 +11,16 @@ operators may select only the code-reviewed catalogue entries:
 
 | Category | Primary source | Required prerequisite |
 |---|---|---|
-| Commodity | CME Group | Contracted API access plus display, use, and retention entitlements |
-| Forex | Cboe FX Spot | Venue-data access and explicit entitlement; this is not a consolidated FX book |
+| Commodity | MT5 broker proxy | Fresh broker candles, spread, tick activity and sizing support; unavailable exchange-volume fields remain explicitly unavailable |
+| Forex | MT5 broker proxy + Twelve Data | MT5 provides execution/liquidity proxy evidence; Twelve Data only fills fresh exact price/candle fields as `AGGREGATED_PROXY` |
 | Cryptocurrency | Coinbase Exchange | Official Exchange API terms and retention review |
-| Advisory analysis | OpenAI Responses or Anthropic Messages | Qualified project credential and one allowlisted exact model |
+| Economic calendar | BLS/BEA official machine feeds; owner-cited Federal Reserve/EIA schedules | Coverage is monitored; stale/degraded coverage blocks affected new recommendations when the event guard is enabled |
+| Advisory analysis | Reviewed LiteLLM gateway | Qualified gateway credential and one allowlisted exact model |
 | Broker authority/proxy | Native MT5 EA | Enrolled account/server, investor mode, trading disabled, complete fresh snapshot |
 
 Record legal/licensing approval outside TraderX, acknowledge the notice in the UI, and retain the
 approval reference in the deployment change record. An acknowledgement does not create an
-entitlement. CME/Cboe stay `DEGRADED` until an operator verifies the entitlement evidence.
+entitlement. CME is optional future work; Cboe is retired historical metadata and cannot be connected.
 
 Provider qualification and collection execute only on `worker-research`. That service must be
 attached to both the internal `private` network and the outbound `provider-egress` network; it
@@ -70,15 +71,33 @@ For a stalled run:
 
 ## Source outage and fallback
 
-The immutable path is three bounded specialist attempts, current complete MT5 evidence, the most
-recent successful external evidence within its original freshness policy, then `BLOCKED`. Do not
+The immutable path is three bounded specialist attempts, current complete MT5 evidence, policy-permitted
+fresh exact Twelve Data field evidence, the most recent successful external evidence within its original
+freshness policy, then `BLOCKED`. Do not
 extend an age limit, substitute an unreviewed provider, treat unavailable fields as zero, or weaken
 an asset-specific gate during an outage. Contradictory evidence is quarantined.
 
-Review source role, provider/venue, `ACTUAL`/`BROKER_PROXY`/`UNAVAILABLE` semantics, observed age,
+Review source role, provider/venue, `ACTUAL`/`BROKER_PROXY`/`AGGREGATED_PROXY`/`UNAVAILABLE` semantics, observed age,
 policy version, mapping revision, entitlement, conflict state, and raw-evidence hash in Markets.
 Notify the owner on entitlement loss, material conflict, stale required evidence, repeated schedule
 failure, or blocked category.
+
+## Development-only scraper experiment
+
+The optional `experimental-calendar-scraper` Compose profile runs the third-party
+ForexFactoryScrapper sidecar on the private Docker network. It is deliberately absent from the
+production Compose file and requires `TRADERX_ENABLE_EXPERIMENTAL_CALENDAR_SCRAPER=true` on the
+dedicated experimental worker. Start it only for local inspection with:
+
+```sh
+TRADERX_ENABLE_EXPERIMENTAL_CALENDAR_SCRAPER=true \
+docker compose -f deploy/compose.yaml --profile experimental-calendar-scraper up --build
+```
+
+An MFA-verified owner can then queue an import from **Markets → Economic calendar coverage**.
+Every row is labelled `SCRAPED_EXPERIMENTAL`; it is not official calendar coverage, does not
+qualify as market evidence, and is excluded from event-risk and recommendation gates. Do not add
+this profile, its endpoint, or scraped data to a production deployment.
 
 ## Model failure or retirement
 

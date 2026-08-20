@@ -226,6 +226,7 @@ export function AccountRiskSetup({
           <h3 id="replace-internal-policy">Replace internal risk guardrails</h3><p><strong>Effect:</strong> The stricter applicable limit governs future risk decisions. This action never places or changes an order.</p>
           <form className="setup-form" onSubmit={saveRiskPolicy}><div className="form-row"><label htmlFor="operational-risk-per-trade">Maximum risk per trade<input id="operational-risk-per-trade" name="risk-per-trade" min="0.01" required step="0.01" type="number" /></label><label htmlFor="operational-portfolio-risk">Maximum portfolio risk<input id="operational-portfolio-risk" name="portfolio-risk" min="0.01" required step="0.01" type="number" /></label></div><div className="form-row"><label htmlFor="operational-daily-loss">Internal daily loss<input id="operational-daily-loss" name="internal-daily-loss" min="0.01" required step="0.01" type="number" /></label><label htmlFor="operational-drawdown">Internal drawdown<input id="operational-drawdown" name="internal-drawdown" min="0.01" required step="0.01" type="number" /></label></div><div className="form-row"><label htmlFor="operational-prop-buffer">Minimum prop buffer<input defaultValue="0" id="operational-prop-buffer" name="prop-buffer" min="0" required step="0.01" type="number" /></label><label htmlFor="operational-maximum-positions">Maximum positions<select defaultValue="2" id="operational-maximum-positions" name="maximum-positions"><option value="1">1</option><option value="2">2</option></select></label></div><label htmlFor="operational-correlation">Maximum correlated exposure<input defaultValue="1" id="operational-correlation" max="1" min="0" name="correlation-limit" required step="0.01" type="number" /></label><label htmlFor="risk-reason">Reason for replacement<textarea id="risk-reason" minLength={8} name="risk-reason" required /></label><label className="confirmation-check"><input required type="checkbox" /> I reviewed the effect and intend to replace the complete internal policy.</label><button disabled={isSaving} type="submit">{isSaving ? "Recording…" : "Replace internal guardrails"}</button></form>
         </section>
+        <EventRiskPolicySetup account={account} onAccountChanged={onAccountChanged} />
         {message ? <p className="status-message" role="status">{message}</p> : null}
       </div>
     );
@@ -239,4 +240,33 @@ export function AccountRiskSetup({
       {message ? <p className="status-message" data-tone="success" role="status">{message}</p> : null}
     </section>
   );
+}
+
+function EventRiskPolicySetup({ account, onAccountChanged }: { account: AccountSummary; onAccountChanged: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string>();
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setBusy(true); setMessage(undefined);
+    try {
+      const { response, result } = await replace(`/accounts/${account.id}/event-risk-policy`, {
+        enabled_event_types: ["US_CPI", "US_NFP", "US_PCE", "US_GDP", "FOMC", "EIA_PETROLEUM"],
+        pre_event_buffer_seconds: Number(form.get("event-pre")) * 60,
+        post_event_buffer_seconds: Number(form.get("event-post")) * 60,
+        required_source_coverage: form.get("coverage-required") === "on" ? ["OFFICIAL"] : [],
+        reason: form.get("event-reason"), confirmation: "CONFIRMED"
+      }, account.etag);
+      if (!response.ok) { setMessage(problemMessage(result)); return; }
+      await onAccountChanged();
+      setMessage("Economic-event guardrails are active. They block only affected new recommendations.");
+    } catch { setMessage("TraderX could not save the economic-event guardrails."); }
+    finally { setBusy(false); }
+  }
+  return <section className="setup-card" aria-labelledby="event-risk-heading">
+    <p className="section-kicker">New recommendation safety gate</p><h3 id="event-risk-heading">Economic-event risk guard</h3>
+    <p>Use high-impact official events to pause new recommendations before and after releases. Existing positions, research, paper trading, and journals are not changed.</p>
+    <form className="setup-form" onSubmit={save}><div className="form-row"><label>Minutes before event<input defaultValue="30" min="0" name="event-pre" required type="number" /></label><label>Minutes after event<input defaultValue="30" min="0" name="event-post" required type="number" /></label></div><label><input defaultChecked name="coverage-required" type="checkbox" /> Block affected recommendations if official calendar coverage is degraded</label><label>Reason<textarea minLength={8} name="event-reason" required /></label><button disabled={busy} type="submit">{busy ? "Saving…" : "Save event-risk guard"}</button></form>
+    {message ? <p className="status-message" role="status">{message}</p> : null}
+  </section>;
 }

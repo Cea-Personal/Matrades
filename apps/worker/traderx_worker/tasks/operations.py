@@ -22,6 +22,7 @@ from traderx.market_data.providers.cboe_fx_spot import CboeFxSpotAdapter
 from traderx.market_data.providers.cme_group import CmeGroupAdapter
 from traderx.market_data.providers.coinbase_exchange import CoinbaseExchangeAdapter
 from traderx.market_data.providers.http import ProviderHttpTransport, ProviderTransportError
+from traderx.market_data.providers.twelve_data import TwelveDataAdapter
 from traderx.notifications.model import DeliveryAttempt, NotificationEvent, RoutedNotification
 from traderx.notifications.providers import (
     DeliveryProvider,
@@ -355,13 +356,15 @@ def _probe(integration: Integration, credentials: dict[str, object]) -> None:
     token = None
     if definition.credential_fields:
         token = str(credentials[next(iter(sorted(definition.credential_fields)))])
-    if integration.provider in {"CME_GROUP", "CBOE_FX_SPOT", "COINBASE_EXCHANGE"}:
+    if integration.provider in {"CME_GROUP", "CBOE_FX_SPOT", "COINBASE_EXCHANGE", "TWELVE_DATA"}:
         transport = ProviderHttpTransport(integration.provider, credential=token)
         try:
             if integration.provider == "CME_GROUP":
                 result = CmeGroupAdapter(transport, entitlement_verified=True).test_connection()
             elif integration.provider == "CBOE_FX_SPOT":
                 result = CboeFxSpotAdapter(transport, entitlement_verified=True).test_connection()
+            elif integration.provider == "TWELVE_DATA":
+                result = TwelveDataAdapter(transport).test_connection()
             else:
                 result = CoinbaseExchangeAdapter(transport).test_connection()
         finally:
@@ -379,6 +382,18 @@ def _probe(integration: Integration, credentials: dict[str, object]) -> None:
                     base_url=str(integration.configuration["base_url"]),
                     client=client,
                 ).test_connection()
+    elif integration.provider in {"BLS", "BEA"}:
+        # Health is limited to the documented machine-readable schedule endpoint;
+        # no page scraping is permitted.
+        url = (
+            "https://www.bls.gov/schedule/news_release/bls.ics"
+            if integration.provider == "BLS"
+            else "https://www.bea.gov/news/schedule/icalendar"
+        )
+        with httpx.Client(timeout=get_settings().provider_read_timeout_seconds, follow_redirects=False) as client:
+            response = client.get(url, headers={"Accept": "text/calendar"})
+            response.raise_for_status()
+        result = {"healthy": bool(response.content)}
     else:
         raise ValueError("provider does not expose a reviewed qualification probe")
     if not bool(result.get("healthy")):

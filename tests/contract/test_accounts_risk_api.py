@@ -128,8 +128,7 @@ def test_owner_can_record_account_and_risk_configuration_but_not_bypass_verifica
             "active_paper_runs": 0,
         }
         assert dashboard.json()["research_connection_progress"] == [
-            {"provider": "CME_GROUP", "label": "CME Group", "required": True, "complete": False},
-            {"provider": "CBOE_FX_SPOT", "label": "Cboe FX Spot", "required": False, "complete": False},
+            {"provider": "TWELVE_DATA", "label": "Twelve Data", "required": False, "complete": False},
             {"provider": "COINBASE_EXCHANGE", "label": "Coinbase Exchange", "required": True, "complete": False},
             {"provider": "LITELLM_PROXY", "label": "LiteLLM Gateway", "required": False, "complete": False},
         ]

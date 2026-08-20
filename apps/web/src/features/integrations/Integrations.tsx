@@ -58,12 +58,24 @@ type ResearchIntegration = {
   retention_posture: string;
 };
 
+type ExperimentalCalendarEvent = {
+  id: string;
+  title: string;
+  event_type: string;
+  importance: string;
+  scheduled_at: string;
+  official_url: string;
+};
+
 const providerNames: Record<string, string> = {
-  CME_GROUP: "CME Group",
-  CBOE_FX_SPOT: "Cboe FX Spot",
+  TWELVE_DATA: "Twelve Data",
   COINBASE_EXCHANGE: "Coinbase Exchange",
   LITELLM_PROXY: "LiteLLM Gateway"
 };
+
+const manuallyConnectableProviders = new Set([
+  "TWELVE_DATA", "COINBASE_EXCHANGE", "LITELLM_PROXY"
+]);
 
 function messageFor(result: ApiProblem): string {
   return result.detail ?? result.title ?? "TraderX could not complete that integration step.";
@@ -347,6 +359,7 @@ function ResearchProviders() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string>();
   const [error, setError] = useState<string>();
+  const [experimentalEvents, setExperimentalEvents] = useState<ExperimentalCalendarEvent[]>([]);
 
   const load = useCallback(async () => {
     try {
@@ -356,13 +369,19 @@ function ResearchProviders() {
       ]);
       if (!catalogueResponse.ok || !configuredResponse.ok) throw new Error("unavailable");
       const all = (await catalogueResponse.json() as { items: ProviderDefinition[] }).items;
-      setCatalogue(all.filter((item) => providerNames[item.provider] && !item.verification_only));
+      setCatalogue(all.filter((item) => manuallyConnectableProviders.has(item.provider) && !item.verification_only));
       setConfigured((await configuredResponse.json() as { items: ResearchIntegration[] }).items.filter((item) => providerNames[item.provider]));
       setError(undefined);
     } catch { setError("TraderX could not load the reviewed research-provider catalogue."); }
   }, []);
 
   useEffect(() => { void Promise.resolve().then(load); }, [load]);
+  useEffect(() => {
+    void fetch("/api/v1/economic-calendar/events", { credentials: "same-origin" })
+      .then(async (response) => response.ok ? response.json() as Promise<Array<ExperimentalCalendarEvent & { source_origin: string }>> : [])
+      .then((events) => setExperimentalEvents(events.filter((event) => event.source_origin === "SCRAPED_EXPERIMENTAL")))
+      .catch(() => setExperimentalEvents([]));
+  }, []);
   const definition = catalogue.find((item) => item.provider === selected);
   const healthyProviders = catalogue.filter((item) =>
     configured.some(
@@ -380,13 +399,46 @@ function ResearchProviders() {
     try {
       const response = await fetch("/api/v1/integrations/non-broker", {
         method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
-        body: JSON.stringify({ provider: definition.provider, name: String(form.get("provider-name")), configuration, credentials, capabilities: [definition.category === "LLM" ? "LLM_ANALYSIS" : "MARKET_DATA_READ"], official_source: true, licensing_accepted: form.get("licensing-accepted") === "on", retention_accepted: form.get("retention-accepted") === "on", reason: form.get("provider-reason") })
+        body: JSON.stringify({ provider: definition.provider, name: String(form.get("provider-name")), configuration, credentials, capabilities: [definition.category === "LLM" ? "LLM_ANALYSIS" : definition.category === "ECONOMIC_CALENDAR" ? "ECONOMIC_CALENDAR_READ" : "MARKET_DATA_READ"], official_source: true, licensing_accepted: form.get("licensing-accepted") === "on", retention_accepted: form.get("retention-accepted") === "on", reason: form.get("provider-reason") })
       });
       const result = await response.json() as ApiProblem;
       if (!response.ok) { setError(messageFor(result)); return; }
       setMessage(`${providerNames[definition.provider]} was saved with write-only credentials. Test and qualify it before research use.`);
       await load();
     } catch { setError("TraderX could not connect this reviewed provider."); }
+    finally { setBusy(false); }
+  }
+
+  async function importExperimentalCalendar(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const sources = String(form.get("scraper-sources") ?? "")
+      .split(",")
+      .map((source) => source.trim())
+      .filter(Boolean);
+    setBusy(true); setError(undefined); setMessage(undefined);
+    try {
+      const response = await fetch("/api/v1/economic-calendar/experimental/forex-factory/import", {
+        method: "POST", credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          acknowledge_non_production: true,
+          start_date: form.get("scraper-start-date"),
+          end_date: form.get("scraper-end-date"),
+          sources,
+          limit: Number(form.get("scraper-limit")),
+          offset: Number(form.get("scraper-offset"))
+        })
+      });
+      const result = await response.json() as ApiProblem;
+      if (!response.ok) { setError(messageFor(result)); return; }
+      setMessage("Experimental scraper import queued. Its events remain excluded from calendar coverage and all recommendation gates.");
+      window.setTimeout(() => {
+        void fetch("/api/v1/economic-calendar/events", { credentials: "same-origin" })
+          .then(async (eventsResponse) => eventsResponse.ok ? eventsResponse.json() as Promise<Array<ExperimentalCalendarEvent & { source_origin: string }>> : [])
+          .then((events) => setExperimentalEvents(events.filter((item) => item.source_origin === "SCRAPED_EXPERIMENTAL")));
+      }, 1500);
+    } catch { setError("TraderX could not queue the experimental calendar import. Start the experimental scraper profile first."); }
     finally { setBusy(false); }
   }
 
@@ -481,6 +533,25 @@ function ResearchProviders() {
       <p className="section-kicker">Provider connections</p>
       <h2 id="research-providers">Reviewed research providers</h2>
       <p>Configure specialist market data and advisory models here in the current Integrations workspace. Credentials are write-only. Licensing and retention must be reviewed before connection.</p>
+      <section className="setup-card" aria-labelledby="experimental-scraper-heading">
+        <p className="section-kicker">Experimental provider</p>
+        <h3 id="experimental-scraper-heading">ForexFactory scraper</h3>
+        <p>Local development inspection only. Imported data is marked <code>SCRAPED_EXPERIMENTAL</code>; it is not a healthy provider connection, official calendar coverage, market evidence, or recommendation-gate input.</p>
+        <form className="setup-form" onSubmit={importExperimentalCalendar}>
+          <div className="form-row">
+            <label>Start date<input name="scraper-start-date" required type="date" /></label>
+            <label>End date<input name="scraper-end-date" required type="date" /></label>
+          </div>
+          <label>Sources (optional, comma-separated)<input name="scraper-sources" placeholder="forex, cryptocraft, energyexch, metalsmine" /></label>
+          <div className="form-row">
+            <label>Limit<input defaultValue="100" max="500" min="1" name="scraper-limit" required type="number" /></label>
+            <label>Offset<input defaultValue="0" min="0" name="scraper-offset" required type="number" /></label>
+          </div>
+          <p className="field-hint">Leave sources blank for ForexFactory. The date range is limited to 31 days; each source/date uses the scraper's daily endpoint.</p>
+          <button className="secondary-button" disabled={busy} type="submit">Run experimental scraper import</button>
+        </form>
+        {experimentalEvents.length ? <div className="evidence-metrics">{experimentalEvents.slice(0, 6).map((event) => <div key={event.id}><strong>{event.importance} · {event.event_type}</strong><span>{event.title} · {new Date(event.scheduled_at).toLocaleString()} · SCRAPED_EXPERIMENTAL</span><a href={event.official_url} rel="noreferrer" target="_blank">Scraped source</a></div>)}</div> : null}
+      </section>
       {healthyProviders.length > 0 ? <><h3>Healthy connections</h3><div className="active-market-grid">{healthyProviders.map((item) => <article key={item.provider}><span>{item.category === "LLM" ? "Advisory model" : item.asset_categories.join(", ") || "Market data"}</span><strong>{providerNames[item.provider]}</strong><small>Connected and healthy · {item.retention_posture}</small>{item.category === "LLM" ? <small>Models: choose any compatible model ID in Markets</small> : item.permitted_models.length ? <small>Models: {item.permitted_models.join(", ")}</small> : null}</article>)}</div></> : <p className="empty-state">No healthy research-provider connections yet. Select a reviewed provider below to configure and test it.</p>}
       {definition ? <form aria-label="Connect reviewed research provider" className="integration-form" onSubmit={connect}><label htmlFor="provider-kind">Research provider<select id="provider-kind" onChange={(event) => setSelected(event.target.value)} value={selected}>{catalogue.map((item) => <option key={item.provider} value={item.provider}>{providerNames[item.provider]}</option>)}</select></label><label htmlFor="provider-name">Connection name<input defaultValue={`${providerNames[definition.provider]} research`} id="provider-name" name="provider-name" required /></label>{definition.provider === "LITELLM_PROXY" ? <p className="field-hint">LiteLLM keeps the underlying provider credentials, routing, and configured model aliases in one gateway. For the bundled service use <code>http://litellm:4000/v1</code>; for a remote gateway use its HTTPS API base URL.</p> : null}{definition.configuration_fields.map((field) => <label key={field}>{field.replaceAll("_", " ")}<input defaultValue={definition.provider === "LITELLM_PROXY" && field === "base_url" ? "http://litellm:4000/v1" : undefined} name={`configuration-${field}`} required /></label>)}{definition.credential_fields.map((field) => <label key={field}>{field.replaceAll("_", " ")}<input autoComplete="new-password" name={`credential-${field}`} required type="password" /></label>)}<label className="confirmation-check"><input name="licensing-accepted" required={Boolean(definition.licensing_notice)} type="checkbox" /> I accept the licensing/data-use prerequisites.</label><label className="confirmation-check"><input name="retention-accepted" required={definition.retention_posture !== "NOT_APPLICABLE"} type="checkbox" /> I reviewed the provider retention posture.</label><label htmlFor="provider-reason">Reason<textarea id="provider-reason" minLength={8} name="provider-reason" required /></label><button disabled={busy} type="submit">Connect reviewed provider</button></form> : null}
       <div className="integration-list">{configured.map((integration) => {

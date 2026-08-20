@@ -3,7 +3,28 @@ export type DecimalString = string;
 export type RiskState = "NORMAL" | "CAUTION" | "DEFENSIVE" | "LOCKDOWN";
 export type RiskDecision = "PASS" | "PASS_REDUCED" | "BLOCKED";
 export type MarketCategory = "COMMODITY" | "FOREX" | "CRYPTO";
-export type SourceSemantics = "AUTHORITATIVE" | "ACTUAL" | "BROKER_PROXY" | "UNAVAILABLE";
+export type SourceSemantics = "AUTHORITATIVE" | "ACTUAL" | "BROKER_PROXY" | "AGGREGATED_PROXY" | "UNAVAILABLE";
+
+export interface EconomicCalendarEvent {
+  id: string;
+  source_origin: "OFFICIAL_MACHINE" | "OWNER_CITED";
+  official_url: string;
+  title: string;
+  event_type: string;
+  importance: "HIGH" | "MEDIUM" | "LOW";
+  scheduled_at: string;
+  affected_categories: MarketCategory[];
+  coverage_state: string;
+}
+
+export interface EventRiskPolicy {
+  id?: string;
+  enabled_event_types: string[];
+  pre_event_buffer_seconds: number;
+  post_event_buffer_seconds: number;
+  required_source_coverage: string[];
+  effective_at?: string;
+}
 
 export interface MarketResearchSchedule {
   id?: string;

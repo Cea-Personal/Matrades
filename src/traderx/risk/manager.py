@@ -20,7 +20,10 @@ def authorize(
     capacity: int,
     exposure_acceptable: bool,
     remaining_margin: Decimal,
+    event_guard_reason_codes: tuple[str, ...] = (),
 ) -> ManagedDecision:
+    if event_guard_reason_codes:
+        return ManagedDecision(RiskDecisionKind.BLOCKED, Decimal("0"), event_guard_reason_codes)
     if capacity <= 0 or risk_state == RiskState.LOCKDOWN:
         return ManagedDecision(RiskDecisionKind.BLOCKED, Decimal("0"), ("CAPACITY_OR_LOCKDOWN",))
     if not exposure_acceptable or requested_risk > remaining_margin:

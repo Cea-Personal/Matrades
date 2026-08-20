@@ -25,6 +25,7 @@ class SourceRole(StrEnum):
     MT5_BROKER_AUTHORITY = "MT5_BROKER_AUTHORITY"
     SPECIALIST_PRIMARY = "SPECIALIST_PRIMARY"
     FALLBACK_MT5 = "FALLBACK_MT5"
+    FALLBACK_TWELVE_DATA = "FALLBACK_TWELVE_DATA"
     FALLBACK_CACHED_EXTERNAL = "FALLBACK_CACHED_EXTERNAL"
 
 
@@ -68,7 +69,8 @@ class SourceEvidence:
         return (
             self.complete
             and self.freshness == FreshnessState.FRESH
-            and self.semantics != SourceSemantics.UNAVAILABLE
+            and self.semantics
+            not in {SourceSemantics.UNAVAILABLE, SourceSemantics.SCRAPED_EXPERIMENTAL}
             and self.quality == "VERIFIED"
             and self.conflict_state != ConflictState.MATERIAL_CONFLICT
             and self.entitlement_status in {"NOT_REQUIRED", "VERIFIED"}

@@ -41,6 +41,14 @@ TraderX Speckit Specify v1.0.0 document."
 - Q: Which parts of market research should the selected LLM be allowed to control? → A: The LLM may analyze evidence, identify anomalies, explain results, and propose improvements; deterministic versioned rules exclusively control eligibility, metrics, scoring, ranking, and selection proposals.
 - Q: What should happen when the selected LLM remains unavailable or returns invalid output after bounded retries? → A: Complete and publish the deterministic research result, mark LLM analysis unavailable, alert the owner, and require an explicit retry with the same selected model rather than switching models automatically.
 
+### Session 2026-08-20
+
+- Q: Until paid COMEX data is connected, how should TraderX treat commodity symbols supported only by the connected MT5 broker? → A: Allow MT5-only commodities to become active and support live recommendations after all other strategy and risk gates pass, always labelled broker-proxy.
+- Q: How should TraderX handle a high-impact scheduled economic release that affects an active market? → A: Block new live recommendations during an owner-configured window before and after the event; keep research and position monitoring available.
+- Q: Which official economic-calendar sources must TraderX automate in its first release? → A: Start with Federal Reserve, BLS, BEA, and EIA; add ECB, BoE, BoJ, or another official central-bank source when its currency is approved as active.
+- Q: What role should Twelve Data have in TraderX's market research? → A: Twelve Data may replace unavailable primary Forex or cryptocurrency research metrics when it supplies the field, including liquidity and volume, but every replacement is labelled `AGGREGATED_PROXY`.
+- Q: What should TraderX do if a required official calendar source has no documented API, RSS, ICS, CSV, or other machine-readable feed? → A: Allow an owner to maintain the source-cited schedule in the UI; published release values still come only from the official source.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Establish a Safe Trading Account (Priority: P1)
@@ -143,9 +151,11 @@ category, and later replace one only through explicit confirmation.
    category's liquidity model for another's.
 13. **Given** candidates from different asset classes, **When** TraderX applies mandatory liquidity
    gates, **Then** it uses broker spread, quote/tick activity, and execution proxies for Forex;
-   official traded volume, open interest, and available depth for commodities; and venue volume
-   plus order-book depth for cryptocurrency, with every unavailable required measure recorded as
-   missing evidence rather than zero.
+   official traded volume, open interest, and available depth for commodities when an entitled
+   source is connected, otherwise current MT5 broker-proxy evidence under the configured proxy
+   gates; and venue volume plus order-book depth for cryptocurrency. Every unavailable measure
+   MUST be recorded as missing evidence rather than zero, and every MT5-only commodity result or
+   recommendation MUST be labelled `BROKER_PROXY` rather than venue-authoritative.
 14. **Given** one category's specialist source remains unavailable after bounded retries, **When**
    the coordinated run applies its fallback policy, **Then** it first tries current MT5 evidence,
    then the most recent successful external dataset, accepts a fallback only when it is complete,
@@ -169,6 +179,22 @@ category, and later replace one only through explicit confirmation.
    **When** the deterministic research engine has complete and valid evidence, **Then** TraderX
    completes the deterministic ranking and selection proposal, marks LLM analysis unavailable,
    alerts the owner, and does not switch models automatically.
+20. **Given** a high-impact official economic event affects an active market, **When** the current
+   time falls within its owner-configured pre- or post-event buffer, **Then** TraderX blocks every
+   new live recommendation with the event, source, scheduled time, and remaining buffer displayed,
+   while research, paper trading, journaling, and monitoring existing positions remain available.
+21. **Given** a non-USD currency is proposed for an active Forex market, **When** the owner approves
+   its activation, **Then** TraderX enables the reviewed official central-bank calendar adapter for
+   that currency before activation completes and records its source coverage and health.
+22. **Given** an approved primary Forex or cryptocurrency source cannot supply a required research
+   metric, **When** the reviewed Twelve Data adapter supplies a complete, fresh replacement under
+   the configured fallback policy, **Then** TraderX may use it for the result while recording the
+   provider and `AGGREGATED_PROXY` semantics for that metric, never as venue-authoritative evidence.
+23. **Given** a required official calendar source has no documented machine-readable feed, **When**
+   an authorized owner enters or updates its cited schedule in the UI, **Then** TraderX preserves
+   the official source URL, event time, impact classification, and audit history, applies the
+   configured event-risk buffer, and does not scrape the source website. Published actual values
+   may be recorded only with their official-source citation.
 
 ---
 
@@ -487,10 +513,17 @@ through authenticated screens.
   rolling broker spreads, quote or tick activity, data freshness, and available execution-quality
   proxies and MUST NOT claim or require a global consolidated order book. Commodity evaluation
   MUST use official venue traded volume and open interest and MUST use order-book depth when the
-  entitled source and instrument provide it. Cryptocurrency evaluation MUST use actual selected-
-  venue traded volume and order-book depth. Any required measure that is unavailable, stale, or
-  invalid MUST remain explicitly unknown and MUST block that candidate rather than be converted to
-  zero or replaced silently by a weaker measure.
+  entitled source and instrument provide it. Until such a source is connected, a broker-supported
+  commodity MAY pass a separately versioned broker-proxy gate using current MT5 spread, quote or
+  tick activity, execution-quality proxies, data freshness, and every available broker depth
+  observation. A broker-proxy commodity MAY be ranked, activated, paper traded, and used by a
+  manually executed live recommendation only after all other strategy and Risk Manager gates pass.
+  Its research results and recommendations MUST conspicuously identify `BROKER_PROXY`, the source,
+  and every unavailable venue-authoritative measure; TraderX MUST NOT represent the evidence as
+  COMEX, exchange-wide, or actual traded-volume authority. Cryptocurrency evaluation MUST use
+  actual selected-venue traded volume and order-book depth. Any required measure that is
+  unavailable, stale, or invalid MUST remain explicitly unknown and MUST block that candidate
+  rather than be converted to zero or replaced silently by a weaker measure.
 - **FR-100**: After the bounded retries for a category's unavailable specialist source are
   exhausted, TraderX MUST apply this ordered fallback chain: first current MT5 evidence; then the
   most recent successful external dataset for that category. A fallback MUST be explicitly labelled
@@ -499,6 +532,15 @@ through authenticated screens.
   approved capability-specific freshness limit. TraderX MUST NOT extend a freshness limit because
   a provider is unavailable. If neither fallback qualifies, the category MUST be blocked with no
   new recommendation and no change to its active assignment; unaffected categories MAY complete.
+- **FR-107**: The reviewed Twelve Data adapter MUST support approved Forex and cryptocurrency
+  price, candle, volatility, liquidity, and volume fields that its documented service provides.
+  It MAY replace an unavailable primary-source research metric only when the configured fallback
+  policy accepts a complete, coherent, and fresh observation for that exact field. TraderX MUST
+  record the provider, field, observation time, freshness, and `AGGREGATED_PROXY` semantics in the
+  research result, suitability input, and any resulting recommendation. Twelve Data MUST NOT be
+  represented as a broker's executable liquidity, Coinbase's executed volume or order book, a
+  specific venue's order book, or a global Forex consolidated volume source; unavailable fields
+  MUST remain unknown rather than synthesized.
 - **FR-101**: Authorized owners MUST be able to select and inspect one global LLM model setting for
   all market-research agents through the authenticated UI. The same setting MUST govern Commodity,
   Forex, and Cryptocurrency research for both manual and scheduled runs; V1 MUST NOT support
@@ -527,6 +569,24 @@ through authenticated screens.
   reason, alert the owner, and preserve the failure evidence. TraderX MUST NOT select a different
   model automatically; an authorized user MAY explicitly retry the analysis with the run's pinned
   model while that run remains eligible for retry.
+- **FR-106**: TraderX MUST maintain an approved, official-source economic-event calendar for the
+  configured active-market universe. V1 MUST automate Federal Reserve, BLS, BEA, and EIA calendar
+  sources. When an owner approves a non-USD currency for an active Forex market, TraderX MUST
+  enable the reviewed official central-bank calendar adapter for that currency before activation
+  completes; the catalogue MAY include ECB, BoE, BoJ, and other relevant official adapters.
+  Authorized owners MUST be able to configure the high-impact event types and pre- and post-event
+  recommendation-blocking buffers through the authenticated UI. When an active market is affected
+  and the current time is inside either buffer, the Risk Manager MUST block new live
+  recommendations, identify the event and remaining buffer in the block reason, and preserve
+  research, paper trading, journaling, and monitoring of existing positions. The calendar MUST
+  record its source, scheduled and observed release times, impacted currencies or instruments,
+  actual and previous values when published, and a missing consensus forecast as unknown rather
+  than inferred. It MUST ingest only documented official machine-readable feeds where available.
+  When no such feed exists for a required approved source, authorized owners MAY create and update
+  a source-cited schedule through the authenticated UI; each entry MUST include the official URL,
+  event time, impact classification, actor, and audit history. Actual or previous release values
+  entered through this path MUST retain their official citation. Production web scraping is
+  prohibited.
 - **FR-022**: TraderX MUST calculate a composite Market Suitability result that balances volatility
   opportunity, liquidity, execution, data quality, strategy opportunity, trading costs, gap risk,
   and prop-firm risk.
@@ -760,6 +820,10 @@ through authenticated screens.
   by a reviewed catalogue adapter, with declared authority, asset coverage, available capabilities,
   masked credential status, licensing or use constraints, freshness state, instrument mappings,
   and collection history.
+- **Economic Calendar Event**: An official-source scheduled or released macroeconomic, monetary-
+  policy, or commodity-fundamental event with source, impacted markets, scheduled and observed
+  release times, impact classification, actual and previous values when available, and an explicit
+  unknown consensus value when the source does not publish one.
 - **Market Research Model Configuration**: The owner-selected global LLM provider and permitted
   model identifier, its reviewed catalogue entry, masked integration status, and change history
   used by Commodity, Forex, and Cryptocurrency research agents.
@@ -877,7 +941,8 @@ through authenticated screens.
   recommendation.
 - **SC-020**: In source-authority acceptance tests, 100% of externally covered but MT5-unsupported
   candidates are excluded, every displayed liquidity measure identifies its source and actual or
-  proxy status, and missing, stale, or materially conflicting mandatory evidence produces no
+  proxy status, every Twelve Data substitution records `AGGREGATED_PROXY`, and missing, stale, or
+  materially conflicting mandatory evidence that has no qualifying configured fallback produces no
   activation or replacement recommendation.
 - **SC-021**: In fallback acceptance tests, 100% of specialist-source failures apply MT5 before
   cached external evidence, accept only complete and fresh evidence that passes the unchanged

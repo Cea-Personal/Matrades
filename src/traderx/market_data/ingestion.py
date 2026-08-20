@@ -103,6 +103,12 @@ def persist_provider_observations(
     keep OHLC fields null rather than manufacturing financial values.
     """
 
+    if batch.provider == "TWELVE_DATA" and batch.capability not in {
+        "QUOTES", "CANDLES", "TRADED_VOLUME"
+    }:
+        raise ValueError("Twelve Data cannot supply this market-data capability")
+    if batch.provider == "TWELVE_DATA" and batch.semantics != "AGGREGATED_PROXY":
+        raise ValueError("Twelve Data observations must retain AGGREGATED_PROXY semantics")
     native_rows = [_provider_observation_document(item) for item in observations]
     payload = json.dumps(
         {

@@ -42,6 +42,7 @@ def assess_asset_liquidity(
     tick_volume: Decimal | None = None,
     open_interest: Decimal | None = None,
     observed_slippage_bps: Decimal | None = None,
+    commodity_broker_proxy: bool = False,
 ) -> LiquidityMetrics:
     """Use only class-appropriate evidence and identify every proxy in the result."""
 
@@ -63,11 +64,18 @@ def assess_asset_liquidity(
         evidence.extend(("TRADED_VOLUME_ACTUAL", "ORDER_BOOK_ACTUAL"))
     elif category == MarketCategory.COMMODITY:
         if open_interest is None:
-            raise ValueError("commodity liquidity requires official venue open interest")
-        depth = quoted_depth if quoted_depth is not None else open_interest
-        evidence.extend(("TRADED_VOLUME_ACTUAL", "OPEN_INTEREST_ACTUAL"))
-        if quoted_depth is not None:
-            evidence.append("ORDER_BOOK_ACTUAL")
+            if not commodity_broker_proxy or tick_volume is None:
+                raise ValueError("commodity liquidity requires official venue open interest or MT5 broker activity")
+            depth = tick_volume
+            evidence.extend((
+                "BROKER_PROXY", "TICK_VOLUME_BROKER_PROXY", "VENUE_VOLUME_UNAVAILABLE",
+                "VENUE_OPEN_INTEREST_UNAVAILABLE", "VENUE_ORDER_BOOK_UNAVAILABLE",
+            ))
+        else:
+            depth = quoted_depth if quoted_depth is not None else open_interest
+            evidence.extend(("TRADED_VOLUME_ACTUAL", "OPEN_INTEREST_ACTUAL"))
+            if quoted_depth is not None:
+                evidence.append("ORDER_BOOK_ACTUAL")
     else:
         if tick_volume is None:
             raise ValueError("forex liquidity requires broker tick volume")

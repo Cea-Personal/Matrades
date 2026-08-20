@@ -22,6 +22,7 @@ ALLOWED_CAPABILITIES = frozenset(
         "POSITION_READ",
         "DEAL_READ",
         "MARKET_DATA_READ",
+        "ECONOMIC_CALENDAR_READ",
         "LLM_ANALYSIS",
         "NOTIFICATION_SEND",
     }
@@ -78,10 +79,14 @@ def create_non_broker_integration(
         credentials=credentials,
         official_source=official_source,
     )
+    if definition.lifecycle == "RETIRED":
+        raise ValueError("retired providers are retained for audit only and cannot be newly connected")
     if definition.category == "BROKER_ACCOUNT_DATA":
         raise ValueError("broker integrations use the managed MT5 enrollment flow")
     if definition.licensing_notice and not licensing_accepted:
         raise ValueError("provider licensing terms must be acknowledged")
+    if definition.category == "ECONOMIC_CALENDAR" and definition.provider == "FEDERAL_RESERVE":
+        raise ValueError("this calendar uses owner-cited schedule entries rather than a credentialed integration")
     if definition.retention_posture != "NOT_APPLICABLE" and not retention_accepted:
         raise ValueError("provider retention posture must be acknowledged")
     if database.scalar(select(Integration.id).where(Integration.name == name)) is not None:

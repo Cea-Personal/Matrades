@@ -56,6 +56,10 @@ class Settings(BaseModel):
     provider_retention_posture: str = Field(
         default="STANDARD", pattern=r"^(STANDARD|ADMIN_VERIFIED)$"
     )
+    # This is intentionally off by default.  It controls a local-only scraper
+    # experiment and is not a provider entitlement or an approval to use its
+    # output for live decisions.
+    experimental_calendar_scraper_enabled: bool = False
 
     @field_validator("session_pepper", "encryption_key_b64")
     @classmethod
@@ -77,6 +81,10 @@ class Settings(BaseModel):
                     "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
                 )
             ),
+            experimental_calendar_scraper_enabled=(
+                getenv("TRADERX_ENABLE_EXPERIMENTAL_CALENDAR_SCRAPER", "false").lower()
+                == "true"
+            ),
         )
 
     def validate_startup(self) -> None:
@@ -86,6 +94,10 @@ class Settings(BaseModel):
         ):
             raise ValueError("market research interval bounds are invalid")
         if self.environment == "production":
+            if self.experimental_calendar_scraper_enabled:
+                raise ValueError(
+                    "TRADERX_ENABLE_EXPERIMENTAL_CALENDAR_SCRAPER cannot be enabled in production"
+                )
             if self.session_pepper.get_secret_value() == "development-only-change-me":
                 raise ValueError("TRADERX_SESSION_PEPPER must be set in production")
             if (

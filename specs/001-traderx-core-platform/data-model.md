@@ -289,8 +289,9 @@ validity interval, and verification status. Unique for provider plus provider sy
 
 Immutable manifest for reproducible analysis: instrument, integration, provider/alias, provider
 catalogue/adapter revision, venue, capability, data kind and interval, evidence semantics (`ACTUAL`,
-`BROKER_PROXY`, `UNAVAILABLE`), source role (`MT5_BROKER_AUTHORITY`, `SPECIALIST_PRIMARY`,
-`FALLBACK_MT5`, `FALLBACK_CACHED_EXTERNAL`), coverage bounds, row count, observed/as-of time,
+`BROKER_PROXY`, `AGGREGATED_PROXY`, `UNAVAILABLE`), source role (`MT5_BROKER_AUTHORITY`,
+`SPECIALIST_PRIMARY`, `FALLBACK_MT5`, `FALLBACK_TWELVE_DATA`, `FALLBACK_CACHED_EXTERNAL`),
+coverage bounds, row count, observed/as-of time,
 content/chunk hashes, calendar/time-zone normalization, freshness policy/version and age at run
 start, fallback reason/order, instrument-mapping verification, quality/conflict outcome,
 correction/supersession references, created time, and storage reference.
@@ -298,15 +299,33 @@ correction/supersession references, created time, and storage reference.
 ### MarketObservation
 
 Normalized candle, quote, tick, spread, volume/open-interest, or order-book observation. Common
-fields include instrument, provider/venue/capability, `ACTUAL`/`BROKER_PROXY` semantics, event and
-receive times, sequence, quality flags, and raw reference. Kind-specific values are decimal;
+fields include instrument, provider/venue/capability,
+`ACTUAL`/`BROKER_PROXY`/`AGGREGATED_PROXY` semantics, event and receive times, sequence, quality
+flags, and raw reference. Kind-specific values are decimal;
 unavailable values are null with reason, never numeric zero. Deduplication key is
 provider/alias/kind/interval/event identity.
 
 ### EconomicEvent
 
-Fields: provider event identity, event time, affected currencies/markets, importance, title,
-observed/forecast/previous values, revision, received time, and quality status.
+Fields: provider/event identity, source origin (`OFFICIAL_MACHINE`, `OWNER_CITED`), official source
+URL, source retrieval time, scheduled and observed release times, affected currencies/categories/
+canonical instruments, importance, title/type, actual/previous values, consensus value (nullable
+and `UNKNOWN` when not officially published), revision/cancellation/supersession reference,
+received time, quality/coverage state, owner/reviewer, reason, and audit-event reference.
+
+Validation: machine-imported events are immutable; an owner correction, cancellation, or manual
+entry creates a cited revision. Every owner-cited entry requires an official URL, scheduled time,
+impact classification, actor, and reason. Production collection never depends on scraping.
+
+### EventRiskPolicyVersion
+
+Immutable per-account policy fields: enabled high-impact event types, market/category/currency
+mapping rules, pre-event and post-event buffer durations, required calendar-source coverage,
+coverage-staleness threshold, policy version/effective interval, author, and reason.
+
+Validation: only an authorized owner may create a new version. When a relevant event is in either
+buffer, or required coverage is stale/unverified within the guard window, the Risk Manager records
+an event-specific `BLOCKED` decision; it does not close or alter an existing position.
 
 ### DataQualityObservation
 
@@ -531,6 +550,7 @@ outcome so retries cannot apply a financial side effect twice.
 User -> AuthSession / MfaFactor / MfaRecoveryCode / PasswordResetChallenge / AssistedMfaResetRequest / AuditEvent
 IdentityBootstrapState -> User (exactly one initial OWNER)
 TradingAccount -> PropProfileVersion / RiskPolicyVersion / AccountSnapshot -> RiskSnapshot
+TradingAccount -> EventRiskPolicyVersion + EconomicEvent -> event-specific RiskDecision
 ProviderCatalogueEntry -> Integration / FreshnessPolicyVersion / RetryPolicyVersion
 Integration -> CredentialVersion / HealthObservation / InstrumentAlias / Provider observations
 MarketResearchSchedule -> MarketResearchOccurrence -> CoordinatedMarketResearchRun

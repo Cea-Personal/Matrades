@@ -68,6 +68,8 @@ Rules:
 | `com.traderx.risk.circuit-breaker-activated.v1` | breaker, scope, evidence | recommendation blocker, alerts, audit |
 | `com.traderx.risk.circuit-breaker-cleared.v1` | breaker, actor, reason | dashboard, alerts, audit |
 | `com.traderx.risk.policy-version-created.v1` | account, policy version, actor, reason | risk projection, audit |
+| `com.traderx.risk.event-guard-blocked.v1` | account, event, event-risk policy, scope, remaining buffer, source citation | recommendation engine, dashboard, audit |
+| `com.traderx.risk.event-guard-cleared.v1` | account, event/policy, scope, reason | dashboard, audit |
 
 ### Integrations and Market Data
 
@@ -78,6 +80,8 @@ Rules:
 | `com.traderx.integration.catalogue-entry-changed.v1` | provider key, old/new revision, lifecycle, evidence | integration eligibility, audit |
 | `com.traderx.marketdata.batch-ingested.v1` | batch/manifest, coverage, quality | normalization, jobs |
 | `com.traderx.marketdata.quality-failed.v1` | instrument/provider, scope, policy, reasons | quarantine, circuit breakers, alerts |
+| `com.traderx.calendar.schedule-synchronized.v1` | source, event revisions, coverage, retrieval time | event-risk projection, UI, audit |
+| `com.traderx.calendar.owner-cited-event-updated.v1` | event revision, official URL, actor/reviewer, reason | event-risk projection, UI, audit |
 | `com.traderx.broker.position-observed.v1` | account, position, revision, reconciliation state | risk, matching, monitoring, journal |
 | `com.traderx.broker.deal-observed.v1` | account, position, deal identity | position projection, journal |
 | `com.traderx.broker.reconciliation-required.v1` | account, gap/contradiction evidence | integration health, risk blocker |
@@ -92,7 +96,7 @@ Rules:
 | `com.traderx.markets.research-occurrence-skipped.v1` | occurrence, due time, active run, reason | UI, audit |
 | `com.traderx.markets.coordinated-research-completed.v1` | parent run, three category outcomes, pinned policies/model | UI, alerts |
 | `com.traderx.markets.category-research-blocked.v1` | run/category, failed evidence/gates, preserved assignment | UI, alerts |
-| `com.traderx.markets.source-fallback-applied.v1` | run/category, from/to source role, policy, reason | evidence report, audit |
+| `com.traderx.markets.source-fallback-applied.v1` | run/category, exact field, from/to source role and semantics, policy, reason | evidence report, audit |
 | `com.traderx.markets.model-selection-changed.v1` | old/new provider/model/catalogue, actor/reason | future-run configuration, audit |
 | `com.traderx.markets.llm-analysis-completed.v1` | run/category, pinned model/policies, output hash/usage | UI, audit |
 | `com.traderx.markets.llm-analysis-unavailable.v1` | run/category, pinned model, failure/retry evidence | UI, alerts |

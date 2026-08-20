@@ -12,9 +12,25 @@ The Integrations panel presents only reviewed catalogue cards. Each card shows p
 catalogue revision, asset/venue coverage, capabilities, actual/proxy semantics, required entitlement,
 retention/licensing notice, configuration status, health, last success, and freshness.
 
-An authorized owner can connect, test, enable, disable, rotate credentials, and remove CME Group,
-Cboe FX Spot, Coinbase Exchange, OpenAI, Anthropic, and LiteLLM Gateway integrations. Credentials are write-only on
-entry and masked thereafter. Arbitrary URLs and provider keys are never accepted.
+An authorized owner can connect, test, enable, disable, rotate credentials, and remove MT5,
+Coinbase Exchange, Twelve Data, and LiteLLM Gateway integrations. The fixed official calendar
+catalogue lists Federal Reserve, BLS, BEA, EIA, and conditionally enabled central-bank adapters;
+only sources needing credentials accept them. Credentials are write-only on entry and masked
+thereafter. Arbitrary URLs and provider keys are never accepted.
+
+## Economic Calendar and Event Risk
+
+The Markets workspace includes an **Economic calendar** panel. It shows official-source coverage,
+last synchronization, stale/degraded state, source citations, upcoming high-impact events, and each
+event's affected markets. An owner configures enabled event types plus pre- and post-event blocks
+for new live recommendations. The panel states that research, paper trading, journaling, and
+monitoring continue during a block.
+
+When a required source has no documented machine feed, an owner can add a cited schedule entry with
+official URL, event time, impact, affected scope, and reason. Machine-imported events are not
+edited in place; corrections create superseding cited revisions. The UI never offers webpage scraping
+or an arbitrary calendar URL. A current `IN_GUARD_WINDOW` or `CALENDAR_COVERAGE_DEGRADED` decision
+shows the event, source, scheduled time, remaining buffer, and recommendation-block reason.
 
 ## Global LLM Model Control
 
@@ -41,13 +57,18 @@ The run view shows:
 
 - parent state and three independently completable category outcomes;
 - evaluated MT5 broker universe and every exclusion reason;
-- provider, venue, instrument mapping, capability, `ACTUAL`/`BROKER_PROXY`/`UNAVAILABLE`, observed
+- provider, venue, instrument mapping, capability,
+  `ACTUAL`/`BROKER_PROXY`/`AGGREGATED_PROXY`/`UNAVAILABLE`, observed
   time, age, freshness policy, and quality/conflict state for every liquidity measure;
 - specialist retry and ordered MT5/cached-external fallback trail;
 - deterministic methodology, metrics, components, score, rank, and selection proposal;
 - pinned LLM provider/model/catalogue/prompt/schema/inference versions;
 - advisory analysis or a visible unavailable/refused/invalid/timed-out/rate-limited reason; and
 - eligibility for explicit same-pinned-model analysis retry.
+
+Commodity results using MT5-only evidence display `BROKER_PROXY` and the unavailable
+venue-authoritative measures. Twelve Data substitutions identify the exact field and
+`AGGREGATED_PROXY`; neither is visually or textually described as a venue book or actual venue volume.
 
 `ranking_is_not_activation` is always visible. A recommendation is followed by a separate
 authorized confirmation flow; a blocked category preserves the current active assignment.
@@ -76,3 +97,6 @@ and a valid next action.
 8. Any LLM output/failure leaves deterministic gates, metrics, scores, ranks, and proposals
    unchanged.
 9. No result activates or replaces a market without separate human approval.
+10. A guard-window or coverage-degraded event blocks new recommendations with a citation and
+    remaining buffer, but does not stop research or monitoring.
+11. Twelve Data never appears as a venue-order-book or selected-venue-volume source.

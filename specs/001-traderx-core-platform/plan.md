@@ -1,12 +1,12 @@
 # Implementation Plan: TraderX Core Platform
 
 **Branch**: `001-traderx-core-platform` (Spec Kit feature context; current Git branch: `master`) |
-**Date**: 2026-08-14 | **Spec**: [spec.md](spec.md)
+**Date**: 2026-08-20 | **Spec**: [spec.md](spec.md)
 
 **Input**: Feature specification from `specs/001-traderx-core-platform/spec.md` and the attached
 TraderX Speckit Plan v1.0.0, reconciled with TraderX Constitution v1.1.0 and amended for the
-native MetaTrader 5 bridge, layered official market-data catalogue, durable coordinated research
-schedule, and owner-selectable advisory LLM model.
+native MetaTrader 5 bridge, layered low-cost market-data catalogue, official-source economic-event
+calendar, durable coordinated research schedule, and owner-selectable advisory LLM model.
 
 ## Summary
 
@@ -16,9 +16,10 @@ Redis coordinates transient jobs and events but never owns financial truth. Prov
 normalize broker, market, economic, LLM, and notification integrations. The broker adapter is the
 native outbound MetaTrader 5 (MT5) Expert Advisor; it provides account truth, the broker-supported
 universe, instrument specifications, and broker-specific quote/activity evidence while exposing no
-trading operation. Reviewed CME Group, Cboe FX Spot, and Coinbase Exchange adapters supplement
-Commodity, Forex, and Cryptocurrency evidence respectively. A PostgreSQL-authoritative scheduler
-starts one coordinated three-category run, and a single owner-selected, run-pinned LLM provides
+trading operation. MT5 provides broker-proxy Forex and commodity evidence, Coinbase Exchange is
+the crypto venue authority, and Twelve Data supplies field-level aggregated fallback evidence only
+where it actually supplies a complete fresh field. A PostgreSQL-authoritative scheduler starts one
+coordinated three-category run, and a single owner-selected, run-pinned LLM provides
 non-authoritative analysis without controlling any gate, metric, score, rank, or proposal.
 
 The design has no real-money order submission capability. It admits one user-approved Commodity,
@@ -81,7 +82,7 @@ advisory, tool-free, and incapable of changing deterministic financial results.
 **Scale/Scope**: One manual trader or small role-controlled team, one live account, three active
 markets, up to 10,000 catalogued instruments, tens of millions of time-series observations,
 hundreds of strategy versions, and tens of concurrent long-running research or validation jobs;
-105 functional requirements and 22 success criteria across identity, risk, markets, research,
+107 functional requirements and 22 success criteria across identity, risk, markets, research,
 validation, paper trading, recommendations, monitoring, journal, integrations, and audit
 
 ## Constitution Check
@@ -94,7 +95,7 @@ validation, paper trading, recommendations, monitoring, journal, integrations, a
 | Mandatory evidence lifecycle | Strategy transition rules require research, realistic historical testing, unseen-data validation, robustness, portfolio simulation, paper evidence, and human approval. | PASS |
 | Manual real-money execution | Broker ports expose account, market, position, and deal reads only; no live order command exists in application or provider contracts. | PASS |
 | Broker credentials and provider boundaries | The native MT5 EA enrolls outbound, never receives or stores an order capability, and requires investor authorization plus disabled account/terminal trading. It fails to `LOCKDOWN` on incomplete verification. | PASS |
-| Volatility plus deep-liquidity selection | MT5 broker eligibility precedes asset-aware data/liquidity/execution/prop/sizing gates. CME, Cboe FX, and Coinbase evidence retains actual/proxy/venue semantics and unchanged freshness limits before multi-horizon scoring. | PASS |
+| Volatility plus deep-liquidity selection | MT5 broker eligibility precedes asset-aware data/liquidity/execution/prop/sizing gates. Coinbase venue evidence, MT5 broker-proxy evidence, and field-level Twelve Data aggregated fallback retain explicit unchanged semantics and freshness limits before multi-horizon scoring. | PASS |
 | Shared equity and dynamic 0/1/2 capacity | One account aggregate owns risk snapshots; serializable decision transactions and invariants block a third live position. | PASS |
 | Authenticated and UI-first operation | Dedicated setup, sign-in, MFA, reset, and recovery routes use server-validated MFA sessions; every ordinary workflow has an authenticated UI/API contract and workers continue after the browser closes. | PASS |
 | Permanent knowledge and immutable versions | Instrument records are never cascade-deleted; strategy versions, run inputs, reports, decisions, and theses are append-only. | PASS |
@@ -251,17 +252,38 @@ as separate processes.
 
 - MT5 is authoritative for broker support, symbol mapping, specifications, current broker trading
   conditions, and sizing feasibility. External evidence cannot make an unsupported symbol eligible.
-- The initial specialist catalogue is `CME_GROUP` for commodity futures volume/open interest and
-  entitled depth, `CBOE_FX_SPOT` for explicitly venue-specific spot-FX volume/depth, and
-  `COINBASE_EXCHANGE` for crypto trades/candles/volume and L2/L3 books. `CFTC_COT`, CME FX futures,
-  and `KRAKEN_SPOT` are disabled-by-default verification profiles, never silent substitutes.
-- Each category records source/venue, capability, `ACTUAL`/`BROKER_PROXY`/`UNAVAILABLE` semantics,
-  mapping, entitlement, quality, and policy-specific age. Initial freshness defaults are 60 seconds
-  for MT5/current streams, one completed trading day for daily exchange statistics, and seven days
-  for contextual CFTC data; catalogue policy versions may tighten them but outages never extend them.
-- After three bounded specialist attempts, a category tries complete current MT5 evidence and then
-  its most recent complete external dataset within the unchanged freshness policy. If neither meets
-  every asset-specific gate, that category is blocked while independently valid categories complete.
+- `MT5_TERMINAL_BRIDGE` is the required broker authority and supplies broker-proxy Forex and
+  commodity price, spread, tick-activity, execution, and available DOM evidence. A versioned
+  commodity broker-proxy gate may rank and activate a broker-supported commodity, but every result
+  and recommendation identifies unavailable venue volume/depth rather than claiming COMEX data.
+- `COINBASE_EXCHANGE` is the cryptocurrency primary for selected-venue trade and order-book evidence.
+  `TWELVE_DATA` is a reviewed Forex/crypto fallback that may provide only documented price, candle,
+  volatility, volume, or liquidity fields. Every Twelve Data field is `AGGREGATED_PROXY`; it never
+  represents a venue book, venue-executed volume, executable broker liquidity, or a global FX book.
+  CME Group remains a disabled optional future entitlement, not a V1 requirement.
+- Each category records source/venue, capability, `ACTUAL`/`BROKER_PROXY`/`AGGREGATED_PROXY`/
+  `UNAVAILABLE` semantics, mapping, entitlement, quality, and policy-specific age. Initial
+  freshness defaults are 60 seconds for MT5/current streams and a provider-approved bounded age
+  for Twelve Data snapshots; catalogue policy versions may tighten them but outages never extend them.
+- After bounded primary attempts, a category first uses complete current MT5 evidence. For an exact
+  unavailable Forex or crypto field, it may then use a complete fresh Twelve Data field only if the
+  pinned fallback policy permits it; otherwise it tries a still-fresh cached external dataset. No
+  fallback may fill a provider-unsupported field or weaken a gate. If evidence remains insufficient,
+  that category is blocked while independently valid categories complete.
+
+### Official Economic Calendar and Event-Risk Gate
+
+- V1 synchronizes BLS and BEA schedules from their documented machine-readable feeds and ingests
+  published values from their official APIs. It ingests EIA published petroleum values from API v2;
+  EIA release scheduling and FOMC schedules use owner-maintained, official-URL-cited entries when
+  no documented machine feed exists. Production workers never scrape HTML.
+- An owner configures high-impact event types and pre/post-event buffers. The deterministic Risk
+  Manager maps events to active markets and blocks new live recommendations in the guard window;
+  research, paper trading, journaling, and monitoring continue. A stale or unverified required
+  event schedule inside its guard window fails closed with `CALENDAR_COVERAGE_DEGRADED`.
+- Calendar imports and owner-cited overrides are append-only revisions. Every run and recommendation
+  freezes the event-risk policy, event revision, official citation, source retrieval time, and
+  affected-market mapping. Consensus is `UNKNOWN` in V1 unless an official source publishes it.
 
 ### Durable Coordinated Market-Research Scheduling
 
@@ -348,11 +370,12 @@ connection can make an account active.
 
 ### Milestone 2 — Broker and Market Intelligence Foundation
 
-Deliver the native MT5 EA account/broker-evidence slice; fixed CME Group, Cboe FX Spot, and Coinbase
-Exchange market-data adapters; provider/model catalogue and credential UI; normalized source,
+Deliver the native MT5 EA account/broker-evidence slice; fixed MT5, Coinbase Exchange, Twelve Data,
+and official-calendar adapters; provider/model catalogue and credential UI; normalized source,
 capability, actual/proxy, mapping, freshness, conflict, and fallback evidence; incremental history;
 the Instrument Library; asset-aware eligibility and multi-horizon volatility/liquidity methods; and
-versioned suitability scoring. Deliver the database-backed anchored recurring schedule, one
+versioned suitability scoring. Deliver owner-configured economic-event buffers and the
+database-backed anchored recurring schedule, one
 coordinated three-category run, overlap skipping, three independently completable category results,
 one global OpenAI/Anthropic model selector, run-level model pinning, structured advisory analysis,
 and explicit same-model analysis retry inside the existing Markets workspace.
@@ -362,7 +385,8 @@ reconciliation within the freshness SLO before it can provide risk truth; source
 mapping gates pass; category reports rank only eligible candidates; exactly one due job or overlap
 skip is durable; LLM output changes no deterministic result; one user-approved instrument may
 occupy each category; replacing a market preserves all knowledge; manually opened positions are
-visible.
+visible; official or owner-cited high-impact events block affected new recommendations inside the
+configured buffers; and calendar coverage degradation fails closed inside a required guard window.
 
 ### Milestone 3 — Strategy Research and Validation Platform
 
@@ -440,12 +464,16 @@ scope. The following safety tests are release-blocking:
 17. every due research occurrence creates exactly one coordinated job or one durable overlap skip,
     never a catch-up job, and no result changes an active assignment automatically;
 18. MT5-unsupported candidates are excluded even when externally covered, and every liquidity
-    measure displays provider/venue plus `ACTUAL`, `BROKER_PROXY`, or `UNAVAILABLE` semantics;
-19. specialist failures apply bounded retries, current MT5, then still-fresh cached external
-    evidence without extending freshness; unresolved categories block while valid categories finish;
-20. changing the global model cannot alter an active run, and every invocation records its exact
+    measure displays provider/venue plus `ACTUAL`, `BROKER_PROXY`, `AGGREGATED_PROXY`, or
+    `UNAVAILABLE` semantics;
+19. source failures apply bounded retries, current MT5, then only a policy-permitted fresh exact
+    Twelve Data field or still-fresh cached external evidence without extending freshness;
+    unresolved categories block while valid categories finish;
+20. high-impact official or owner-cited events block new recommendations for their configured
+    pre/post buffers, with degraded calendar coverage failing closed inside the guard window; and
+21. changing the global model cannot alter an active run, and every invocation records its exact
     provider/model/catalogue/prompt/schema/inference versions; and
-21. conflicting, refused, invalid, timed-out, or unavailable LLM output changes zero deterministic
+22. conflicting, refused, invalid, timed-out, or unavailable LLM output changes zero deterministic
     gate, metric, score, rank, or proposal values and never triggers automatic model substitution.
 
 Production promotion also requires migration rehearsal, backup/restore validation, secret rotation

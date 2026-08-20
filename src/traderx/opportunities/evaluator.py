@@ -15,6 +15,7 @@ from traderx.opportunities.ranking import rank_components
 from traderx.opportunities.recommendation_model import Recommendation, RecommendationState
 from traderx.portfolio.exposure import assess_exposure
 from traderx.risk.manager import authorize
+from traderx.risk.event_guard import evaluate_event_guard
 from traderx.risk.model import AccountSnapshot, RiskDecision, RiskSnapshot
 from traderx.risk.sizing import size_position
 from traderx.shared.types import DataQuality, RiskDecisionKind, RiskState, as_decimal, utc_now
@@ -263,12 +264,16 @@ def _risk_authorize(
         correlation_limit=Decimal("0.75"),
         factor_limit=Decimal("0.75"),
     )
+    event_guard = evaluate_event_guard(
+        database, account_id=account.id, category=instrument.category, instrument_id=instrument.id, now=now
+    )
     managed = authorize(
         requested_risk=requested,
         risk_state=RiskState(risk.state),
         capacity=risk.capacity,
         exposure_acceptable=exposure.acceptable,
         remaining_margin=remaining,
+        event_guard_reason_codes=event_guard.reason_codes,
     )
     decision = RiskDecision(
         account_id=account.id,
@@ -285,6 +290,7 @@ def _risk_authorize(
     if managed.decision == RiskDecisionKind.BLOCKED:
         opportunity.state = OpportunityState.NO_TRADE
         opportunity.reason_codes = list(managed.reason_codes)
+        opportunity.evidence = {**opportunity.evidence, "event_guard_blocks": list(event_guard.blocks)}
         return
     entry = _current_price(instrument)
     if entry is None:

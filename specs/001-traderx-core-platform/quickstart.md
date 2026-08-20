@@ -15,8 +15,9 @@ interfaces are defined under [contracts/](contracts/).
   test credentials only
 - For broker-adapter validation: a dedicated MT5 **demo** account using an investor/read-only
   password. The password is entered only into the local MT5 terminal, never into TraderX.
-- Licensed recorded or synthetic fixtures for CME Group, Cboe FX Spot, and Coinbase Exchange;
-  production entitlements and redistribution rights are not required for local tests.
+- Recorded or synthetic fixtures for MT5, Coinbase Exchange, Twelve Data, official calendar feeds,
+  and owner-cited calendar entries; production entitlements and redistribution rights are not
+  required for local tests.
 - A test OpenAI or Anthropic API project/model credential, or the contract test adapter. Never use
   prompts containing account identity, equity, personal data, or integration secrets.
 - A test MFA authenticator and optional test Email/Telegram destinations
@@ -132,9 +133,10 @@ Expected outcomes:
 
 ### Reviewed market-data and LLM integrations
 
-1. In the existing Integrations panel confirm the fixed catalogue lists CME Group for Commodity,
-   Cboe FX Spot for Forex, Coinbase Exchange for Cryptocurrency, and the reviewed OpenAI/Anthropic
-   models. Attempt to enter an arbitrary URL/provider/model and confirm rejection.
+1. In the existing Integrations panel confirm the fixed catalogue lists MT5 broker evidence,
+   Coinbase Exchange for cryptocurrency venue evidence, Twelve Data for Forex/crypto aggregate
+   fallback, the official calendar sources, and the reviewed LiteLLM gateway. Attempt to enter an
+   arbitrary URL/provider/model and confirm rejection.
 2. Connect each fixture adapter through the UI, test it, rotate a write-only test credential,
    disable/re-enable it, and remove it. Confirm secrets never return and capability, venue,
    entitlement, retention, health, and freshness remain visible.
@@ -148,7 +150,7 @@ Expected outcomes:
 - only reviewed entries can become healthy integrations;
 - external coverage never makes an MT5-unsupported/ambiguous symbol eligible;
 - each observation identifies provider, venue, capability and
-  `ACTUAL`/`BROKER_PROXY`/`UNAVAILABLE` semantics; and
+  `ACTUAL`/`BROKER_PROXY`/`AGGREGATED_PROXY`/`UNAVAILABLE` semantics; and
 - unavailable evidence remains unknown rather than becoming numeric zero.
 
 ### Shared fail-closed behavior
@@ -188,7 +190,8 @@ Expected outcomes:
 
 - data, liquidity, execution, broker, prop, and sizing gates run before final ranking;
 - Forex uses broker spread/tick/execution evidence without claiming a global book; Commodity uses
-  official traded volume/open interest and entitled depth; Crypto uses venue volume and book depth;
+  official traded volume/open interest/depth when entitled, otherwise an explicitly labelled MT5
+  broker-proxy gate; Crypto uses Coinbase venue volume and book depth;
 - each ineligible candidate shows its evidence and cannot be approved;
 - the report preserves metrics, weights, methodology, source/fallback manifests, actual/proxy
   semantics, rank, deterministic explanation, and optional advisory analysis;
@@ -203,9 +206,23 @@ Expected outcomes:
    freshness policy; repeat after advancing beyond that limit.
 4. Keep the other two categories independently valid.
 
-Expected outcomes: the trail is specialist retries → MT5 → fresh cached external → blocked. Stale
-cache is rejected without extending freshness; the affected active assignment is unchanged while
-the two valid categories may complete.
+Expected outcomes: the trail is primary retries → MT5 → policy-permitted fresh exact Twelve Data
+field → fresh cached external → blocked. Twelve Data cannot fill unsupported fields or appear as
+venue authority. Stale cache is rejected without extending freshness; the affected active assignment
+is unchanged while the two valid categories may complete.
+
+### Economic calendar and event-risk guard
+
+1. Synchronize BLS and BEA fixture schedules and official released-value fixtures. Add an
+   owner-cited FOMC or EIA schedule entry with its official URL, impact, affected scope, and reason.
+2. Configure a high-impact pre/post-event buffer for the test account, then move the fixture clock
+   into its pre-event and post-event windows.
+3. Attempt a new recommendation for an affected market, then repeat for an unaffected market and an
+   existing open position. Mark required calendar coverage stale inside a guard window.
+
+Expected outcomes: affected new recommendations are blocked with source citation and remaining
+buffer; research and monitoring continue; official machine events are not edited in place; manual
+entries are audited; stale required coverage fails closed; and no connector extracts calendar HTML.
 
 ### Schedule and global model
 

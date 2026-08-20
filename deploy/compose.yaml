@@ -93,6 +93,35 @@ services:
     secrets: [postgres_password]
     networks: [private]
 
+  forex-factory-scraper:
+    # Optional third-party scraper experiment. It is intentionally not part of
+    # the default stack and has no host port or production Compose definition.
+    profiles: ["experimental-calendar-scraper"]
+    build:
+      context: ./experimental/forex-factory-scraper
+      args:
+        FOREX_FACTORY_SCRAPER_REF: ${FOREX_FACTORY_SCRAPER_REF:-main}
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "5000"
+      DEBUG: "false"
+      PYTHONDONTWRITEBYTECODE: "1"
+    read_only: true
+    tmpfs: [/tmp:rw,noexec,nosuid,size=32m]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    networks: [private, provider-egress]
+
+  worker-experimental-calendar:
+    profiles: ["experimental-calendar-scraper"]
+    build: { context: "..", dockerfile: deploy/containers/python.Dockerfile }
+    command: ["celery", "-A", "traderx_worker.runtime.celery_app", "worker", "-Q", "experimental", "--loglevel=INFO"]
+    environment:
+      <<: *app_environment
+      TRADERX_ENABLE_EXPERIMENTAL_CALENDAR_SCRAPER: "true"
+    depends_on: [postgres, redis, forex-factory-scraper]
+    secrets: [postgres_password]
+    networks: [private]
   web:
     build: { context: "..", dockerfile: deploy/containers/web.Dockerfile }
     environment:

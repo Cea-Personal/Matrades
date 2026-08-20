@@ -19,6 +19,8 @@ from traderx.accounts.model import (
 )
 from traderx.accounts.service import create_account, next_version
 from traderx.identity.authorization import Actor, Role, require_role
+from traderx.market_data.model import EventRiskPolicyVersion
+from traderx.risk.event_guard import evaluate_event_guard
 from traderx.shared.types import ConcurrentModification, InvalidTransition, utc_now
 from traderx_api.dependencies import get_database_session
 from traderx_api.routes.identity import AuthenticationContext, authenticated_context
@@ -55,6 +57,15 @@ class RiskPolicyCommand(BaseModel):
     correlation_limit: Decimal = Field(ge=0, le=1)
     state_thresholds: dict[str, object] = Field(default_factory=dict)
     reason: str = Field(min_length=8, max_length=2000)
+
+
+class EventRiskPolicyCommand(BaseModel):
+    enabled_event_types: list[str] = Field(min_length=1)
+    pre_event_buffer_seconds: int = Field(ge=0, le=86400)
+    post_event_buffer_seconds: int = Field(ge=0, le=86400)
+    required_source_coverage: list[str] = Field(default_factory=list)
+    reason: str = Field(min_length=8, max_length=2000)
+    confirmation: Literal["CONFIRMED"]
 
 
 def _actor(context: AuthenticationContext) -> Actor:
@@ -255,4 +266,67 @@ def current_risk(
         "capacity": 0,
         "quality": "UNKNOWN",
         "reason_codes": ["NO_VERIFIED_ACCOUNT_SNAPSHOT"],
+    }
+
+
+@router.get("/{account_id}/event-risk-policy")
+def get_event_risk_policy(
+    account_id: UUID, response: Response,
+    context: Annotated[AuthenticationContext, Depends(authenticated_context)], database: DatabaseSession,
+) -> dict[str, object]:
+    _require_account_manager(context)
+    account = _account_or_404(database, account_id)
+    response.headers["ETag"] = _etag(account)
+    policy = database.scalar(
+        select(EventRiskPolicyVersion)
+        .where(EventRiskPolicyVersion.account_id == account.id, EventRiskPolicyVersion.retired_at.is_(None))
+        .order_by(EventRiskPolicyVersion.effective_from.desc()).limit(1)
+    )
+    if policy is None:
+        return {"configured": False, "event_guard_blocks": []}
+    guard = evaluate_event_guard(database, account_id=account.id, category="FOREX", instrument_id=None, now=utc_now())
+    return {
+        "id": str(policy.id), "version": policy.version, "policy_version": policy.policy_version,
+        "enabled_event_types": policy.enabled_event_types,
+        "pre_event_buffer_seconds": policy.pre_buffer_minutes * 60,
+        "post_event_buffer_seconds": policy.post_buffer_minutes * 60,
+        "required_source_coverage": ["OFFICIAL" ] if policy.coverage_required else [],
+        "effective_at": policy.effective_from.isoformat(), "event_guard_blocks": list(guard.blocks),
+    }
+
+
+@router.put("/{account_id}/event-risk-policy")
+def replace_event_risk_policy(
+    account_id: UUID, payload: EventRiskPolicyCommand, response: Response,
+    context: Annotated[AuthenticationContext, Depends(authenticated_context)], database: DatabaseSession,
+    if_match: str = Header(alias="If-Match"),
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=16, max_length=200),
+) -> dict[str, object]:
+    _require_account_manager(context)
+    account = _account_or_404(database, account_id)
+    _require_current_version(account, if_match)
+    now = utc_now()
+    for prior in database.scalars(select(EventRiskPolicyVersion).where(EventRiskPolicyVersion.account_id == account.id, EventRiskPolicyVersion.retired_at.is_(None))):
+        prior.retired_at = now
+    policy = EventRiskPolicyVersion(
+        account_id=account.id, policy_version=f"event-risk-{now.strftime('%Y%m%d%H%M%S')}",
+        enabled_event_types=sorted(set(payload.enabled_event_types)),
+        pre_buffer_minutes=payload.pre_event_buffer_seconds // 60,
+        post_buffer_minutes=payload.post_event_buffer_seconds // 60,
+        coverage_required=bool(payload.required_source_coverage), reason=payload.reason,
+        configured_by=context.user.id, effective_from=now,
+    )
+    database.add(policy)
+    account.version += 1
+    database.commit()
+    database.refresh(account)
+    response.headers["ETag"] = _etag(account)
+    response.headers["Idempotency-Key"] = idempotency_key
+    return {
+        "id": str(policy.id), "version": policy.version, "policy_version": policy.policy_version,
+        "enabled_event_types": policy.enabled_event_types,
+        "pre_event_buffer_seconds": policy.pre_buffer_minutes * 60,
+        "post_event_buffer_seconds": policy.post_buffer_minutes * 60,
+        "required_source_coverage": ["OFFICIAL"] if policy.coverage_required else [],
+        "effective_at": policy.effective_from.isoformat(),
     }

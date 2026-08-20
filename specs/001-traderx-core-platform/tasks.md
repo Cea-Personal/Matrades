@@ -927,3 +927,148 @@ Parallel worker/UI health surfaces after T314 and T315: T316, T319, T320
 - [X] T335 Replace status-copying non-broker health polling with bounded live capability probes that retain truthful last success, latency, freshness, current error, and affected-category impact in `apps/worker/traderx_worker/tasks/operations.py` per FR-083 and US9/AC1 (partial)
 - [X] T336 Complete the coordinated report with per-category candidates, exclusions, metrics, ranks, rationale, full source/model policy pins, advisory output or failure reason, and one explicit review proposal per eligible category in `apps/web/src/features/markets/MarketResearchReport.tsx` per FR-024, FR-105, SC-004, SC-018, SC-022, and plan: market-research UI contract (partial)
 - [X] T337 Restore outbound access for reviewed Coinbase and LLM provider qualification/collection on only the research worker while keeping all stateful services private in `deploy/compose.yaml`
+
+---
+
+## Phase 20: Clarified Research-Data Foundation
+
+**Purpose**: Make the clarified source semantics and calendar evidence durable before changing
+market selection, provider operations, or the Risk Manager.
+
+- [X] T338 Add `AGGREGATED_PROXY` source semantics plus append-only economic-event, calendar coverage, owner-cited revision, and event-risk-policy tables in `migrations/versions/0026_market_data_calendar_risk.py`
+- [X] T339 Extend immutable source manifests and normalized market/economic-event models with aggregate-proxy provenance, official citations, source origin, revisions, and risk-policy pins in `src/traderx/market_data/model.py`
+- [X] T340 Replace Cboe as an active V1 catalogue profile with Twelve Data and official calendar profiles, retain Cboe only as retired historical metadata, and keep CME disabled/optional in `src/traderx/integrations/registry.py`
+
+**Checkpoint**: Durable evidence can distinguish actual venue, broker-proxy, aggregate-proxy, and
+unavailable measures; calendar entries have provenance and cannot be silently rewritten.
+
+---
+
+## Phase 21: User Story 2 Amendment — Low-Cost Market Research and Calendar Evidence (Priority: P1)
+
+**Goal**: Research the three market categories with MT5 broker evidence, Coinbase venue evidence,
+Twelve Data field-level fallback, and official macro-event context without a paid CME/Cboe feed.
+
+**Independent Test**: A scheduled or manual run ranks broker-supported Forex/commodity/crypto
+candidates using truthful source semantics; Twelve Data may replace only a complete fresh exact
+Forex/crypto field; and official or owner-cited high-impact events appear in the research report.
+
+### Tests for User Story 2 Amendment
+
+- [ ] T341 [P] [US2] Write Twelve Data authentication, quota, retry, symbol, candle, price, missing-volume, and `AGGREGATED_PROXY` adapter contract tests in `tests/contract/test_twelve_data_adapter.py`
+- [ ] T342 [P] [US2] Extend asset-aware liquidity tests for MT5-only commodity broker-proxy eligibility, missing venue measures, and field-level Twelve Data fallback limits in `tests/unit/market_research/test_asset_liquidity.py`
+- [ ] T343 [P] [US2] Write BLS/BEA machine-feed, EIA value, owner-cited FOMC/EIA schedule, no-scraping, revision, and coverage-degradation tests in `tests/integration/test_economic_calendar_sources.py`
+- [ ] T344 [P] [US2] Write calendar event, coverage, and owner-cited event HTTP contract tests in `tests/contract/test_economic_calendar_api.py`
+- [ ] T345 [P] [US2] Write the in-place Markets economic-calendar, Twelve Data provenance, commodity-proxy, and degraded-coverage browser journey in `apps/web/tests/e2e/economic_calendar.spec.ts`
+
+### Implementation for User Story 2 Amendment
+
+- [X] T346 [US2] Implement the reviewed Twelve Data REST adapter with server-side key handling, bounded quota-aware retries, raw-response hashes, documented field capability declarations, and `AGGREGATED_PROXY` outputs in `src/traderx/market_data/providers/twelve_data.py`
+- [X] T347 [US2] Persist field-level `AGGREGATED_PROXY` observations and immutable fallback manifests without allowing an unsupported Twelve Data field to become a numeric substitute in `src/traderx/market_data/ingestion.py`
+- [X] T348 [US2] Implement versioned MT5 commodity broker-proxy gates and explicit unavailable venue-authority evidence without weakening Crypto venue requirements in `src/traderx/market_research/liquidity.py`
+- [X] T349 [US2] Implement exact-field fallback precedence of primary source, current MT5, policy-permitted fresh Twelve Data, cached external evidence, then blocked in `src/traderx/market_research/source_selection.py`
+- [ ] T350 [P] [US2] Implement documented BLS/BEA schedule synchronization, official released-value ingestion, EIA values, and append-only owner-cited schedule validation without HTML scraping in `src/traderx/economic_calendar/providers.py`
+- [X] T351 [US2] Implement calendar coverage, event revision, active-market impact mapping, and deterministic guard-state projection in `src/traderx/economic_calendar/service.py`
+- [ ] T352 [P] [US2] Implement idempotent calendar schedule/value synchronization and coverage-health worker tasks in `apps/worker/traderx_worker/tasks/economic_calendar.py`
+- [X] T353 [US2] Add authenticated calendar event/coverage/owner-cited revision endpoints and read-only provenance responses in `apps/api/traderx_api/routes/markets.py`
+- [X] T354 [US2] Add provider provenance, `AGGREGATED_PROXY`, broker-proxy commodity warnings, calendar coverage, and cited event views to the existing Markets workspace in `apps/web/src/features/markets/MarketsWorkspace.tsx`
+
+**Checkpoint**: User Story 2 satisfies FR-096–FR-100 and FR-106–FR-107 for the clarified source
+catalogue while preserving broker support vetoes, human activation, and reproducible reports.
+
+---
+
+## Phase 22: User Story 5 Amendment — Economic-Event Recommendation Guard (Priority: P1)
+
+**Goal**: Apply owner-configured high-impact economic-event buffers as deterministic blocks on new
+manual-trading recommendations while leaving existing-position monitoring and research available.
+
+**Independent Test**: Entering a relevant event buffer blocks a new recommendation with source,
+event, and remaining-buffer evidence; an unaffected market or an existing position continues under
+its normal rules; degraded required coverage fails closed within the guard window.
+
+### Tests for User Story 5 Amendment
+
+- [ ] T355 [P] [US5] Write pre/post-event, affected-scope, stale-coverage, existing-position, and no-automatic-order safety tests in `tests/safety/test_economic_event_risk_guard.py`
+- [ ] T356 [P] [US5] Extend account-risk HTTP tests for versioned event-risk policy commands, active guard blocks, and event-specific reason codes in `tests/contract/test_accounts_risk_api.py`
+- [ ] T357 [P] [US5] Write the owner event-risk configuration and recommendation-block browser journey in `apps/web/tests/e2e/event_risk_guard.spec.ts`
+
+### Implementation for User Story 5 Amendment
+
+- [X] T358 [US5] Implement deterministic event-to-instrument scope matching, pre/post buffer evaluation, coverage degradation, and immutable block evidence in `src/traderx/risk/event_guard.py`
+- [X] T359 [US5] Invoke the event guard from every live recommendation decision without changing paper, research, journal, or existing-position behavior in `src/traderx/risk/manager.py`
+- [X] T360 [US5] Implement audited owner event-risk-policy commands and current guard-block responses in `apps/api/traderx_api/routes/accounts.py`
+- [X] T361 [US5] Add owner-configurable event types/buffers and visible recommendation-block evidence to the existing risk setup UI in `apps/web/src/features/risk/AccountRiskSetup.tsx`
+
+**Checkpoint**: User Story 5 satisfies the FR-106 calendar-risk boundary: `NO NEW TRADE` is
+deterministic, explainable, audited, and never becomes automatic order execution.
+
+---
+
+## Phase 23: User Story 9 Amendment — Provider and Calendar Operations (Priority: P2)
+
+**Goal**: Let an owner operate Twelve Data and official calendar sources entirely from the existing
+Integrations and Markets UI, with fixed adapters, protected credentials, coverage health, and audit.
+
+**Independent Test**: An owner can configure/test Twelve Data, inspect calendar-source health,
+create a source-cited entry when permitted, and cannot add an arbitrary URL, scrape a source, or
+expose credentials.
+
+### Tests for User Story 9 Amendment
+
+- [ ] T362 [P] [US9] Extend provider-catalogue lifecycle/security tests for Twelve Data, fixed official calendar adapters, retired Cboe metadata, and arbitrary-source rejection in `tests/security/test_provider_catalogue_security.py`
+- [ ] T363 [P] [US9] Extend integration-card tests for Twelve Data credentials, calendar health, owner-cited schedule actions, redaction, and permissions in `apps/web/src/features/integrations/Integrations.test.tsx`
+
+### Implementation for User Story 9 Amendment
+
+- [ ] T364 [US9] Implement fixed Twelve Data and official-calendar configuration validation, credential protection, capability health, and retired-provider preservation in `src/traderx/integrations/service.py`
+- [X] T365 [US9] Add Twelve Data and official-calendar integration cards, health/coverage status, and safe owner-cited handoff to the current UI in `apps/web/src/features/integrations/Integrations.tsx`
+
+**Checkpoint**: Provider and calendar operations remain UI-first, deny-by-default, source-cited,
+secret-safe, and auditable.
+
+---
+
+## Phase 24: Clarified Data-Source Release Gates
+
+**Purpose**: Prove the updated evidence semantics, calendar safeguards, contracts, and user
+guidance before enabling the clarified source catalogue.
+
+- [ ] T366 [P] Add end-to-end acceptance coverage for MT5 commodity proxies, Twelve Data fallback provenance, official/owner-cited calendars, event buffers, and coverage degradation in `tests/e2e/test_market_research_calendar_acceptance.py`
+- [ ] T367 [P] Regenerate and reconcile the typed web API boundary for Twelve Data, calendar, event-risk policy, and guard-block schemas in `apps/web/src/lib/api/generated.ts`
+- [X] T368 Update the provider, calendar, fallback, and event-risk operational runbook in `deploy/operations/market-research-runbook.md`
+- [ ] T369 Record the clarified contract/runtime reconciliation and release decision after all new contract tests pass in `specs/001-traderx-core-platform/contracts/compatibility-report.md`
+- [ ] T370 Execute the quickstart source-fallback and calendar-guard scenarios and record results in `specs/001-traderx-core-platform/quickstart-results.md`
+
+**Checkpoint**: The new catalogue is release-eligible only when every required source is qualified,
+all fallback and event-risk tests pass, calendar coverage is observable, and no raw source or
+credential leaks through the UI.
+
+---
+
+## Clarification Dependencies and Execution Order
+
+```text
+Phase 20 foundation
+  ├─> Phase 21 US2: market evidence and economic calendar
+  ├─> Phase 22 US5: event-risk recommendation guard
+  └─> Phase 23 US9: provider/calendar operations
+Phase 21 + Phase 22 + Phase 23 ─> Phase 24 release gates
+```
+
+### Parallel Opportunities
+
+- In US2, T341–T345 are independent test work; after T338–T340, T346 and T350 may proceed in
+  parallel, followed by T347–T354 in dependency order.
+- In US5, T355–T357 are parallel tests; T358 precedes T359–T361, which can proceed in parallel by
+  backend/API/UI boundary.
+- In US9, T362 and T363 may proceed in parallel; T364 precedes T365.
+- T366–T370 are release work after their respective story tasks complete.
+
+### Incremental Delivery
+
+1. Complete Phase 20 and validate the migration/model/catalogue semantics.
+2. Deliver Phase 21 and prove research reports source truth without enabling any recommendation.
+3. Deliver Phase 22 and prove calendar buffers block only new recommendations.
+4. Deliver Phase 23 so all configuration and recovery actions are available in the current UI.
+5. Complete Phase 24 before enabling the revised catalogue in production.

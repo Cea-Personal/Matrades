@@ -308,6 +308,73 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/RiskSnapshot'}
+  /accounts/{account_id}/event-risk-policy:
+    get:
+      tags: [Accounts and Risk]
+      operationId: getEventRiskPolicy
+      parameters:
+        - $ref: '#/components/parameters/AccountId'
+      responses:
+        '200':
+          description: Current versioned economic-event risk policy
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EventRiskPolicy'}
+    put:
+      tags: [Accounts and Risk]
+      operationId: replaceEventRiskPolicy
+      parameters:
+        - $ref: '#/components/parameters/AccountId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EventRiskPolicyCommand'}
+      responses:
+        '200': {$ref: '#/components/responses/VersionedResource'}
+        '412': {$ref: '#/components/responses/Problem'}
+  /economic-calendar/events:
+    get:
+      tags: [Markets]
+      operationId: listEconomicCalendarEvents
+      responses:
+        '200':
+          description: Approved official and owner-cited economic events with provenance
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/EconomicCalendarEvent'}
+  /economic-calendar/coverage:
+    get:
+      tags: [Markets]
+      operationId: getEconomicCalendarCoverage
+      responses:
+        '200':
+          description: Source coverage, health, and freshness for the active-market universe
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+  /economic-calendar/owner-cited-events:
+    post:
+      tags: [Markets]
+      operationId: createOwnerCitedEconomicEvent
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/OwnerCitedEconomicEventCommand'}
+      responses:
+        '201':
+          description: Append-only cited event revision created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EconomicCalendarEvent'}
+        '422': {$ref: '#/components/responses/Problem'}
   /accounts/{account_id}/circuit-breakers:
     get:
       tags: [Accounts and Risk]
@@ -1203,6 +1270,71 @@ components:
         quality: {type: string, enum: [VERIFIED, STALE, CONTRADICTORY, UNKNOWN]}
         calculated_at: {$ref: '#/components/schemas/Instant'}
         reason_codes: {type: array, items: {type: string}}
+        event_guard_blocks:
+          type: array
+          items: {$ref: '#/components/schemas/EventGuardBlock'}
+    EventRiskPolicyCommand:
+      type: object
+      required: [enabled_event_types, pre_event_buffer_seconds, post_event_buffer_seconds, reason, confirmation]
+      additionalProperties: false
+      properties:
+        enabled_event_types: {type: array, minItems: 1, items: {type: string}, uniqueItems: true}
+        pre_event_buffer_seconds: {type: integer, minimum: 0, maximum: 86400}
+        post_event_buffer_seconds: {type: integer, minimum: 0, maximum: 86400}
+        required_source_coverage: {type: array, items: {type: string}, uniqueItems: true}
+        reason: {type: string, minLength: 8}
+        confirmation: {type: string, const: CONFIRMED}
+    EventRiskPolicy:
+      allOf:
+        - $ref: '#/components/schemas/EventRiskPolicyCommand'
+        - type: object
+          required: [id, version, effective_at]
+          properties:
+            id: {$ref: '#/components/schemas/Id'}
+            version: {type: integer}
+            effective_at: {$ref: '#/components/schemas/Instant'}
+    EconomicCalendarEvent:
+      type: object
+      required: [id, source_origin, official_url, title, event_type, importance, scheduled_at, coverage_state]
+      properties:
+        id: {$ref: '#/components/schemas/Id'}
+        source_origin: {type: string, enum: [OFFICIAL_MACHINE, OWNER_CITED]}
+        official_url: {type: string, format: uri}
+        title: {type: string}
+        event_type: {type: string}
+        importance: {type: string, enum: [HIGH, MEDIUM, LOW]}
+        scheduled_at: {$ref: '#/components/schemas/Instant'}
+        observed_at: {$ref: '#/components/schemas/Instant'}
+        affected_currencies: {type: array, items: {type: string}}
+        affected_categories: {type: array, items: {$ref: '#/components/schemas/MarketCategory'}}
+        actual: {type: string, nullable: true}
+        previous: {type: string, nullable: true}
+        consensus: {type: string, nullable: true, description: Null means UNKNOWN; it is never inferred.}
+        coverage_state: {type: string, enum: [VERIFIED, STALE, DEGRADED, CANCELLED]}
+        source_retrieved_at: {$ref: '#/components/schemas/Instant'}
+        supersedes_event_id: {$ref: '#/components/schemas/Id'}
+    OwnerCitedEconomicEventCommand:
+      type: object
+      required: [official_url, title, event_type, importance, scheduled_at, reason]
+      additionalProperties: false
+      properties:
+        official_url: {type: string, format: uri}
+        title: {type: string, minLength: 1, maxLength: 256}
+        event_type: {type: string, minLength: 1, maxLength: 128}
+        importance: {type: string, enum: [HIGH, MEDIUM, LOW]}
+        scheduled_at: {$ref: '#/components/schemas/Instant'}
+        affected_currencies: {type: array, items: {type: string}}
+        affected_categories: {type: array, items: {$ref: '#/components/schemas/MarketCategory'}}
+        supersedes_event_id: {$ref: '#/components/schemas/Id'}
+        reason: {type: string, minLength: 8, maxLength: 2000}
+    EventGuardBlock:
+      type: object
+      required: [event_id, state, remaining_seconds, official_url]
+      properties:
+        event_id: {$ref: '#/components/schemas/Id'}
+        state: {type: string, enum: [IN_GUARD_WINDOW, CALENDAR_COVERAGE_DEGRADED]}
+        remaining_seconds: {type: integer, minimum: 0}
+        official_url: {type: string, format: uri}
     CircuitBreaker:
       type: object
       required: [id, version, type, state]
@@ -1215,15 +1347,15 @@ components:
       type: object
       required: [provider, catalogue_revision, adapter_revision, category, lifecycle, capabilities]
       properties:
-        provider: {type: string, enum: [MT5_TERMINAL_BRIDGE, CME_GROUP, CBOE_FX_SPOT, COINBASE_EXCHANGE, LITELLM_PROXY]}
+        provider: {type: string, enum: [MT5_TERMINAL_BRIDGE, COINBASE_EXCHANGE, TWELVE_DATA, FEDERAL_RESERVE, BLS, BEA, EIA, ECB, BOE, BOJ, CME_GROUP, LITELLM_PROXY]}
         catalogue_revision: {type: string}
         adapter_revision: {type: string}
-        category: {type: string, enum: [BROKER_ACCOUNT_DATA, MARKET_DATA, LLM]}
+        category: {type: string, enum: [BROKER_ACCOUNT_DATA, MARKET_DATA, ECONOMIC, LLM]}
         lifecycle: {type: string, enum: [APPROVED, DEPRECATED, RETIRED]}
         asset_categories: {type: array, items: {$ref: '#/components/schemas/MarketCategory'}}
         venues: {type: array, items: {type: string}}
         capabilities: {type: array, items: {type: string}}
-        capability_semantics: {type: object, additionalProperties: {type: string, enum: [AUTHORITATIVE, ACTUAL, BROKER_PROXY, UNAVAILABLE]}}
+        capability_semantics: {type: object, additionalProperties: {type: string, enum: [AUTHORITATIVE, ACTUAL, BROKER_PROXY, AGGREGATED_PROXY, UNAVAILABLE]}}
         permitted_models: {type: array, items: {type: string}}
         licensing_notice: {type: string}
         retention_posture: {type: string, enum: [NOT_APPLICABLE, STANDARD, ADMIN_VERIFIED]}
@@ -1272,7 +1404,7 @@ components:
       properties:
         id: {$ref: '#/components/schemas/Id'}
         version: {type: integer}
-        category: {type: string, enum: [BROKER_ACCOUNT_DATA, MARKET_DATA, LLM, NOTIFICATION]}
+        category: {type: string, enum: [BROKER_ACCOUNT_DATA, MARKET_DATA, ECONOMIC, LLM, NOTIFICATION]}
         name: {type: string}
         mt5_account_login: {type: string, description: MT5 account login selected for this managed bridge.}
         mt5_server: {type: string, description: Broker server selected for this managed bridge.}
@@ -1398,8 +1530,8 @@ components:
         provider: {type: string}
         venue: {type: string}
         capability: {type: string}
-        semantics: {type: string, enum: [ACTUAL, BROKER_PROXY, UNAVAILABLE]}
-        source_role: {type: string, enum: [MT5_BROKER_AUTHORITY, SPECIALIST_PRIMARY, FALLBACK_MT5, FALLBACK_CACHED_EXTERNAL]}
+        semantics: {type: string, enum: [ACTUAL, BROKER_PROXY, AGGREGATED_PROXY, UNAVAILABLE]}
+        source_role: {type: string, enum: [MT5_BROKER_AUTHORITY, SPECIALIST_PRIMARY, FALLBACK_MT5, FALLBACK_TWELVE_DATA, FALLBACK_CACHED_EXTERNAL]}
         observed_at: {$ref: '#/components/schemas/Instant'}
         received_at: {$ref: '#/components/schemas/Instant'}
         freshness: {type: string, enum: [FRESH, STALE, UNKNOWN]}

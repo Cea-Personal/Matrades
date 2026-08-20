@@ -23,6 +23,12 @@ class SourceSemantics(StrEnum):
     AUTHORITATIVE = "AUTHORITATIVE"
     ACTUAL = "ACTUAL"
     BROKER_PROXY = "BROKER_PROXY"
+    # A composite feed may be useful for a precise price/candle continuity gap,
+    # but is never a venue order book or executed-volume authority.
+    AGGREGATED_PROXY = "AGGREGATED_PROXY"
+    # Development-only scraped material is inspectable, but it is never
+    # eligibility or risk-gate evidence.
+    SCRAPED_EXPERIMENTAL = "SCRAPED_EXPERIMENTAL"
     UNAVAILABLE = "UNAVAILABLE"
 
 
