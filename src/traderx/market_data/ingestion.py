@@ -3,14 +3,23 @@ from __future__ import annotations
 import hashlib
 import io
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING
+from uuid import UUID
 
 import polars as pl
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
+from traderx.integrations.ports import ProviderObservation
+from traderx.market_data.model import DataSetManifest, MarketObservation
 from traderx.shared.types import as_decimal
+
+if TYPE_CHECKING:
+    from traderx.market_data.source_evidence import ConflictState
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +73,183 @@ class ParquetArtifact:
     coverage_end: datetime | None
     cursor: str | None
     source_manifest: dict[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class PersistedProviderBatch:
+    """Database-backed immutable provider batch and its normalized observations."""
+
+    manifest: DataSetManifest
+    observations: tuple[MarketObservation, ...]
+
+
+def persist_provider_observations(
+    database: Session,
+    *,
+    instrument_id: UUID,
+    integration_id: UUID,
+    batch: ProviderBatch,
+    observations: Sequence[ProviderObservation],
+    normalized_value: Decimal | None,
+    quality: str,
+    conflict_state: ConflictState,
+    complete: bool,
+    fallback_reason: str | None = None,
+) -> PersistedProviderBatch:
+    """Persist native payloads before a research run consumes their normalized value.
+
+    The content hash makes at-least-once collection idempotent. Provider payloads are
+    retained in ``MarketObservation.measures``; metric-only observations deliberately
+    keep OHLC fields null rather than manufacturing financial values.
+    """
+
+    native_rows = [_provider_observation_document(item) for item in observations]
+    payload = json.dumps(
+        {
+            "integration_id": str(integration_id),
+            "instrument_id": str(instrument_id),
+            "provider": batch.provider,
+            "provider_symbol": batch.provider_symbol,
+            "capability": batch.capability,
+            "retrieved_at": _utc_instant(batch.retrieved_at).isoformat(),
+            "observations": native_rows,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode()
+    content_hash = hashlib.sha256(payload).hexdigest()
+    existing = database.scalar(
+        select(DataSetManifest).where(DataSetManifest.content_hash == content_hash)
+    )
+    if existing is not None:
+        rows = tuple(
+            database.scalars(
+                select(MarketObservation)
+                .where(MarketObservation.dataset_manifest_id == existing.id)
+                .order_by(MarketObservation.observed_at, MarketObservation.id)
+            )
+        )
+        return PersistedProviderBatch(existing, rows)
+
+    observed_times = [
+        _utc_instant(item.observed_at) for item in observations if item.observed_at is not None
+    ]
+    received_times = [_utc_instant(item.received_at) for item in observations]
+    manifest = DataSetManifest(
+        provider=batch.provider,
+        integration_id=integration_id,
+        provider_symbol=batch.provider_symbol,
+        venue=batch.venue,
+        capability=batch.capability,
+        semantics=batch.semantics,
+        source_role=batch.source_role,
+        catalogue_revision=batch.catalogue_revision,
+        adapter_revision=batch.adapter_revision,
+        mapping_revision=batch.mapping_revision,
+        freshness_policy_version=batch.freshness_policy_version,
+        retry_policy_version=batch.retry_policy_version,
+        entitlement_status=batch.entitlement_status,
+        purpose="MARKET_SELECTION",
+        parquet_uri=f"postgresql://market-observations/{content_hash}",
+        content_hash=content_hash,
+        coverage={
+            "row_count": len(observations),
+            "start": min(observed_times).isoformat() if observed_times else None,
+            "end": max(observed_times).isoformat() if observed_times else None,
+        },
+        source_observed_at=max(observed_times) if observed_times else None,
+        received_at=max(received_times) if received_times else _utc_instant(batch.retrieved_at),
+        complete=complete,
+        quality=quality,
+        conflict_state=conflict_state.value,
+        fallback_reason=fallback_reason,
+        raw_reference=batch.raw_reference or f"sha256:{content_hash}",
+        created_at=_utc_instant(batch.retrieved_at),
+    )
+    database.add(manifest)
+    database.flush()
+
+    persisted: list[MarketObservation] = []
+    seen_observation_keys: set[tuple[datetime, int]] = set()
+    for item in observations:
+        if item.observed_at is None:
+            continue
+        revision = _positive_revision(item.revision)
+        observation_key = (_utc_instant(item.observed_at), revision)
+        if observation_key in seen_observation_keys:
+            # Contradictory duplicate identities are retained in the native batch
+            # below and quarantined by the manifest; never manufacture two rows
+            # that violate the canonical observation identity.
+            continue
+        seen_observation_keys.add(observation_key)
+        row = MarketObservation(
+            instrument_id=instrument_id,
+            integration_id=integration_id,
+            dataset_manifest_id=manifest.id,
+            provider=item.provider,
+            provider_symbol=item.provider_symbol,
+            venue=item.venue,
+            capability=str(item.capability),
+            semantics=item.semantics.value,
+            source_role=batch.source_role,
+            mapping_revision=batch.mapping_revision,
+            freshness_policy_version=batch.freshness_policy_version,
+            observed_at=_utc_instant(item.observed_at),
+            received_at=_utc_instant(item.received_at),
+            revision=revision,
+            open=None,
+            high=None,
+            low=None,
+            close=None,
+            volume=normalized_value if batch.capability == "TRADED_VOLUME" else None,
+            spread=None,
+            measures={
+                "payload": dict(item.payload),
+                "native_batch": native_rows,
+                "normalized_value": str(normalized_value) if normalized_value is not None else None,
+                "provider_event_id": item.provider_event_id,
+                "sequence": item.sequence,
+                "provider_revision": item.revision,
+                "quality_flags": list(item.quality_flags),
+            },
+            complete=complete and item.complete,
+            conflict_state=conflict_state.value,
+            raw_reference=manifest.raw_reference,
+            quality=quality,
+        )
+        database.add(row)
+        persisted.append(row)
+    database.flush()
+    return PersistedProviderBatch(manifest, tuple(persisted))
+
+
+def _provider_observation_document(item: ProviderObservation) -> dict[str, object]:
+    return {
+        "provider": item.provider,
+        "provider_symbol": item.provider_symbol,
+        "venue": item.venue,
+        "capability": str(item.capability),
+        "semantics": item.semantics.value,
+        "observed_at": item.observed_at.isoformat() if item.observed_at else None,
+        "received_at": item.received_at.isoformat(),
+        "provider_event_id": item.provider_event_id,
+        "sequence": item.sequence,
+        "revision": item.revision,
+        "complete": item.complete,
+        "quality_flags": list(item.quality_flags),
+        "payload": item.payload,
+    }
+
+
+def _positive_revision(value: str | None) -> int:
+    if value is None:
+        return 1
+    try:
+        parsed = int(value)
+    except ValueError:
+        return 1
+    return max(1, parsed)
 
 
 def normalize_bar(raw: dict[str, object]) -> CanonicalBar:

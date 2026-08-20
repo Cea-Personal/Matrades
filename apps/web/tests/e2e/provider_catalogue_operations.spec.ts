@@ -9,7 +9,7 @@ test("reviewed provider cards operate inside the existing Integrations workspace
 
   await expect(page.getByRole("heading", { name: "Reviewed research providers" })).toBeVisible();
   for (const provider of ["CME Group", "Cboe FX Spot", "Coinbase Exchange", "OpenAI Responses", "Anthropic Messages"]) {
-    await expect(page.getByText(provider, { exact: true })).toBeVisible();
+    await expect(page.locator(".active-market-grid strong", { hasText: provider })).toBeVisible();
   }
   await expect(page.getByText(/credentials are write-only/i)).toBeVisible();
   await expect(page.getByText(/licensing and retention/i)).toBeVisible();

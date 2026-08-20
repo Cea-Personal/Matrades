@@ -7,6 +7,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from traderx.identity.model import Role, User, UserStatus
 from traderx.notifications.model import (
     NotificationEvent,
     NotificationPreference,
@@ -90,6 +91,7 @@ _MARKET_RESEARCH_SEVERITY = {
     "SCHEDULE_OVERLAP": "INFO",
     "SCHEDULE_FAILED": "HIGH",
     "LLM_UNAVAILABLE": "WARNING",
+    "CATEGORY_BLOCKED": "HIGH",
 }
 
 
@@ -121,3 +123,34 @@ def create_market_research_notification(
     database.add(event)
     database.flush()
     return event
+
+
+def notify_market_research_owners(
+    database: Session,
+    *,
+    kind: str,
+    subject_id: str,
+    payload: dict[str, object],
+    created_at: datetime,
+) -> list[NotificationEvent]:
+    """Create one durable, deduplicated notification fact per active owner."""
+
+    owners = list(
+        database.scalars(
+            select(User).where(
+                User.role == Role.OWNER,
+                User.status == UserStatus.ACTIVE,
+            )
+        )
+    )
+    events: list[NotificationEvent] = []
+    for owner in owners:
+        event = create_market_research_notification(
+            database,
+            kind=kind,
+            subject_id=f"{subject_id}:owner:{owner.id}",
+            payload={**payload, "user_id": str(owner.id)},
+            created_at=created_at,
+        )
+        events.append(event)
+    return events

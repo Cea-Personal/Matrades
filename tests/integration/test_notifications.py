@@ -6,6 +6,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from traderx.identity.model import Role, User, UserStatus
 from traderx.notifications.model import (
     NotificationEvent,
     NotificationPreference,
@@ -18,7 +19,13 @@ from traderx.notifications.providers import (
     UnconfiguredExternalProvider,
     WebInboxProvider,
 )
-from traderx.notifications.router import retryable, route, route_event, severity_allows
+from traderx.notifications.router import (
+    notify_market_research_owners,
+    retryable,
+    route,
+    route_event,
+    severity_allows,
+)
 from traderx.shared.db import Base, load_model_metadata
 
 
@@ -115,3 +122,47 @@ def test_ambiguous_delivery_timeout_retries_with_same_notification_identity() ->
             provider.deliver("stable-route-id", "content")
         assert retryable(attempt) is (attempt < 3)
     assert seen == ["stable-route-id"] * 3
+
+
+def test_market_research_alerts_target_active_owners_and_deduplicate() -> None:
+    load_model_metadata()
+    engine = create_engine("sqlite+pysqlite://")
+    Base.metadata.create_all(engine)
+    now = datetime(2026, 8, 20, 10, tzinfo=UTC)
+    with sessionmaker(bind=engine).begin() as database:
+        owner_password_digest = str(uuid4())
+        viewer_password_digest = str(uuid4())
+        owner = User(
+            email="owner@example.com",
+            password_hash=owner_password_digest,
+            role=Role.OWNER,
+            status=UserStatus.ACTIVE,
+            mfa_required=True,
+        )
+        viewer = User(
+            email="viewer@example.com",
+            password_hash=viewer_password_digest,
+            role=Role.VIEWER,
+            status=UserStatus.ACTIVE,
+            mfa_required=True,
+        )
+        database.add_all([owner, viewer])
+        database.flush()
+        first = notify_market_research_owners(
+            database,
+            kind="CATEGORY_BLOCKED",
+            subject_id="category-run-1",
+            payload={"category": "COMMODITY", "reason": "SOURCE_STALE"},
+            created_at=now,
+        )
+        replay = notify_market_research_owners(
+            database,
+            kind="CATEGORY_BLOCKED",
+            subject_id="category-run-1",
+            payload={"category": "COMMODITY", "reason": "SOURCE_STALE"},
+            created_at=now,
+        )
+        assert len(first) == len(replay) == 1
+        assert first[0].id == replay[0].id
+        assert first[0].payload["user_id"] == str(owner.id)
+        assert database.scalars(select(NotificationEvent)).all() == first

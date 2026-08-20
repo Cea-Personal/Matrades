@@ -11,6 +11,7 @@ from sqlalchemy.pool import StaticPool
 
 from traderx.accounts.model import TradingAccount
 from traderx.integrations.model import Integration
+from traderx.market_data.model import Instrument
 from traderx.shared.db import Base, load_model_metadata
 from traderx_api.dependencies import get_database_session
 from traderx_api.main import app
@@ -61,10 +62,31 @@ def test_market_research_automation_routes_are_authenticated_and_operational() -
             entitlement_status="NOT_REQUIRED",
             retention_posture="STANDARD",
         )
-        database.add_all([account, llm])
+        specialist = Integration(
+            name="Coinbase market evidence",
+            category="MARKET_DATA",
+            provider="COINBASE_EXCHANGE",
+            state="HEALTHY",
+            capabilities=["MARKET_DATA_READ"],
+            configuration={},
+            official_source=True,
+            catalogue_revision="2026-08-14.v1",
+            adapter_revision="v1",
+            entitlement_status="NOT_REQUIRED",
+        )
+        instrument = Instrument(
+            symbol="BTCUSD",
+            display_name="Bitcoin / US Dollar",
+            category="CRYPTO",
+            contract_spec={},
+            trading_hours={},
+        )
+        database.add_all([account, llm, specialist, instrument])
         database.flush()
         account_id = str(account.id)
         llm_id = str(llm.id)
+        specialist_id = str(specialist.id)
+        instrument_id = str(instrument.id)
 
     def database_override() -> Generator[Session]:
         session = factory()
@@ -82,9 +104,50 @@ def test_market_research_automation_routes_are_authenticated_and_operational() -
         assert "/api/v1/markets/research/coordinated" in paths
         assert "/api/v1/markets/research/coordinated/{run_id}" in paths
         assert "/api/v1/markets/research/category-runs/{run_id}/llm-analysis/retry" in paths
+        assert "/api/v1/markets/instruments/{instrument_id}/mapping" in paths
         assert client.get("/api/v1/markets/research/schedule").status_code == 401
 
         headers = _mfa_headers(client)
+        mapping_payload = {
+            "integration_id": specialist_id,
+            "provider_symbol": "BTC-USD",
+            "venue": "COINBASE_EXCHANGE",
+            "mapping_revision": "mapping-v1",
+            "reason": "Approve reviewed Coinbase mapping",
+        }
+        mapping = client.put(
+            f"/api/v1/markets/instruments/{instrument_id}/mapping",
+            headers={
+                **headers,
+                "If-Match": f'"instrument-{instrument_id}-1"',
+                "Idempotency-Key": "market-symbol-mapping-0001",
+            },
+            json=mapping_payload,
+        )
+        assert mapping.status_code == 200
+        assert mapping.headers["etag"] == f'"instrument-{instrument_id}-2"'
+        mapping_replay = client.put(
+            f"/api/v1/markets/instruments/{instrument_id}/mapping",
+            headers={
+                **headers,
+                "If-Match": f'"instrument-{instrument_id}-1"',
+                "Idempotency-Key": "market-symbol-mapping-0001",
+            },
+            json=mapping_payload,
+        )
+        assert mapping_replay.status_code == 200
+        assert mapping_replay.json() == mapping.json()
+        conflicting_mapping = client.put(
+            f"/api/v1/markets/instruments/{instrument_id}/mapping",
+            headers={
+                **headers,
+                "If-Match": mapping.headers["etag"],
+                "Idempotency-Key": "market-symbol-mapping-0001",
+            },
+            json={**mapping_payload, "provider_symbol": "BTC-USDC"},
+        )
+        assert conflicting_mapping.status_code == 409
+
         schedule = client.put(
             "/api/v1/markets/research/schedule",
             headers={
@@ -170,7 +233,16 @@ def test_market_research_automation_routes_are_authenticated_and_operational() -
         assert report.status_code == 200
         assert len(report.json()["categories"]) == 3
         assert report.json()["ranking_is_not_activation"] is True
-        assert all(item["llm_analysis"]["authoritative"] is False for item in report.json()["categories"])
+        assert all(
+            item["llm_analysis"]["authoritative"] is False for item in report.json()["categories"]
+        )
+        assert report.json()["model_pin"]["exact_model_id"] == "gpt-5.6-terra"
+        assert report.json()["freshness_policy_manifest"]
+        assert all("policy_pins" in item for item in report.json()["categories"])
+        assert all("selection_proposal" in item for item in report.json()["categories"])
+        history = client.get("/api/v1/markets/research/coordinated", headers=headers)
+        assert history.status_code == 200
+        assert history.json()["items"][0]["id"] == started.json()["run_id"]
     finally:
         app.dependency_overrides.clear()
         engine.dispose()

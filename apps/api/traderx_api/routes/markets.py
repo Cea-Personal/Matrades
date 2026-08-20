@@ -47,6 +47,12 @@ from traderx.market_research.service import (
 from traderx.market_research.service import (
     approve_active_market as approve_active_market_service,
 )
+from traderx.shared.idempotency import (
+    IdempotencyRecord,
+    canonical_request_hash,
+    complete,
+    start_or_replay,
+)
 from traderx.shared.types import utc_now
 from traderx_api.dependencies import get_database_session
 from traderx_api.middleware.context import correlation_id
@@ -138,6 +144,42 @@ def put_instrument_mapping(
     if_match: str = Header(alias="If-Match"),
     idempotency_key: str = Header(alias="Idempotency-Key", min_length=16, max_length=200),
 ) -> dict[str, object]:
+    actor = _actor(context)
+    require_role(actor, {Role.OWNER}, "market.mapping.approve", require_mfa=True)
+    request_hash = canonical_request_hash(
+        {
+            "instrument_id": instrument_id,
+            "if_match": if_match,
+            **payload.model_dump(mode="json"),
+        }
+    )
+    idempotency = database.scalar(
+        select(IdempotencyRecord).where(
+            IdempotencyRecord.actor_id == context.user.id,
+            IdempotencyRecord.operation == "market.mapping.approve",
+            IdempotencyRecord.key == idempotency_key,
+        )
+    )
+    replay = start_or_replay(idempotency, request_hash)
+    if replay is not None:
+        replay_etag = replay.get("etag")
+        resource = replay.get("resource")
+        if isinstance(replay_etag, str):
+            response.headers["ETag"] = replay_etag
+        if not isinstance(resource, dict):
+            from traderx.shared.types import InvalidTransition
+
+            raise InvalidTransition("the idempotent mapping result is no longer available")
+        return {str(key): value for key, value in resource.items()}
+    if idempotency is None:
+        idempotency = IdempotencyRecord(
+            actor_id=context.user.id,
+            operation="market.mapping.approve",
+            key=idempotency_key,
+            request_hash=request_hash,
+        )
+        database.add(idempotency)
+        database.flush()
     instrument = database.get(Instrument, instrument_id)
     integration = database.get(Integration, payload.integration_id)
     if instrument is None or integration is None:
@@ -161,26 +203,30 @@ def put_instrument_mapping(
         from traderx.shared.types import InvalidTransition
 
         raise InvalidTransition("the specialist is not healthy and entitled for this category")
-    alias = approve_symbol_mapping(
-        database,
-        _actor(context),
-        instrument=instrument,
-        integration_id=integration.id,
-        provider=integration.provider,
-        provider_symbol=payload.provider_symbol,
-        venue=payload.venue,
-        catalogue_revision=integration.catalogue_revision or definition.catalogue_revision,
-        mapping_revision=payload.mapping_revision,
-        contract_variant=payload.contract_variant,
-        reason=payload.reason,
-        now=utc_now(),
-        correlation_id=correlation_id.get() or "unavailable",
-        idempotency_key=idempotency_key,
-    )
-    database.commit()
-    database.refresh(instrument)
-    response.headers["ETag"] = f'"instrument-{instrument.id}-{instrument.version}"'
-    return {
+    try:
+        alias = approve_symbol_mapping(
+            database,
+            actor,
+            instrument=instrument,
+            integration_id=integration.id,
+            provider=integration.provider,
+            provider_symbol=payload.provider_symbol,
+            venue=payload.venue,
+            catalogue_revision=integration.catalogue_revision or definition.catalogue_revision,
+            mapping_revision=payload.mapping_revision,
+            contract_variant=payload.contract_variant,
+            reason=payload.reason,
+            now=utc_now(),
+            correlation_id=correlation_id.get() or "unavailable",
+            idempotency_key=idempotency_key,
+        )
+    except ValueError as exc:
+        from traderx.shared.types import InvalidTransition
+
+        raise InvalidTransition(str(exc)) from exc
+    database.flush()
+    etag = f'"instrument-{instrument.id}-{instrument.version}"'
+    body: dict[str, object] = {
         "id": str(alias.id),
         "instrument_id": str(instrument.id),
         "provider": alias.provider,
@@ -190,6 +236,15 @@ def put_instrument_mapping(
         "contract_variant": alias.contract_variant,
         "status": "APPROVED",
     }
+    complete(
+        idempotency,
+        status=200,
+        body={"resource": body, "etag": etag},
+        completed_at=utc_now(),
+    )
+    database.commit()
+    response.headers["ETag"] = etag
+    return body
 
 
 @router.post("/research", status_code=202)

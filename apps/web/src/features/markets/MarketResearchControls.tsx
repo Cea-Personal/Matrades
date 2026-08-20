@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import type { CoordinatedMarketResearchReport, MarketResearchModelConfiguration, MarketResearchSchedule } from "@/lib/api/generated";
 
@@ -65,14 +65,15 @@ export function MarketResearchControls({ onReport, onStatus }: { onReport: (repo
   }, []);
 
   useEffect(() => { void Promise.resolve().then(load); }, [load]);
-  const availableModels = models.filter((item) => integrations.some((integration) => {
+  const availableModels = useMemo(() => models.filter((item) => integrations.some((integration) => {
     const provider = item.value.split(":")[0];
     return integration.provider === provider && integration.category === "LLM" && (integration.state === "HEALTHY" || integration.status === "HEALTHY");
-  }));
+  })), [integrations]);
+  const effectiveModel = availableModels.some((item) => item.value === model) ? model : (availableModels[0]?.value ?? "");
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const [provider, exactModel] = model.split(":");
+    const [provider, exactModel] = effectiveModel.split(":");
     const integration = integrations.find((item) => item.provider === provider && item.category === "LLM");
     if (!accountId) { setError("Configure the trading account before scheduling market research."); return; }
     if (!integration) { setError(`Connect and qualify ${provider === "OPENAI_RESPONSES" ? "OpenAI" : "Anthropic"} in Integrations first.`); return; }
@@ -119,13 +120,14 @@ export function MarketResearchControls({ onReport, onStatus }: { onReport: (repo
         await new Promise((resolve) => setTimeout(resolve, 2000));
       }
       if (!report) throw new Error("The coordinated report is unavailable.");
-      onReport(report);
-      setHistory((current) => [report!, ...current.filter((item) => item.id !== report!.id)]);
-      onStatus(["COMPLETED", "PARTIAL", "FAILED"].includes(report.state) ? "All three category runs finished. Rankings remain proposals until human activation." : "The coordinated run continues safely in the background. You can close the browser and return to its history.");
+      const completedReport = report;
+      onReport(completedReport);
+      setHistory((current) => [completedReport, ...current.filter((item) => item.id !== completedReport.id)]);
+      onStatus(["COMPLETED", "PARTIAL", "FAILED"].includes(completedReport.state) ? "All three category runs finished. Rankings remain proposals until human activation." : "The coordinated run continues safely in the background. You can close the browser and return to its history.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "TraderX could not run coordinated market research.");
     } finally { setBusy(false); }
   }
 
-  return <section aria-labelledby="market-research-automation"><p className="section-kicker">Browser-independent schedule</p><h3 id="market-research-automation">Market research automation</h3><p>One database-owned occurrence coordinates Commodity, Forex, and Cryptocurrency. The LLM explains evidence only; deterministic gates and ranking retain authority.</p><form className="setup-form" onSubmit={save}><label htmlFor="research-model">Global research model<select id="research-model" onChange={(event) => setModel(event.target.value)} required value={model}>{availableModels.length === 0 ? <option value="">Qualify OpenAI or Anthropic first</option> : availableModels.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label><label htmlFor="research-interval">Research interval<input id="research-interval" min="3600" max="2592000" onChange={(event) => setInterval(event.target.value)} required type="number" value={interval} /></label><label htmlFor="research-anchor">Anchor start<input id="research-anchor" onChange={(event) => setAnchor(event.target.value)} required type="datetime-local" value={anchor} /></label><label htmlFor="research-timezone">Account time zone<input id="research-timezone" onChange={(event) => setTimezone(event.target.value)} required value={timezone} /></label><label className="confirmation-check" htmlFor="research-enabled"><input checked={enabled} id="research-enabled" onChange={(event) => setEnabled(event.target.checked)} type="checkbox" /> Enable recurring research</label><label htmlFor="research-reason">Reason for research settings<textarea id="research-reason" minLength={8} onChange={(event) => setReason(event.target.value)} required value={reason} /></label><div className="integration-form-actions"><button disabled={busy || !anchor || !model} type="submit">Save research settings</button><button className="secondary-button" disabled={busy} onClick={() => void runAll()} type="button">Run all three markets</button></div></form><dl className="evidence-metrics"><div><dt>Next occurrence</dt><dd>{nextRun ? new Date(nextRun).toLocaleString() : "Not scheduled"}</dd></div><div><dt>Last occurrence</dt><dd>{lastRun ? new Date(lastRun).toLocaleString() : "Not run"}</dd></div><div><dt>Overlap policy</dt><dd>Skip; no catch-up</dd></div></dl><section aria-labelledby="research-run-history"><h4 id="research-run-history">Coordinated run history</h4>{history.length ? <ol className="timeline">{history.map((item) => <li key={item.id}><strong>{item.state} · {item.trigger}</strong><span>{item.categories.map((category) => `${category.category}: ${category.outcome}`).join(" · ")}</span><button className="secondary-button" onClick={() => onReport(item)} type="button">View run</button></li>)}</ol> : <p className="workspace-notice">No coordinated market-research run has been recorded yet.</p>}</section>{error ? <p className="status-message" data-tone="error" role="alert">{error}</p> : null}</section>;
+  return <section aria-labelledby="market-research-automation"><p className="section-kicker">Browser-independent schedule</p><h3 id="market-research-automation">Market research automation</h3><p>One database-owned occurrence coordinates Commodity, Forex, and Cryptocurrency. The LLM explains evidence only; deterministic gates and ranking retain authority.</p><form className="setup-form" onSubmit={save}><label htmlFor="research-model">Global research model<select id="research-model" onChange={(event) => setModel(event.target.value)} required value={effectiveModel}>{availableModels.length === 0 ? <option value="">Qualify OpenAI or Anthropic first</option> : availableModels.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label><label htmlFor="research-interval">Research interval<input id="research-interval" min="3600" max="2592000" onChange={(event) => setInterval(event.target.value)} required type="number" value={interval} /></label><label htmlFor="research-anchor">Anchor start<input id="research-anchor" onChange={(event) => setAnchor(event.target.value)} required type="datetime-local" value={anchor} /></label><label htmlFor="research-timezone">Account time zone<input id="research-timezone" onChange={(event) => setTimezone(event.target.value)} required value={timezone} /></label><label className="confirmation-check" htmlFor="research-enabled"><input checked={enabled} id="research-enabled" onChange={(event) => setEnabled(event.target.checked)} type="checkbox" /> Enable recurring research</label><label htmlFor="research-reason">Reason for research settings<textarea id="research-reason" minLength={8} onChange={(event) => setReason(event.target.value)} required value={reason} /></label><div className="integration-form-actions"><button disabled={busy || !anchor || !effectiveModel} type="submit">Save research settings</button><button className="secondary-button" disabled={busy} onClick={() => void runAll()} type="button">Run all three categories</button></div></form><dl className="evidence-metrics"><div><dt>Next occurrence</dt><dd>{nextRun ? new Date(nextRun).toLocaleString() : "Not scheduled"}</dd></div><div><dt>Last occurrence</dt><dd>{lastRun ? new Date(lastRun).toLocaleString() : "Not run"}</dd></div><div><dt>Overlap policy</dt><dd>Skip; no catch-up</dd></div></dl><section aria-labelledby="research-run-history"><h4 id="research-run-history">Coordinated run history</h4>{history.length ? <ol className="timeline">{history.map((item) => <li key={item.id}><strong>{item.state} · {item.trigger}</strong><span>{item.categories.map((category) => `${category.category}: ${category.outcome}`).join(" · ")}</span><button className="secondary-button" onClick={() => onReport(item)} type="button">View run</button></li>)}</ol> : <p className="workspace-notice">No coordinated market-research run has been recorded yet.</p>}</section>{error ? <p className="status-message" data-tone="error" role="alert">{error}</p> : null}</section>;
 }

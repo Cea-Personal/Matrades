@@ -26,7 +26,7 @@ type Workspace =
   | "operations";
 
 const workspaces: Array<{ id: Workspace; label: string; description: string }> = [
-  { id: "integrations", label: "Account connection", description: "Manage your MT5 read-only account connection." },
+  { id: "integrations", label: "Integrations", description: "Manage the MT5 read-only account connection and reviewed research providers." },
   { id: "account-risk", label: "Account & risk", description: "Review account identity and deliberately version governed risk limits." },
   { id: "markets", label: "Markets", description: "Research and explicitly approve eligible active markets." },
   { id: "strategies", label: "Strategies", description: "Build, test, and validate immutable strategy evidence." },
@@ -87,7 +87,7 @@ export function CommandCenterWorkspace({
         ))}
       </nav>
       <div className="workspace-content">
-        {current === "integrations" && (account ? <Integrations account={account} onAccountChanged={onAccountChanged} /> : <EmptyDataNotice area="Account connection" />)}
+        {current === "integrations" && (account ? <Integrations account={account} onAccountChanged={onAccountChanged} /> : <EmptyDataNotice area="Integrations" />)}
         {current === "account-risk" && <AccountRiskSetup account={account} onAccountChanged={onAccountChanged} operational />}
         {current === "markets" && <MarketsWorkspace />}
         {current === "strategies" && <StrategiesWorkspace />}

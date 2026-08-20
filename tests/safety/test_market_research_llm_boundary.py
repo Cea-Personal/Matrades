@@ -27,6 +27,14 @@ class FakeLlmPort:
         return self.responses.pop(0)
 
 
+class FailingLlmPort:
+    def test_connection(self, exact_model_id: str) -> dict[str, object]:
+        return {"model": exact_model_id, "healthy": False}
+
+    def analyze(self, request: LlmAnalysisRequest) -> LlmAnalysisResponse:
+        raise RuntimeError("provider response must not escape the advisory boundary")
+
+
 def _run(database: Session, now: datetime) -> MarketResearchRun:
     account = TradingAccount(
         name="Demo",
@@ -149,4 +157,26 @@ def test_exhaustion_is_visible_and_explicit_retry_uses_original_pin() -> None:
         )
         assert retried.explicit_retry is True
         assert retry_port.requests[0].exact_model_id == "gpt-5.6-terra"
+        assert run.deterministic_result_hash == "deterministic-result-hash"
+
+
+def test_provider_failure_cannot_roll_back_the_deterministic_result() -> None:
+    load_model_metadata()
+    engine = create_engine("sqlite+pysqlite://")
+    Base.metadata.create_all(engine)
+    now = datetime(2026, 8, 14, 12, 0, tzinfo=UTC)
+    with Session(engine) as database, database.begin():
+        run = _run(database, now)
+        result = run_advisory_analysis(
+            database,
+            run,
+            FailingLlmPort(),
+            evidence={"category": "FOREX"},
+            now=now,
+            sleep=lambda _seconds: None,
+        )
+
+        assert result.state == "FAILED"
+        assert result.failure_reason == "ADVISORY_PROVIDER_FAILURE"
+        assert run.llm_analysis_state == "UNAVAILABLE"
         assert run.deterministic_result_hash == "deterministic-result-hash"

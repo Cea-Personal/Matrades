@@ -17,7 +17,7 @@ test("scheduled three-category research stays in Markets and keeps analysis advi
   await page.getByRole("button", { name: "Save research settings" }).click();
   await expect(page.getByRole("status")).toContainText("future runs");
 
-  await page.getByRole("button", { name: "Run all three markets" }).click();
+  await page.getByRole("button", { name: "Run all three categories" }).click();
   const report = page.getByRole("region", { name: "Coordinated market research" });
   await expect(report).toContainText("Commodity");
   await expect(report).toContainText("Forex");
@@ -27,8 +27,15 @@ test("scheduled three-category research stays in Markets and keeps analysis advi
   await expect(report).toContainText("Ranking is not activation");
   await expect(report).toContainText("gpt-5.6-terra");
   await expect(report).toContainText("analysis unavailable");
+  await expect(report).toContainText("Rank 1");
+  await expect(report).toContainText("volatility");
+  await expect(report).toContainText("Deterministic rationale");
+  await expect(report).toContainText("advisory provider failure");
+  await expect(report).toContainText("Commodity evidence is coherent");
 
-  await report.getByRole("button", { name: "Retry pinned analysis" }).click();
+  await report.getByRole("button", { name: "Retry Forex pinned analysis" }).click();
   await expect(page.getByRole("status")).toContainText("same pinned model");
-  await expect(page.getByRole("button", { name: "Review for activation" })).toBeVisible();
+  await expect(report.getByRole("button", { name: "Review Commodity proposal for activation" })).toBeVisible();
+  await expect(report.getByRole("button", { name: "Review Forex proposal for activation" })).toBeVisible();
+  await expect(report.getByRole("button", { name: /proposal for activation/ })).toHaveCount(2);
 });

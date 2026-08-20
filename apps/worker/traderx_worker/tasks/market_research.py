@@ -1,22 +1,35 @@
 from __future__ import annotations
 
 import json
-from datetime import timedelta
+from collections.abc import Callable, Sequence
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 from celery import shared_task
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from traderx.integrations.crypto import EncryptedSecret, SecretBox
 from traderx.integrations.model import CredentialVersion, FreshnessPolicyVersion, Integration
-from traderx.integrations.ports import MarketDataCapability, SourceSemantics
+from traderx.integrations.ports import (
+    LlmAnalysisPort,
+    MarketDataCapability,
+    MarketDataPort,
+    ProviderObservation,
+    SourceSemantics,
+)
 from traderx.integrations.providers.anthropic_messages import AnthropicMessagesAdapter
 from traderx.integrations.providers.openai_responses import OpenAIResponsesAdapter
 from traderx.jobs.model import BackgroundJob, JobState
-from traderx.market_data.model import Instrument, InstrumentAlias
+from traderx.market_data.ingestion import ProviderBatch, persist_provider_observations
+from traderx.market_data.model import (
+    DataSetManifest,
+    Instrument,
+    InstrumentAlias,
+    MarketObservation,
+)
 from traderx.market_data.providers.cboe_fx_spot import CboeFxSpotAdapter
 from traderx.market_data.providers.cme_group import CmeGroupAdapter
 from traderx.market_data.providers.coinbase_exchange import CoinbaseExchangeAdapter
@@ -29,7 +42,7 @@ from traderx.market_data.source_evidence import (
     SourceRole,
     build_source_evidence,
 )
-from traderx.market_research.coordinator import record_category_outcome
+from traderx.market_research.coordinator import claim_category_run, record_category_outcome
 from traderx.market_research.llm_analysis import retry_advisory_analysis, run_advisory_analysis
 from traderx.market_research.model import (
     CandidateAssessment,
@@ -42,6 +55,7 @@ from traderx.market_research.source_selection import (
     SourceSelection,
     select_market_source,
 )
+from traderx.notifications.router import notify_market_research_owners
 from traderx.shared.config import get_settings
 from traderx.shared.types import InvalidTransition, utc_now
 from traderx_worker.runtime.jobs import checkpoint
@@ -128,15 +142,34 @@ def dispatch_coordinated_run(coordinated_run_id: str) -> dict[str, object]:
     """Dispatch exactly the three already-persisted category children."""
 
     with session_factory().begin() as database:
-        parent = database.get(CoordinatedMarketResearchRun, UUID(coordinated_run_id))
+        parent = database.scalar(
+            select(CoordinatedMarketResearchRun)
+            .where(CoordinatedMarketResearchRun.id == UUID(coordinated_run_id))
+            .with_for_update(skip_locked=True)
+        )
         if parent is None:
-            return {"run_id": coordinated_run_id, "status": "MISSING"}
+            return {"run_id": coordinated_run_id, "status": "NOT_CLAIMED"}
+        if parent.state in {"COMPLETED", "PARTIAL", "FAILED"}:
+            return {"run_id": coordinated_run_id, "status": parent.state}
+        now = utc_now()
         parent.state = "RUNNING"
-        parent.started_at = parent.started_at or utc_now()
+        parent.started_at = parent.started_at or now
         children = list(
             database.scalars(
                 select(MarketResearchRun)
-                .where(MarketResearchRun.coordinated_run_id == parent.id)
+                .where(
+                    MarketResearchRun.coordinated_run_id == parent.id,
+                    or_(
+                        MarketResearchRun.state == "QUEUED",
+                        and_(
+                            MarketResearchRun.state == "RUNNING",
+                            or_(
+                                MarketResearchRun.lease_expires_at.is_(None),
+                                MarketResearchRun.lease_expires_at <= now,
+                            ),
+                        ),
+                    ),
+                )
                 .order_by(MarketResearchRun.category)
             )
         )
@@ -146,62 +179,151 @@ def dispatch_coordinated_run(coordinated_run_id: str) -> dict[str, object]:
     return {"run_id": coordinated_run_id, "status": "DISPATCHED", "children": child_ids}
 
 
-@shared_task(name="traderx.market_research.run_category", acks_late=True)
-def run_coordinated_category(category_run_id: str) -> dict[str, str]:
+@shared_task(name="traderx.market_research.run_category", bind=True, acks_late=True)
+def run_coordinated_category(self: object, category_run_id: str) -> dict[str, str]:
     """Idempotently evaluate one child; ranking never changes an active assignment."""
 
+    run_id = UUID(category_run_id)
+    lease_token = _task_id(self)
     with session_factory().begin() as database:
-        run = database.get(MarketResearchRun, UUID(category_run_id))
-        if run is None:
-            return {"run_id": category_run_id, "status": "MISSING"}
-        if run.state in {"COMPLETED", "BLOCKED"}:
-            return {"run_id": category_run_id, "status": run.state}
-        source_selection = _collect_category_sources(database, run.category)
-        evaluated = execute_market_research(
+        claim = claim_category_run(
             database,
-            category=run.category,
-            method_version=run.method_version,
-            existing_run=run,
-            source_selection=source_selection,
+            run_id,
+            now=utc_now(),
+            lease_owner="celery-market-research",
+            lease_token=lease_token,
         )
-        if evaluated.state == "COMPLETED":
-            port = _analysis_port(database, evaluated)
-            if port is None:
-                evaluated.llm_analysis_state = "UNAVAILABLE"
-            else:
-                try:
-                    run_advisory_analysis(
+    if claim is None:
+        return {"run_id": category_run_id, "status": "NOT_CLAIMED"}
+
+    try:
+        with session_factory().begin() as database:
+            run = database.scalar(
+                select(MarketResearchRun)
+                .where(
+                    MarketResearchRun.id == run_id,
+                    MarketResearchRun.lease_token == lease_token,
+                )
+                .with_for_update()
+            )
+            if run is None:
+                return {"run_id": category_run_id, "status": "FENCED"}
+            source_selection = _collect_category_sources(database, run.category)
+            evaluated = execute_market_research(
+                database,
+                category=run.category,
+                method_version=run.method_version,
+                existing_run=run,
+                source_selection=source_selection,
+            )
+            if evaluated.state == "COMPLETED":
+                port = _analysis_port(database, evaluated)
+                if port is None:
+                    evaluated.llm_analysis_state = "UNAVAILABLE"
+                    notify_market_research_owners(
                         database,
-                        evaluated,
-                        port,
-                        evidence=_advisory_evidence(database, evaluated),
-                        now=utc_now(),
+                        kind="LLM_UNAVAILABLE",
+                        subject_id=str(evaluated.id),
+                        payload={
+                            "category": evaluated.category,
+                            "failure_reason": "PINNED_MODEL_INTEGRATION_UNAVAILABLE",
+                            "retry_eligible": True,
+                            "authoritative": False,
+                        },
+                        created_at=utc_now(),
                     )
-                finally:
-                    _close_port(port)
-        outcome = "BLOCKED" if evaluated.state == "BLOCKED" else "RECOMMENDED"
-        record_category_outcome(
-            database,
-            evaluated,
-            outcome=outcome,
-            block_reasons=evaluated.block_reasons,
-            completed_at=evaluated.completed_at or utc_now(),
-        )
-    return {"run_id": category_run_id, "status": outcome}
+                else:
+                    try:
+                        run_advisory_analysis(
+                            database,
+                            evaluated,
+                            port,
+                            evidence=_advisory_evidence(database, evaluated),
+                            now=utc_now(),
+                        )
+                    finally:
+                        _close_port(port)
+            outcome = "BLOCKED" if evaluated.state == "BLOCKED" else "RECOMMENDED"
+            record_category_outcome(
+                database,
+                evaluated,
+                outcome=outcome,
+                block_reasons=evaluated.block_reasons,
+                completed_at=evaluated.completed_at or utc_now(),
+            )
+        return {"run_id": category_run_id, "status": outcome}
+    except Exception as error:
+        reason = f"WORKER_{type(error).__name__.upper()}"
+        with session_factory().begin() as database:
+            run = database.scalar(
+                select(MarketResearchRun)
+                .where(
+                    MarketResearchRun.id == run_id,
+                    MarketResearchRun.lease_token == lease_token,
+                )
+                .with_for_update()
+            )
+            if run is None:
+                return {"run_id": category_run_id, "status": "FENCED"}
+            run.current_error = reason
+            if run.attempt_count >= 3:
+                record_category_outcome(
+                    database,
+                    run,
+                    outcome="FAILED",
+                    block_reasons=[reason],
+                    completed_at=utc_now(),
+                )
+                status = "FAILED"
+            else:
+                run.state = "QUEUED"
+                run.lease_owner = None
+                run.lease_token = None
+                run.lease_expires_at = None
+                status = "RETRY_QUEUED"
+        return {"run_id": category_run_id, "status": status}
 
 
-@shared_task(name="traderx.market_research.retry_llm", acks_late=True)
-def retry_pinned_analysis(category_run_id: str) -> dict[str, str]:
+@shared_task(name="traderx.market_research.retry_llm", bind=True, acks_late=True)
+def retry_pinned_analysis(self: object, category_run_id: str) -> dict[str, str]:
     """Durable checkpoint for a user-requested same-pin retry.
 
     Runtime adapter construction remains catalogue-bound; unavailable credentials leave
     the advisory state visible without affecting the deterministic result.
     """
 
+    run_id = UUID(category_run_id)
+    lease_token = _task_id(self)
+    now = utc_now()
     with session_factory().begin() as database:
-        run = database.get(MarketResearchRun, UUID(category_run_id))
+        run = database.scalar(
+            select(MarketResearchRun)
+            .where(MarketResearchRun.id == run_id)
+            .with_for_update(skip_locked=True)
+        )
         if run is None:
-            return {"run_id": category_run_id, "status": "MISSING"}
+            return {"run_id": category_run_id, "status": "NOT_CLAIMED"}
+        if run.llm_analysis_state == "RUNNING" and (
+            run.lease_expires_at is None or run.lease_expires_at > now
+        ):
+            return {"run_id": category_run_id, "status": "NOT_CLAIMED"}
+        if run.llm_analysis_state not in {"RETRY_QUEUED", "RUNNING"}:
+            return {"run_id": category_run_id, "status": run.llm_analysis_state}
+        run.llm_analysis_state = "RUNNING"
+        run.lease_owner = "celery-market-research-llm"
+        run.lease_token = lease_token
+        run.lease_expires_at = now + timedelta(minutes=15)
+    with session_factory().begin() as database:
+        run = database.scalar(
+            select(MarketResearchRun)
+            .where(
+                MarketResearchRun.id == run_id,
+                MarketResearchRun.lease_token == lease_token,
+            )
+            .with_for_update()
+        )
+        if run is None:
+            return {"run_id": category_run_id, "status": "FENCED"}
         port = _analysis_port(database, run)
         if port is None:
             run.llm_analysis_state = "UNAVAILABLE"
@@ -218,6 +340,9 @@ def retry_pinned_analysis(category_run_id: str) -> dict[str, str]:
                 status = attempt.state
             finally:
                 _close_port(port)
+        run.lease_owner = None
+        run.lease_token = None
+        run.lease_expires_at = None
     return {"run_id": category_run_id, "status": status, "authoritative": "false"}
 
 
@@ -230,6 +355,14 @@ _REQUIRED_CAPABILITIES = {
     "COMMODITY": (MarketDataCapability.TRADED_VOLUME, MarketDataCapability.OPEN_INTEREST),
     "FOREX": (MarketDataCapability.TRADED_VOLUME, MarketDataCapability.ORDER_BOOK),
     "CRYPTO": (MarketDataCapability.TRADED_VOLUME, MarketDataCapability.ORDER_BOOK),
+}
+_COLLECT_CAPABILITIES = {
+    **_REQUIRED_CAPABILITIES,
+    "COMMODITY": (
+        MarketDataCapability.TRADED_VOLUME,
+        MarketDataCapability.OPEN_INTEREST,
+        MarketDataCapability.ORDER_BOOK,
+    ),
 }
 
 
@@ -260,6 +393,24 @@ def _collect_category_sources(database: Session, category: str) -> SourceSelecti
                 evaluated_at=now,
                 raw_hash=lambda: transport.last_response_hash if transport else None,
             )
+            for conflict in (
+                item
+                for item in specialist
+                if item.conflict_state == ConflictState.MATERIAL_CONFLICT
+            ):
+                notify_market_research_owners(
+                    database,
+                    kind="SOURCE_CONFLICT",
+                    subject_id=conflict.raw_reference or f"{provider}:{category}",
+                    payload={
+                        "category": category,
+                        "provider": provider,
+                        "capability": conflict.capability,
+                        "provider_symbol": conflict.provider_symbol,
+                        "active_assignment_changed": False,
+                    },
+                    created_at=now,
+                )
             complete_liquidity = any(item.capability == "LIQUIDITY" for item in specialist)
             attempts.append(SourceAttempt(provider, 1, complete_liquidity, None))
             if not complete_liquidity:
@@ -282,7 +433,9 @@ def _collect_category_sources(database: Session, category: str) -> SourceSelecti
     )
 
 
-def _market_data_adapter(database: Session, integration: Integration):  # type: ignore[no-untyped-def]
+def _market_data_adapter(
+    database: Session, integration: Integration
+) -> tuple[MarketDataPort, ProviderHttpTransport]:
     credentials = _credentials(database, integration)
     token = str(credentials.get("api_token")) if credentials.get("api_token") else None
     transport = ProviderHttpTransport(integration.provider, credential=token)
@@ -299,11 +452,11 @@ def _market_data_adapter(database: Session, integration: Integration):  # type: 
 def _collect_specialist_evidence(
     database: Session,
     integration: Integration,
-    adapter,  # type: ignore[no-untyped-def]
+    adapter: MarketDataPort,
     *,
     category: str,
-    evaluated_at,
-    raw_hash,  # type: ignore[no-untyped-def]
+    evaluated_at: datetime,
+    raw_hash: Callable[[], str | None],
 ) -> list[SourceEvidence]:
     evidence: list[SourceEvidence] = []
     complete_by_instrument: dict[UUID, set[str]] = {}
@@ -320,30 +473,66 @@ def _collect_specialist_evidence(
         )
     )
     for alias in aliases:
-        for capability in _REQUIRED_CAPABILITIES[category]:
+        for capability in _COLLECT_CAPABILITIES[category]:
             observations = adapter.get_observations(alias.native_symbol, capability)
-            if not observations:
-                continue
-            _record_specialist_metric(
+            policy = _freshness_policy(database, integration.provider, capability.value)
+            value = _observation_metric(observations, capability)
+            coherent = bool(observations) and _observations_are_coherent(observations)
+            complete = bool(observations) and value is not None and value > 0 and coherent
+            conflict = (
+                ConflictState.CLEAR
+                if coherent
+                else ConflictState.MATERIAL_CONFLICT
+                if observations
+                else ConflictState.UNCHECKED
+            )
+            retained = persist_provider_observations(
                 database,
-                alias,
-                integration,
-                capability,
-                observations,
-                raw_reference=raw_hash(),
+                instrument_id=alias.instrument_id,
+                integration_id=integration.id,
+                batch=ProviderBatch(
+                    provider=integration.provider,
+                    provider_symbol=alias.native_symbol,
+                    retrieved_at=evaluated_at,
+                    payload=json.dumps(
+                        [item.payload for item in observations],
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        default=str,
+                    ).encode(),
+                    venue=alias.venue,
+                    capability=capability.value,
+                    semantics=SourceSemantics.ACTUAL.value,
+                    source_role=SourceRole.SPECIALIST_PRIMARY.value,
+                    catalogue_revision=integration.catalogue_revision,
+                    adapter_revision=integration.adapter_revision,
+                    mapping_revision=alias.mapping_revision,
+                    freshness_policy_version=policy.version,
+                    retry_policy_version="retry-2026-08-v1",
+                    entitlement_status=integration.entitlement_status,
+                    source_observed_at=max(
+                        (item.observed_at for item in observations if item.observed_at is not None),
+                        default=None,
+                    ),
+                    raw_reference=raw_hash(),
+                ),
+                observations=observations,
+                normalized_value=value,
+                quality="VERIFIED" if complete else "QUARANTINED",
+                conflict_state=conflict,
+                complete=complete,
             )
             latest = max(
                 (item.observed_at for item in observations if item.observed_at is not None),
                 default=None,
             )
-            policy = _freshness_policy(database, integration.provider, capability.value)
             item = build_source_evidence(
                 provider=integration.provider,
                 capability=capability.value,
-                semantics=SourceSemantics.ACTUAL,
+                semantics=(SourceSemantics.ACTUAL if complete else SourceSemantics.UNAVAILABLE),
                 source_role=SourceRole.SPECIALIST_PRIMARY,
                 observed_at=latest,
-                received_at=max(item.received_at for item in observations),
+                received_at=max((item.received_at for item in observations), default=evaluated_at),
                 evaluated_at=evaluated_at,
                 policy=policy,
                 venue=alias.venue,
@@ -351,10 +540,13 @@ def _collect_specialist_evidence(
                 canonical_instrument_id=str(alias.instrument_id),
                 mapping_revision=alias.mapping_revision,
                 entitlement_status=integration.entitlement_status,
-                complete=all(item.complete for item in observations),
-                quality="VERIFIED",
-                conflict_state=ConflictState.CLEAR,
-                raw_reference=raw_hash(),
+                complete=complete,
+                quality="VERIFIED" if complete else "QUARANTINED",
+                conflict_state=conflict,
+                raw_reference=(
+                    f"dataset-manifest:{retained.manifest.id}:{retained.manifest.content_hash}"
+                ),
+                measures={"value": str(value)} if value is not None else {},
             )
             evidence.append(item)
             if item.qualifies:
@@ -366,8 +558,7 @@ def _collect_specialist_evidence(
         components = [
             item
             for item in evidence
-            if item.canonical_instrument_id == str(instrument_id)
-            and item.capability in required
+            if item.canonical_instrument_id == str(instrument_id) and item.capability in required
         ]
         evidence.append(
             _composite_liquidity_evidence(
@@ -379,88 +570,106 @@ def _collect_specialist_evidence(
     return evidence
 
 
-def _record_specialist_metric(
-    database: Session,
-    alias: InstrumentAlias,
-    integration: Integration,
-    capability: MarketDataCapability,
-    observations,  # type: ignore[no-untyped-def]
-    *,
-    raw_reference: str | None,
-) -> None:
-    instrument = database.get(Instrument, alias.instrument_id)
-    if instrument is None:
-        return
-    value = _observation_metric(observations, capability)
-    if value is None or value <= 0:
-        return
-    existing = instrument.contract_spec.get("specialist_metrics", {})
-    metrics = dict(existing) if isinstance(existing, dict) else {}
-    metrics[capability.value] = str(value)
-    metrics.update(
-        {
-            "provider": integration.provider,
-            "venue": alias.venue,
-            "mapping_revision": alias.mapping_revision,
-            "catalogue_revision": integration.catalogue_revision,
-            "raw_reference": raw_reference,
-        }
-    )
-    instrument.contract_spec = {**instrument.contract_spec, "specialist_metrics": metrics}
-
-
-def _observation_metric(observations, capability: MarketDataCapability):  # type: ignore[no-untyped-def]
+def _observation_metric(
+    observations: Sequence[ProviderObservation], capability: MarketDataCapability
+) -> Decimal | None:
+    if not observations:
+        return None
     if capability == MarketDataCapability.ORDER_BOOK:
         total = Decimal("0")
         for observation in observations:
+            found_side = False
             for side in ("bids", "asks", "depth"):
                 levels = observation.payload.get(side, [])
                 if not isinstance(levels, list):
-                    continue
+                    return None
+                if levels:
+                    found_side = True
                 for level in levels:
                     if isinstance(level, (list, tuple)) and len(level) >= 2:
-                        total += _decimal_or_zero(level[1])
+                        value = _strict_decimal(level[1])
                     elif isinstance(level, dict):
-                        total += _decimal_or_zero(
+                        value = _strict_decimal(
                             level.get("size") or level.get("volume") or level.get("quantity")
                         )
-        return total or None
+                    else:
+                        return None
+                    if value is None or value <= 0:
+                        return None
+                    total += value
+            if not found_side:
+                return None
+        return total if total > 0 else None
     keys = (
         ("open_interest", "openInterest")
         if capability == MarketDataCapability.OPEN_INTEREST
         else ("traded_volume", "volume", "size", "quantity")
     )
-    values = [
-        _decimal_or_zero(observation.payload.get(key))
-        for observation in observations
-        for key in keys
-        if observation.payload.get(key) is not None
-    ]
+    values: list[Decimal] = []
+    for observation in observations:
+        raw = next(
+            (
+                observation.payload.get(key)
+                for key in keys
+                if observation.payload.get(key) is not None
+            ),
+            None,
+        )
+        value = _strict_decimal(raw)
+        if value is None or value <= 0:
+            return None
+        values.append(value)
     if not values:
         return None
-    return max(values) if capability == MarketDataCapability.OPEN_INTEREST else sum(values)
+    return (
+        max(values)
+        if capability == MarketDataCapability.OPEN_INTEREST
+        else sum(values, Decimal("0"))
+    )
 
 
-def _decimal_or_zero(value) -> Decimal:  # type: ignore[no-untyped-def]
+def _strict_decimal(value: object) -> Decimal | None:
     try:
-        return Decimal(str(value))
+        parsed = Decimal(str(value))
     except (InvalidOperation, TypeError, ValueError):
-        return Decimal("0")
+        return None
+    return parsed if parsed.is_finite() else None
+
+
+def _observations_are_coherent(observations: Sequence[ProviderObservation]) -> bool:
+    """Reject contradictory duplicate provider identities instead of averaging them."""
+
+    seen: dict[tuple[str, str, str, str], str] = {}
+    for item in observations:
+        identity = (
+            item.provider_event_id or "",
+            item.sequence or "",
+            item.revision or "",
+            item.observed_at.isoformat() if item.observed_at else "",
+        )
+        payload_hash = json.dumps(item.payload, sort_keys=True, separators=(",", ":"), default=str)
+        previous = seen.get(identity)
+        if previous is not None and previous != payload_hash:
+            return False
+        seen[identity] = payload_hash
+    return all(item.complete and item.observed_at is not None for item in observations)
 
 
 def _mt5_fallback_evidence(
-    database: Session, *, category: str, evaluated_at
-) -> list[SourceEvidence]:  # type: ignore[no-untyped-def]
+    database: Session, *, category: str, evaluated_at: datetime
+) -> list[SourceEvidence]:
     # Commodity and crypto liquidity require actual specialist measures in V1.
     if category != "FOREX":
         return []
     evidence: list[SourceEvidence] = []
-    for instrument in database.scalars(
-        select(Instrument).where(Instrument.category == category)
-    ):
+    for instrument in database.scalars(select(Instrument).where(Instrument.category == category)):
         spec = instrument.contract_spec
         if not spec.get("tick_volumes") or spec.get("bid") is None or spec.get("ask") is None:
             continue
+        tick_volumes = _strict_decimal_values(spec.get("tick_volumes"))
+        if not tick_volumes or any(value <= 0 for value in tick_volumes):
+            continue
+        broker_activity = sum(tick_volumes, Decimal("0"))
         observed_at = _instant(spec.get("observed_at"))
         policy = _freshness_policy(database, "MT5_TERMINAL_BRIDGE", "CANDLES")
         evidence.append(
@@ -481,56 +690,72 @@ def _mt5_fallback_evidence(
                 quality="VERIFIED",
                 conflict_state=ConflictState.CLEAR,
                 fallback_reason="SPECIALIST_RETRIES_EXHAUSTED",
+                measures={
+                    "TRADED_VOLUME": str(broker_activity),
+                    "ORDER_BOOK": str(broker_activity / Decimal(len(tick_volumes))),
+                },
             )
         )
     return evidence
 
 
 def _cached_external_evidence(
-    database: Session, *, category: str, evaluated_at
-) -> list[SourceEvidence]:  # type: ignore[no-untyped-def]
+    database: Session, *, category: str, evaluated_at: datetime
+) -> list[SourceEvidence]:
     cached: list[SourceEvidence] = []
     for instrument in database.scalars(select(Instrument).where(Instrument.category == category)):
-        values = instrument.contract_spec.get("cached_external_evidence", [])
-        if not isinstance(values, list):
-            continue
-        for raw in values:
-            if not isinstance(raw, dict) or raw.get("capability") != "LIQUIDITY":
+        rows = database.execute(
+            select(DataSetManifest, MarketObservation)
+            .join(MarketObservation, MarketObservation.dataset_manifest_id == DataSetManifest.id)
+            .where(
+                MarketObservation.instrument_id == instrument.id,
+                DataSetManifest.provider == _SPECIALISTS[category],
+                DataSetManifest.source_role == SourceRole.SPECIALIST_PRIMARY.value,
+            )
+            .order_by(DataSetManifest.created_at.desc(), MarketObservation.observed_at.desc())
+        ).all()
+        latest_by_capability: dict[str, tuple[DataSetManifest, MarketObservation]] = {}
+        for manifest, observation in rows:
+            latest_by_capability.setdefault(manifest.capability, (manifest, observation))
+        components: list[SourceEvidence] = []
+        for capability in _REQUIRED_CAPABILITIES[category]:
+            pair = latest_by_capability.get(capability.value)
+            if pair is None:
                 continue
-            provider = str(raw.get("provider", ""))
-            observed_at = _instant(raw.get("observed_at"))
-            maximum_age = int(raw.get("maximum_age_seconds", 60))
+            manifest, observation = pair
+            policy = _freshness_policy(database, manifest.provider, manifest.capability)
+            value = observation.measures.get("normalized_value")
+            item = build_source_evidence(
+                provider=manifest.provider,
+                capability=manifest.capability,
+                semantics=SourceSemantics(manifest.semantics),
+                source_role=SourceRole.FALLBACK_CACHED_EXTERNAL,
+                observed_at=manifest.source_observed_at,
+                received_at=manifest.received_at or manifest.created_at,
+                evaluated_at=evaluated_at,
+                policy=policy,
+                venue=manifest.venue,
+                provider_symbol=manifest.provider_symbol,
+                canonical_instrument_id=str(instrument.id),
+                mapping_revision=manifest.mapping_revision,
+                entitlement_status=manifest.entitlement_status,
+                complete=manifest.complete,
+                quality=manifest.quality,
+                conflict_state=ConflictState(manifest.conflict_state),
+                fallback_reason="SPECIALIST_RETRIES_EXHAUSTED",
+                raw_reference=f"dataset-manifest:{manifest.id}:{manifest.content_hash}",
+                measures={"value": str(value)} if value is not None else {},
+            )
+            components.append(item)
+            cached.append(item)
+        required = {item.value for item in _REQUIRED_CAPABILITIES[category]}
+        qualified = {item.capability for item in components if item.qualifies}
+        if required <= qualified:
             cached.append(
-                build_source_evidence(
-                    provider=provider,
-                    capability="LIQUIDITY",
-                    semantics=SourceSemantics(str(raw.get("semantics", "ACTUAL"))),
-                    source_role=SourceRole.FALLBACK_CACHED_EXTERNAL,
-                    observed_at=observed_at,
-                    received_at=_instant(raw.get("received_at")) or evaluated_at,
-                    evaluated_at=evaluated_at,
-                    policy=FreshnessPolicy(
-                        provider,
-                        "LIQUIDITY",
-                        str(raw.get("freshness_policy_version", "cached-v1")),
-                        timedelta(seconds=maximum_age),
-                    ),
-                    venue=str(raw.get("venue")) if raw.get("venue") else None,
-                    provider_symbol=str(raw.get("provider_symbol"))
-                    if raw.get("provider_symbol")
-                    else None,
-                    canonical_instrument_id=str(instrument.id),
-                    mapping_revision=str(raw.get("mapping_revision"))
-                    if raw.get("mapping_revision")
-                    else None,
-                    entitlement_status=str(raw.get("entitlement_status", "UNVERIFIED")),
-                    complete=bool(raw.get("complete")),
-                    quality=str(raw.get("quality", "UNKNOWN")),
-                    conflict_state=ConflictState(str(raw.get("conflict_state", "UNCHECKED"))),
-                    fallback_reason="SPECIALIST_RETRIES_EXHAUSTED",
-                    raw_reference=str(raw.get("raw_reference"))
-                    if raw.get("raw_reference")
-                    else None,
+                _composite_liquidity_evidence(
+                    components,
+                    role=SourceRole.FALLBACK_CACHED_EXTERNAL,
+                    semantics=SourceSemantics.ACTUAL,
                 )
             )
     return cached
@@ -569,12 +794,15 @@ def _composite_liquidity_evidence(
             else ConflictState.MATERIAL_CONFLICT
         ),
         raw_reference="+".join(item.raw_reference or "" for item in components),
+        measures={
+            item.capability: item.measures["value"]
+            for item in components
+            if item.measures.get("value") is not None
+        },
     )
 
 
-def _freshness_policy(
-    database: Session, provider: str, capability: str
-) -> FreshnessPolicy:
+def _freshness_policy(database: Session, provider: str, capability: str) -> FreshnessPolicy:
     row = database.scalar(
         select(FreshnessPolicyVersion)
         .where(
@@ -594,17 +822,23 @@ def _freshness_policy(
     )
 
 
-def _analysis_port(database: Session, run: MarketResearchRun):  # type: ignore[no-untyped-def]
+def _analysis_port(database: Session, run: MarketResearchRun) -> LlmAnalysisPort | None:
     if run.coordinated_run_id is None:
         return None
     parent = database.get(CoordinatedMarketResearchRun, run.coordinated_run_id)
     if parent is None or parent.llm_integration_id is None or parent.exact_model_id is None:
         return None
     integration = database.get(Integration, parent.llm_integration_id)
-    if integration is None or integration.state != "HEALTHY" or integration.provider != parent.llm_provider_key:
+    if (
+        integration is None
+        or integration.state != "HEALTHY"
+        or integration.provider != parent.llm_provider_key
+    ):
         return None
     credentials = _credentials(database, integration)
     api_key = str(credentials.get("api_key", ""))
+    if not api_key:
+        return None
     client = httpx.Client(timeout=get_settings().llm_attempt_timeout_seconds)
     if integration.provider == "OPENAI_RESPONSES":
         return OpenAIResponsesAdapter(api_key, client=client)
@@ -660,20 +894,33 @@ def _advisory_evidence(database: Session, run: MarketResearchRun) -> dict[str, o
     }
 
 
-def _close_port(port) -> None:  # type: ignore[no-untyped-def]
+def _close_port(port: LlmAnalysisPort) -> None:
     client = getattr(port, "_client", None)
     if client is not None:
         client.close()
 
 
-def _instant(value):  # type: ignore[no-untyped-def]
+def _instant(value: object) -> datetime | None:
     if value is None:
         return None
-    if hasattr(value, "tzinfo"):
+    if isinstance(value, datetime):
         return value
-    from datetime import datetime
-
     return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+
+
+def _strict_decimal_values(value: object) -> list[Decimal] | None:
+    if not isinstance(value, list):
+        return None
+    parsed = [_strict_decimal(item) for item in value]
+    if any(item is None for item in parsed):
+        return None
+    return [item for item in parsed if item is not None]
+
+
+def _task_id(task: object) -> str:
+    request = getattr(task, "request", None)
+    value = getattr(request, "id", None)
+    return str(value) if value else str(uuid4())
 
 
 def _start_job(database: Session, background_job_id: str | None) -> BackgroundJob | None:

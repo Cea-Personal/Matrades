@@ -121,10 +121,12 @@ class MarketObservation(IdentifiedMixin, Base):
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     revision: Mapped[int] = mapped_column(nullable=False, default=1)
-    open: Mapped[object] = mapped_column(FinancialDecimal, nullable=False)
-    high: Mapped[object] = mapped_column(FinancialDecimal, nullable=False)
-    low: Mapped[object] = mapped_column(FinancialDecimal, nullable=False)
-    close: Mapped[object] = mapped_column(FinancialDecimal, nullable=False)
+    # Metric-only provider observations (volume, open interest, depth) have no OHLC
+    # values. Null preserves that distinction instead of manufacturing zero prices.
+    open: Mapped[object | None] = mapped_column(FinancialDecimal, nullable=True)
+    high: Mapped[object | None] = mapped_column(FinancialDecimal, nullable=True)
+    low: Mapped[object | None] = mapped_column(FinancialDecimal, nullable=True)
+    close: Mapped[object | None] = mapped_column(FinancialDecimal, nullable=True)
     volume: Mapped[object | None] = mapped_column(FinancialDecimal, nullable=True)
     spread: Mapped[object | None] = mapped_column(FinancialDecimal, nullable=True)
     measures: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)

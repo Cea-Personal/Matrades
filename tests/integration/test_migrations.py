@@ -50,7 +50,7 @@ def test_fresh_forward_migration_reaches_head_and_downgrade_preserves_evidence(t
         } <= tables
         with engine.connect() as connection:
             assert MigrationContext.configure(connection).get_current_revision() == (
-                "0023_market_research_automation"
+                "0025_research_leases"
             )
         with Session(engine) as database:
             event = AuditEvent.create(
@@ -68,7 +68,7 @@ def test_fresh_forward_migration_reaches_head_and_downgrade_preserves_evidence(t
                 causation_id=None,
                 idempotency_key=None,
                 previous_value=None,
-                new_value={"revision": "0023_market_research_automation"},
+                new_value={"revision": "0025_research_leases"},
                 occurred_at=datetime(2026, 8, 14, tzinfo=UTC),
             )
             database.add(event)

@@ -63,6 +63,7 @@ services:
     <<: *app-hardening
     environment: *production-environment
     secrets: *application-secrets
+    networks: [private, provider-egress]
     deploy: *worker-resources
 
   worker-notifications:
@@ -152,5 +153,6 @@ secrets:
 
 networks:
   ingress:
+  provider-egress:
   private:
     internal: true

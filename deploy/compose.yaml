@@ -60,7 +60,10 @@ services:
     environment: *app_environment
     depends_on: [postgres, redis]
     secrets: [postgres_password]
-    networks: [private]
+    # Research and provider-qualification tasks call only catalogue-reviewed,
+    # fixed HTTPS endpoints. Keep internal state on the private network while
+    # granting this worker (and no other application service) outbound access.
+    networks: [private, provider-egress]
 
   worker-notifications:
     build: { context: "..", dockerfile: deploy/containers/python.Dockerfile }
@@ -100,5 +103,6 @@ secrets:
 
 networks:
   ingress:
+  provider-egress:
   private:
     internal: true

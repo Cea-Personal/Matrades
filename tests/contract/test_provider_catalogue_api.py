@@ -82,6 +82,40 @@ def test_reviewed_catalogue_and_non_broker_lifecycle_are_secret_safe() -> None:
         assert "never-return-openai-secret" not in created.text
         integration_id = created.json()["id"]
 
+        created_replay = client.post(
+            "/api/v1/integrations/non-broker",
+            headers={**headers, "Idempotency-Key": "catalog-openai-create-0001"},
+            json={
+                "provider": "OPENAI_RESPONSES",
+                "name": "Research OpenAI",
+                "configuration": {},
+                "credentials": {"api_key": "never-return-openai-secret"},
+                "capabilities": ["LLM_ANALYSIS"],
+                "official_source": True,
+                "licensing_accepted": True,
+                "retention_accepted": True,
+                "reason": "Connect reviewed advisory analysis",
+            },
+        )
+        assert created_replay.status_code == 201
+        assert created_replay.json() == created.json()
+        conflicting_create = client.post(
+            "/api/v1/integrations/non-broker",
+            headers={**headers, "Idempotency-Key": "catalog-openai-create-0001"},
+            json={
+                "provider": "OPENAI_RESPONSES",
+                "name": "A different integration",
+                "configuration": {},
+                "credentials": {"api_key": "never-return-openai-secret"},
+                "capabilities": ["LLM_ANALYSIS"],
+                "official_source": True,
+                "licensing_accepted": True,
+                "retention_accepted": True,
+                "reason": "Connect reviewed advisory analysis",
+            },
+        )
+        assert conflicting_create.status_code == 409
+
         rotated = client.post(
             f"/api/v1/integrations/{integration_id}/credentials/rotate",
             headers={
@@ -94,6 +128,17 @@ def test_reviewed_catalogue_and_non_broker_lifecycle_are_secret_safe() -> None:
         assert rotated.status_code == 200
         assert rotated.json()["credential_status"] == "CONFIGURED"
         assert "second-never-return-openai-secret" not in rotated.text
+        rotated_replay = client.post(
+            f"/api/v1/integrations/{integration_id}/credentials/rotate",
+            headers={
+                **headers,
+                "If-Match": created.headers["etag"],
+                "Idempotency-Key": "catalog-openai-rotate-0001",
+            },
+            json={"credentials": {"api_key": "second-never-return-openai-secret"}},
+        )
+        assert rotated_replay.status_code == 200
+        assert rotated_replay.json() == rotated.json()
 
         qualification = client.post(
             f"/api/v1/integrations/{integration_id}/test",
@@ -102,6 +147,12 @@ def test_reviewed_catalogue_and_non_broker_lifecycle_are_secret_safe() -> None:
         assert qualification.status_code == 202
         assert qualification.json()["state"] == "QUEUED"
         assert qualification.json()["credential"] == "REDACTED"
+        qualification_replay = client.post(
+            f"/api/v1/integrations/{integration_id}/test",
+            headers={**headers, "Idempotency-Key": "catalog-openai-test-0001"},
+        )
+        assert qualification_replay.status_code == 202
+        assert qualification_replay.json() == qualification.json()
 
         listed = client.get("/api/v1/integrations/non-broker", headers=headers)
         assert listed.status_code == 200
@@ -119,6 +170,17 @@ def test_reviewed_catalogue_and_non_broker_lifecycle_are_secret_safe() -> None:
         )
         assert disabled.status_code == 200
         assert disabled.json()["state"] == "DISABLED"
+        disabled_replay = client.put(
+            f"/api/v1/integrations/{integration_id}/non-broker/state",
+            headers={
+                **headers,
+                "If-Match": rotated.headers["etag"],
+                "Idempotency-Key": "catalog-openai-disable-0001",
+            },
+            json={"action": "DISABLE", "reason": "Pause advisory analysis provider"},
+        )
+        assert disabled_replay.status_code == 200
+        assert disabled_replay.json() == disabled.json()
 
         removed = client.delete(
             f"/api/v1/integrations/{integration_id}",
@@ -130,6 +192,16 @@ def test_reviewed_catalogue_and_non_broker_lifecycle_are_secret_safe() -> None:
         )
         assert removed.status_code == 200
         assert removed.json()["status"] == "REMOVED"
+        removed_replay = client.delete(
+            f"/api/v1/integrations/{integration_id}",
+            headers={
+                **headers,
+                "If-Match": disabled.headers["etag"],
+                "Idempotency-Key": "catalog-openai-remove-0001",
+            },
+        )
+        assert removed_replay.status_code == 200
+        assert removed_replay.json() == removed.json()
 
         cme = client.post(
             "/api/v1/integrations/non-broker",
@@ -163,6 +235,21 @@ def test_reviewed_catalogue_and_non_broker_lifecycle_are_secret_safe() -> None:
         assert declared.status_code == 200
         assert declared.json()["entitlement_status"] == "DECLARED"
         assert "agreement-2026-08" not in declared.text
+        declared_replay = client.put(
+            f"/api/v1/integrations/{cme.json()['id']}/entitlement",
+            headers={
+                **headers,
+                "If-Match": cme.headers["etag"],
+                "Idempotency-Key": "catalog-cme-entitlement-0001",
+            },
+            json={
+                "confirmation": "CONFIRM_ENTITLEMENT",
+                "evidence_reference": "agreement-2026-08",
+                "reason": "Record paid CME entitlement evidence",
+            },
+        )
+        assert declared_replay.status_code == 200
+        assert declared_replay.json() == declared.json()
     finally:
         app.dependency_overrides.clear()
         engine.dispose()

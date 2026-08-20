@@ -39,6 +39,47 @@ export interface MarketSourceEvidence {
   freshness_policy_version?: string;
   mapping_revision?: string | null;
   conflict_state?: string;
+  observed_at?: string | null;
+  received_at?: string;
+  provider_symbol?: string | null;
+  canonical_instrument_id?: string | null;
+  entitlement_status?: string;
+  complete?: boolean;
+  quality?: string;
+  fallback_reason?: string | null;
+  raw_reference?: string | null;
+  measures?: Record<string, string>;
+}
+
+export interface CoordinatedMarketCandidate {
+  id: string;
+  instrument_id: string;
+  symbol: string;
+  display_name: string;
+  eligible: boolean;
+  score: string | null;
+  rank: number | null;
+  confidence: string;
+  exclusions: string[];
+  components: Record<string, string>;
+  rationale: Record<string, unknown>;
+  source_evidence: MarketSourceEvidence[];
+}
+
+export interface AdvisoryAnalysisStatus {
+  state: string;
+  authoritative: false;
+  provider?: string | null;
+  exact_model_id?: string | null;
+  catalogue_revision?: string | null;
+  adapter_revision?: string | null;
+  prompt_template_version?: string | null;
+  output_schema_version?: string | null;
+  inference_policy_version?: string | null;
+  attempt_count: number;
+  retry_eligible: boolean;
+  analysis?: Record<string, unknown> | null;
+  failure_reason?: string | null;
 }
 
 export interface CoordinatedCategoryReport {
@@ -50,9 +91,15 @@ export interface CoordinatedCategoryReport {
   source_manifest: { evidence?: MarketSourceEvidence[]; selected_role?: string };
   fallback_path: Array<{ role: string; accepted: boolean; reason_codes: string[] }>;
   deterministic_result_hash?: string | null;
-  llm_analysis: { state: string; authoritative: false; analysis?: Record<string, unknown> };
+  policy_pins: Record<string, unknown>;
+  llm_analysis: AdvisoryAnalysisStatus;
   activation_state: string;
-  candidates?: Array<Record<string, unknown>>;
+  candidates: CoordinatedMarketCandidate[];
+  selection_proposal: {
+    state: "REVIEW_REQUIRED";
+    candidate: CoordinatedMarketCandidate;
+    active_assignment_changed: false;
+  } | null;
 }
 
 export interface CoordinatedMarketResearchReport {
@@ -62,6 +109,17 @@ export interface CoordinatedMarketResearchReport {
   methodology_version: string;
   source_catalogue_revision: string;
   exact_model_id?: string | null;
+  freshness_policy_manifest: Record<string, string>;
+  retry_policy_manifest: Record<string, string>;
+  model_pin: {
+    provider?: string | null;
+    exact_model_id?: string | null;
+    catalogue_revision?: string | null;
+    adapter_revision?: string | null;
+    prompt_template_version?: string | null;
+    output_schema_version?: string | null;
+    inference_policy_version?: string | null;
+  };
   categories: CoordinatedCategoryReport[];
   ranking_is_not_activation: true;
   active_assignments_changed: false;

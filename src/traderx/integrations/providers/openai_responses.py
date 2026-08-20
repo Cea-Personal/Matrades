@@ -88,7 +88,10 @@ class OpenAIResponsesAdapter:
                 provider_request_id=response.headers.get("x-request-id"),
                 reason=f"PROVIDER_HTTP_{response.status_code}",
             )
-        payload = response.json()
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = {}
         return LlmAnalysisResponse(
             "COMPLETED",
             _openai_analysis(payload),
@@ -117,7 +120,10 @@ def _openai_analysis(payload: dict[str, object]) -> dict[str, object] | None:
         return {str(key): value for key, value in direct.items()}
     text = payload.get("output_text")
     if isinstance(text, str):
-        parsed = json.loads(text)
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return None
         return parsed if isinstance(parsed, dict) else None
     output = payload.get("output")
     if isinstance(output, list):
@@ -126,7 +132,10 @@ def _openai_analysis(payload: dict[str, object]) -> dict[str, object] | None:
                 continue
             for content in item.get("content", []):
                 if isinstance(content, dict) and isinstance(content.get("text"), str):
-                    parsed = json.loads(content["text"])
+                    try:
+                        parsed = json.loads(content["text"])
+                    except json.JSONDecodeError:
+                        return None
                     return parsed if isinstance(parsed, dict) else None
     return None
 

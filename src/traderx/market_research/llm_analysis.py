@@ -10,7 +10,7 @@ from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from traderx.integrations.ports import LlmAnalysisPort, LlmAnalysisRequest
+from traderx.integrations.ports import LlmAnalysisPort, LlmAnalysisRequest, LlmAnalysisResponse
 from traderx.market_research.events import (
     LLM_ANALYSIS_COMPLETED,
     LLM_ANALYSIS_UNAVAILABLE,
@@ -22,6 +22,7 @@ from traderx.market_research.model import (
     LlmAnalysisAttempt,
     MarketResearchRun,
 )
+from traderx.notifications.router import notify_market_research_owners
 
 
 def run_advisory_analysis(
@@ -114,7 +115,14 @@ def _attempt_analysis(
     )
     run.llm_analysis_state = "RUNNING"
     for offset in range(1, maximum_attempts + 1):
-        response = port.analyze(request)
+        try:
+            response = port.analyze(request)
+        except Exception:
+            response = LlmAnalysisResponse(
+                "FAILED",
+                None,
+                reason="ADVISORY_PROVIDER_FAILURE",
+            )
         state = response.state
         analysis: dict[str, object] | None = None
         failure_reason = response.reason
@@ -188,6 +196,20 @@ def _attempt_analysis(
         },
         now=now,
         correlation_id="market-research-llm",
+    )
+    notify_market_research_owners(
+        database,
+        kind="LLM_UNAVAILABLE",
+        subject_id=str(run.id),
+        payload={
+            "category": run.category,
+            "provider": pin["provider_key"],
+            "exact_model_id": pin["exact_model_id"],
+            "failure_reason": last.failure_reason or last.state,
+            "retry_eligible": True,
+            "authoritative": False,
+        },
+        created_at=now,
     )
     database.flush()
     return last

@@ -419,9 +419,10 @@ function ResearchProviders() {
 
   async function rotateCredential(event: FormEvent<HTMLFormElement>, integration: ResearchIntegration) {
     event.preventDefault();
+    const formElement = event.currentTarget;
     const provider = catalogue.find((item) => item.provider === integration.provider);
     if (!provider) return;
-    const form = new FormData(event.currentTarget);
+    const form = new FormData(formElement);
     const credentials = Object.fromEntries(provider.credential_fields.map((field) => [field, form.get(`rotate-${field}`)]));
     setBusy(true); setError(undefined); setMessage(undefined);
     try {
@@ -433,7 +434,7 @@ function ResearchProviders() {
       });
       const result = await response.json() as ApiProblem;
       if (!response.ok) { setError(messageFor(result)); return; }
-      event.currentTarget.reset();
+      formElement.reset();
       setMessage(`${providerNames[integration.provider]} credential rotated. Run the provider test before enabling research use.`);
       await load();
     } catch { setError("TraderX could not rotate the write-only credential."); }

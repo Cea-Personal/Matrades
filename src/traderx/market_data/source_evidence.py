@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
@@ -61,6 +61,7 @@ class SourceEvidence:
     conflict_state: ConflictState = ConflictState.UNCHECKED
     fallback_reason: str | None = None
     raw_reference: str | None = None
+    measures: dict[str, str] = field(default_factory=dict)
 
     @property
     def qualifies(self) -> bool:
@@ -104,6 +105,7 @@ def build_source_evidence(
     conflict_state: ConflictState = ConflictState.UNCHECKED,
     fallback_reason: str | None = None,
     raw_reference: str | None = None,
+    measures: dict[str, str] | None = None,
 ) -> SourceEvidence:
     if policy.provider != provider or policy.capability != capability:
         raise ValueError("freshness policy does not match the evidence capability")
@@ -137,6 +139,7 @@ def build_source_evidence(
         conflict_state=conflict_state,
         fallback_reason=fallback_reason,
         raw_reference=raw_reference,
+        measures=dict(measures or {}),
     )
 
 

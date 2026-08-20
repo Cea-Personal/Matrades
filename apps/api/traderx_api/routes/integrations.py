@@ -39,6 +39,12 @@ from traderx.integrations.service import (
 )
 from traderx.jobs.model import BackgroundJob, JobState
 from traderx.shared.config import get_settings
+from traderx.shared.idempotency import (
+    IdempotencyRecord,
+    canonical_request_hash,
+    complete,
+    start_or_replay,
+)
 from traderx.shared.types import (
     AuthenticationError,
     ConcurrentModification,
@@ -51,6 +57,67 @@ from traderx_api.routes.identity import AuthenticationContext, authenticated_con
 
 router = APIRouter(prefix="/integrations", tags=["Integrations"])
 DatabaseSession = Annotated[Session, Depends(get_database_session)]
+
+
+def _start_idempotent_request(
+    database: Session,
+    context: AuthenticationContext,
+    *,
+    operation: str,
+    key: str,
+    request: dict[str, object],
+) -> tuple[IdempotencyRecord, dict[str, object] | None]:
+    request_hash = canonical_request_hash(request)
+    record = database.scalar(
+        select(IdempotencyRecord).where(
+            IdempotencyRecord.actor_id == context.user.id,
+            IdempotencyRecord.operation == operation,
+            IdempotencyRecord.key == key,
+        )
+    )
+    replay = start_or_replay(record, request_hash)
+    if record is not None:
+        return record, replay
+    record = IdempotencyRecord(
+        actor_id=context.user.id,
+        operation=operation,
+        key=key,
+        request_hash=request_hash,
+    )
+    database.add(record)
+    database.flush()
+    return record, None
+
+
+def _complete_idempotent_request(
+    record: IdempotencyRecord,
+    *,
+    status: int,
+    body: dict[str, object],
+    etag: str | None = None,
+    location: str | None = None,
+) -> None:
+    complete(
+        record,
+        status=status,
+        body={"resource": body, "etag": etag, "location": location},
+        completed_at=utc_now(),
+    )
+
+
+def _idempotent_response(
+    response: Response, replay: dict[str, object]
+) -> dict[str, object]:
+    etag = replay.get("etag")
+    location = replay.get("location")
+    if isinstance(etag, str):
+        response.headers["ETag"] = etag
+    if isinstance(location, str):
+        response.headers["Location"] = location
+    resource = replay.get("resource")
+    if not isinstance(resource, dict):
+        raise InvalidTransition("the idempotent integration result is no longer available")
+    return {str(key): value for key, value in resource.items()}
 
 
 class BindBrokerAccountCommand(BaseModel):
@@ -306,10 +373,20 @@ def configure_non_broker_integration(
     database: DatabaseSession,
     idempotency_key: str = Header(alias="Idempotency-Key", min_length=16, max_length=200),
 ) -> dict[str, object]:
+    actor = _require_manager(context)
+    request, replay = _start_idempotent_request(
+        database,
+        context,
+        operation="integration.configure",
+        key=idempotency_key,
+        request=payload.model_dump(mode="json"),
+    )
+    if replay is not None:
+        return _idempotent_response(response, replay)
     try:
         integration = create_non_broker_integration(
             database,
-            _require_manager(context),
+            actor,
             provider=payload.provider,
             name=payload.name,
             configuration=payload.configuration,
@@ -326,10 +403,13 @@ def configure_non_broker_integration(
         )
     except ValueError as exc:
         raise InvalidTransition(str(exc)) from exc
+    database.flush()
+    body = integration_management_payload(database, integration)
+    etag = _etag(integration)
+    _complete_idempotent_request(request, status=201, body=body, etag=etag)
     database.commit()
-    database.refresh(integration)
-    response.headers["ETag"] = _etag(integration)
-    return integration_management_payload(database, integration)
+    response.headers["ETag"] = etag
+    return body
 
 
 @router.post("/{integration_id}/credentials/rotate")
@@ -342,13 +422,27 @@ def rotate_non_broker_credentials(
     if_match: str = Header(alias="If-Match"),
     idempotency_key: str = Header(alias="Idempotency-Key", min_length=16, max_length=200),
 ) -> dict[str, object]:
+    actor = _require_manager(context)
+    request, replay = _start_idempotent_request(
+        database,
+        context,
+        operation="integration.credential.rotate",
+        key=idempotency_key,
+        request={
+            "integration_id": integration_id,
+            "if_match": if_match,
+            **payload.model_dump(mode="json"),
+        },
+    )
+    if replay is not None:
+        return _idempotent_response(response, replay)
     integration = _non_broker_integration_or_404(database, integration_id)
     if if_match != _etag(integration):
         raise ConcurrentModification("the integration changed; refresh before rotating credentials")
     try:
         rotate_integration_credentials(
             database,
-            _require_manager(context),
+            actor,
             integration,
             credentials=payload.credentials,
             secret_box=SecretBox(get_settings().encryption_key_b64.get_secret_value()),
@@ -358,10 +452,13 @@ def rotate_non_broker_credentials(
         )
     except ValueError as exc:
         raise InvalidTransition(str(exc)) from exc
+    database.flush()
+    body = integration_management_payload(database, integration)
+    etag = _etag(integration)
+    _complete_idempotent_request(request, status=200, body=body, etag=etag)
     database.commit()
-    database.refresh(integration)
-    response.headers["ETag"] = _etag(integration)
-    return integration_management_payload(database, integration)
+    response.headers["ETag"] = etag
+    return body
 
 
 @router.put("/{integration_id}/entitlement")
@@ -374,13 +471,27 @@ def declare_non_broker_entitlement(
     if_match: str = Header(alias="If-Match"),
     idempotency_key: str = Header(alias="Idempotency-Key", min_length=16, max_length=200),
 ) -> dict[str, object]:
+    actor = _require_manager(context)
+    request, replay = _start_idempotent_request(
+        database,
+        context,
+        operation="integration.entitlement.declare",
+        key=idempotency_key,
+        request={
+            "integration_id": integration_id,
+            "if_match": if_match,
+            **payload.model_dump(mode="json"),
+        },
+    )
+    if replay is not None:
+        return _idempotent_response(response, replay)
     integration = _non_broker_integration_or_404(database, integration_id)
     if if_match != _etag(integration):
         raise ConcurrentModification("the integration changed; refresh before declaring entitlement")
     try:
         declare_integration_entitlement(
             database,
-            _require_manager(context),
+            actor,
             integration,
             evidence_reference=payload.evidence_reference,
             reason=payload.reason,
@@ -390,10 +501,13 @@ def declare_non_broker_entitlement(
         )
     except ValueError as exc:
         raise InvalidTransition(str(exc)) from exc
+    database.flush()
+    body = integration_management_payload(database, integration)
+    etag = _etag(integration)
+    _complete_idempotent_request(request, status=200, body=body, etag=etag)
     database.commit()
-    database.refresh(integration)
-    response.headers["ETag"] = _etag(integration)
-    return integration_management_payload(database, integration)
+    response.headers["ETag"] = etag
+    return body
 
 
 @router.put("/{integration_id}/non-broker/state")
@@ -406,13 +520,27 @@ def set_non_broker_integration_state(
     if_match: str = Header(alias="If-Match"),
     idempotency_key: str = Header(alias="Idempotency-Key", min_length=16, max_length=200),
 ) -> dict[str, object]:
+    actor = _require_manager(context)
+    request, replay = _start_idempotent_request(
+        database,
+        context,
+        operation="integration.lifecycle",
+        key=idempotency_key,
+        request={
+            "integration_id": integration_id,
+            "if_match": if_match,
+            **payload.model_dump(mode="json"),
+        },
+    )
+    if replay is not None:
+        return _idempotent_response(response, replay)
     integration = _non_broker_integration_or_404(database, integration_id)
     if if_match != _etag(integration):
         raise ConcurrentModification("the integration changed; refresh before updating it")
     try:
         transition_persisted_integration(
             database,
-            _require_manager(context),
+            actor,
             integration,
             action=payload.action,
             reason=payload.reason,
@@ -422,10 +550,13 @@ def set_non_broker_integration_state(
         )
     except ValueError as exc:
         raise InvalidTransition(str(exc)) from exc
+    database.flush()
+    body = integration_management_payload(database, integration)
+    etag = _etag(integration)
+    _complete_idempotent_request(request, status=200, body=body, etag=etag)
     database.commit()
-    database.refresh(integration)
-    response.headers["ETag"] = _etag(integration)
-    return integration_management_payload(database, integration)
+    response.headers["ETag"] = etag
+    return body
 
 
 @router.post("/mt5/enrollments", status_code=201)
@@ -493,11 +624,22 @@ def renew_mt5_enrollment(
 @router.delete("/{integration_id}")
 def remove_mt5_integration(
     integration_id: UUID,
+    response: Response,
     context: Annotated[AuthenticationContext, Depends(authenticated_context)],
     database: DatabaseSession,
     idempotency_key: str = Header(alias="Idempotency-Key", min_length=16, max_length=200),
     if_match: str | None = Header(default=None, alias="If-Match"),
 ) -> dict[str, object]:
+    actor = _require_manager(context)
+    request, replay = _start_idempotent_request(
+        database,
+        context,
+        operation="integration.remove",
+        key=idempotency_key,
+        request={"integration_id": integration_id, "if_match": if_match},
+    )
+    if replay is not None:
+        return _idempotent_response(response, replay)
     raw_integration = database.get(Integration, integration_id)
     if raw_integration is None or raw_integration.state == "REMOVED":
         raise InvalidTransition("the requested integration does not exist")
@@ -507,7 +649,7 @@ def remove_mt5_integration(
         try:
             remove_non_broker_integration(
                 database,
-                _require_manager(context),
+                actor,
                 raw_integration,
                 reason="Remove reviewed provider integration",
                 now=utc_now(),
@@ -516,11 +658,16 @@ def remove_mt5_integration(
             )
         except ValueError as exc:
             raise InvalidTransition(str(exc)) from exc
+        body: dict[str, object] = {
+            "integration_id": str(raw_integration.id),
+            "status": "REMOVED",
+        }
+        _complete_idempotent_request(request, status=200, body=body)
         database.commit()
-        return {"integration_id": str(raw_integration.id), "status": "REMOVED"}
+        return body
     integration = _mt5_integration_or_404(database, integration_id, include_removed=True)
     unbound_account_count = remove_managed_mt5_integration(
-        database, _require_manager(context), integration
+        database, actor, integration
     )
     _record_lifecycle_audit(
         database,
@@ -533,12 +680,14 @@ def remove_mt5_integration(
         current={"state": integration.state, "unbound_account_count": unbound_account_count},
         idempotency_key=idempotency_key,
     )
-    database.commit()
-    return {
+    body = {
         "integration_id": str(integration.id),
         "status": "REMOVED",
         "unbound_account_count": unbound_account_count,
     }
+    _complete_idempotent_request(request, status=200, body=body)
+    database.commit()
+    return body
 
 
 @router.put("/{integration_id}/state")
@@ -659,6 +808,15 @@ def test_integration(
         raise InvalidTransition("the requested integration does not exist")
     _require_manager(context)
     if raw_integration.provider != BrokerProvider.MT5_TERMINAL_BRIDGE:
+        request, replay = _start_idempotent_request(
+            database,
+            context,
+            operation="integration.qualify",
+            key=idempotency_key,
+            request={"integration_id": integration_id},
+        )
+        if replay is not None:
+            return _idempotent_response(response, replay)
         job = BackgroundJob(
             job_type="PROVIDER_QUALIFICATION",
             owner_id=context.user.id,
@@ -672,15 +830,24 @@ def test_integration(
             progress={"stage": "QUALIFICATION_QUEUED"},
         )
         database.add(job)
-        database.commit()
-        response.headers["Location"] = f"/api/v1/jobs/{job.id}"
-        return {
+        database.flush()
+        location = f"/api/v1/jobs/{job.id}"
+        body: dict[str, object] = {
             "id": str(job.id),
             "type": job.job_type,
             "state": job.state,
             "provider": raw_integration.provider,
             "credential": "REDACTED",
         }
+        _complete_idempotent_request(
+            request,
+            status=202,
+            body=body,
+            location=location,
+        )
+        database.commit()
+        response.headers["Location"] = location
+        return body
     integration = _mt5_integration_or_404(database, integration_id)
     job = BackgroundJob(
         job_type="BROKER_CONNECTION_TEST",

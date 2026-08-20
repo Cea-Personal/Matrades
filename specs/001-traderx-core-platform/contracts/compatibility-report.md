@@ -1,18 +1,18 @@
 # Contract compatibility report
 
-Validated on 2026-08-14 against the FastAPI-generated runtime OpenAPI, the committed provider
+Validated on 2026-08-20 against the FastAPI-generated runtime OpenAPI, the committed provider
 ports/catalogue, the market-research domain-event catalogue, and the typed web boundary.
 
 ## Compatibility summary
 
 | Surface | Status | Evidence |
 |---|---|---|
-| Generated FastAPI OpenAPI | PASS | 87 paths, 99 operations, and 99 unique operation IDs; authentication and negative-capability tests pass |
-| Market-research HTTP amendment | PASS | Runtime exposes schedule, model configuration, coordinated start/report, category retry, provider catalogue, and non-broker lifecycle routes at the documented `/api/v1` paths |
+| Generated FastAPI OpenAPI | PASS | 89 paths, 102 operations, and 102 unique operation IDs; authentication and negative-capability tests pass |
+| Market-research HTTP amendment | PASS | Runtime exposes schedule, model configuration, coordinated start/history/report, category retry, owner-approved mapping, provider catalogue, and non-broker lifecycle routes at the documented `/api/v1` paths |
 | Typed web boundary | PASS | Generated schedule/model/source/coordinated schemas compile under strict TypeScript; Vitest, ESLint, and production build pass |
 | Provider ports/catalogue | PASS | Fixed MT5/CME/Cboe/Coinbase/OpenAI/Anthropic definitions, exact endpoints/models, semantics, error classes, and deny-by-default validation agree with adapter tests |
 | Market-research events | PASS | Schedule, occurrence/overlap, coordinated completion, category block, fallback, model change, analysis completion/unavailability/retry use the catalogued event names and transactional outbox |
-| Full hand-authored HTTP catalogue | PARTIAL | 61 design paths/65 operations remain broader and use several legacy resource names; runtime OpenAPI remains authoritative for executable clients |
+| Full hand-authored HTTP catalogue | PARTIAL | 64 design paths/70 operations remain broader and use several legacy resource names; runtime OpenAPI remains authoritative for executable clients |
 | Full domain-event catalogue | PARTIAL | Amendment facts are implemented, but many pre-amendment catalog entries still have durable state/audit without a corresponding outbox fact |
 
 This reconciliation adds no order operation. Runtime and design contracts both describe manual
@@ -27,19 +27,24 @@ The implemented market-research resources match the design server prefix `/api/v
 | Schedule read/update | `/api/v1/markets/research/schedule` |
 | Global future-run model read/update | `/api/v1/markets/research/model-configuration` |
 | Coordinated three-category start | `/api/v1/markets/research/coordinated` |
+| Coordinated run history | `/api/v1/markets/research/coordinated` |
 | Coordinated evidence report | `/api/v1/markets/research/coordinated/{run_id}` |
 | Same-pin advisory retry | `/api/v1/markets/research/category-runs/{run_id}/llm-analysis/retry` |
+| Owner-approved specialist symbol mapping | `/api/v1/markets/instruments/{instrument_id}/mapping` |
 | Reviewed provider catalogue | `/api/v1/integrations/providers` |
 | Non-broker list/create | `/api/v1/integrations/non-broker` |
 | Credential rotation | `/api/v1/integrations/{integration_id}/credentials/rotate` |
 | Qualification test | `/api/v1/integrations/{integration_id}/test` |
+| Entitlement declaration | `/api/v1/integrations/{integration_id}/entitlement` |
 | Enable/disable/reconnect | `/api/v1/integrations/{integration_id}/non-broker/state` |
 | Remove and revoke | `/api/v1/integrations/{integration_id}` |
 
 All mutations are session-authenticated; schedule/model/coordinated/retry commands enforce an
 MFA-assured owner, ETags where a mutable singleton/resource exists, idempotency keys, reasons,
 audit evidence, and secret-free responses. Provider creation is catalogue-bound and rejects extra
-configuration fields, arbitrary URLs, extra capabilities, or non-allowlisted models.
+configuration fields, arbitrary URLs, extra capabilities, or non-allowlisted models. Create,
+qualification, credential rotation, entitlement, lifecycle, and removal commands replay the same
+completed response for the same request/key and reject conflicting key reuse.
 
 ## Runtime/design naming differences retained
 
@@ -81,6 +86,6 @@ account balances/equity, or order intent.
 ## Release consequence
 
 The FR-095–FR-105 amendment contract is reconciled. The broader original T245 gate remains
-partial because the entire 61-path hand-authored design and pre-amendment event catalogue have not
+partial because the entire 64-path hand-authored design and pre-amendment event catalogue have not
 been collapsed into one generated source. Production approval therefore remains blocked even
 though the amendment’s runtime/client/provider/event boundary passes its focused contract tests.

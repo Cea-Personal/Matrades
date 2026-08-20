@@ -26,7 +26,7 @@ from traderx.market_data.model import (
 from traderx.market_data.source_evidence import ConflictState, SourceEvidence
 from traderx.market_research.eligibility import EligibilityInputs, evaluate_eligibility
 from traderx.market_research.events import SOURCE_FALLBACK_SELECTED, emit_market_research_fact
-from traderx.market_research.liquidity import assess_asset_liquidity, assess_liquidity
+from traderx.market_research.liquidity import assess_asset_liquidity
 from traderx.market_research.model import (
     ActiveMarketAssignment,
     AssignmentState,
@@ -480,37 +480,41 @@ def instrument_library_payload(
             .order_by(DataQualityObservation.observed_at.desc())
             .limit(1)
         )
-        result.append({
-            "id": str(instrument.id),
-            "symbol": instrument.symbol,
-            "display_name": instrument.display_name,
-            "category": instrument.category,
-            "status": instrument.status,
-            "data_status": _data_status(instrument.contract_spec),
-            "contract_spec": instrument.contract_spec,
-            "version": instrument.version,
-            "quality_observed_at": _as_utc(quality.observed_at).isoformat() if quality else None,
-            "quality_reason_codes": quality.reason_codes if quality else [],
-            "source_coverage": [
-                {
-                    "provider": alias.provider,
-                    "provider_symbol": alias.native_symbol,
-                    "venue": alias.venue,
-                    "mapping_revision": alias.mapping_revision,
-                    "mapping_status": "APPROVED" if alias.approved_at else "BROKER_AUTHORITY",
-                    "entitlement_status": alias.provider_metadata.get(
-                        "entitlement_status", "NOT_REQUIRED"
-                    ),
-                    "semantics": (
-                        instrument.contract_spec.get("source_semantics", "BROKER_PROXY")
-                        if alias.provider == "MT5_TERMINAL_BRIDGE"
-                        else alias.provider_metadata.get("semantics", "UNAVAILABLE")
-                    ),
-                }
-                for alias in aliases
-            ],
-            "capability_status": instrument.contract_spec.get("capability_status", {}),
-        })
+        result.append(
+            {
+                "id": str(instrument.id),
+                "symbol": instrument.symbol,
+                "display_name": instrument.display_name,
+                "category": instrument.category,
+                "status": instrument.status,
+                "data_status": _data_status(instrument.contract_spec),
+                "contract_spec": instrument.contract_spec,
+                "version": instrument.version,
+                "quality_observed_at": _as_utc(quality.observed_at).isoformat()
+                if quality
+                else None,
+                "quality_reason_codes": quality.reason_codes if quality else [],
+                "source_coverage": [
+                    {
+                        "provider": alias.provider,
+                        "provider_symbol": alias.native_symbol,
+                        "venue": alias.venue,
+                        "mapping_revision": alias.mapping_revision,
+                        "mapping_status": "APPROVED" if alias.approved_at else "BROKER_AUTHORITY",
+                        "entitlement_status": alias.provider_metadata.get(
+                            "entitlement_status", "NOT_REQUIRED"
+                        ),
+                        "semantics": (
+                            instrument.contract_spec.get("source_semantics", "BROKER_PROXY")
+                            if alias.provider == "MT5_TERMINAL_BRIDGE"
+                            else alias.provider_metadata.get("semantics", "UNAVAILABLE")
+                        ),
+                    }
+                    for alias in aliases
+                ],
+                "capability_status": instrument.contract_spec.get("capability_status", {}),
+            }
+        )
     return result
 
 
@@ -741,9 +745,7 @@ def _research_inputs(
     ask = _optional_decimal(spec.get("ask"))
     data_verified = len(closes) >= 61 and all(close > 0 for close in closes)
     broker_turnover = sum(tick_volumes, Decimal("0"))
-    broker_depth = (
-        broker_turnover / Decimal(len(tick_volumes)) if tick_volumes else Decimal("0")
-    )
+    broker_depth = broker_turnover / Decimal(len(tick_volumes)) if tick_volumes else Decimal("0")
     if bid is not None and ask is not None and ask >= bid and bid + ask > 0:
         spread_bps = (ask - bid) / ((ask + bid) / Decimal("2")) * Decimal("10000")
     else:
@@ -765,7 +767,7 @@ def _research_inputs(
     turnover = broker_turnover
     depth = broker_depth
     liquidity = Decimal("0")
-    liquidity_evidence = ("BROKER_ACTIVITY_PROXY",)
+    liquidity_evidence: tuple[str, ...] = ("BROKER_ACTIVITY_PROXY",)
     mandatory_source_complete = True
     source_conflict = False
     actual_liquidity_required_met = True
@@ -778,21 +780,29 @@ def _research_inputs(
             Decimal("1"), turnover / Decimal("100000")
         ) * Decimal("0.3")
     else:
-        qualified = [item for item in source_evidence if item.capability == "LIQUIDITY" and item.qualifies]
+        qualified = [
+            item for item in source_evidence if item.capability == "LIQUIDITY" and item.qualifies
+        ]
         mandatory_source_complete = bool(qualified)
         source_conflict = any(
             item.conflict_state == ConflictState.MATERIAL_CONFLICT for item in source_evidence
         )
         actual = any(item.semantics == SourceSemantics.ACTUAL for item in qualified)
         category = MarketCategory(instrument.category)
-        specialist = spec.get("specialist_metrics", {})
-        specialist_metrics = dict(specialist) if isinstance(specialist, dict) else {}
+        specialist_metrics: dict[str, str] = {}
+        for item in source_evidence:
+            if item.canonical_instrument_id != str(instrument.id):
+                continue
+            if item.capability == "LIQUIDITY":
+                specialist_metrics.update(item.measures)
+            elif item.measures.get("value") is not None:
+                specialist_metrics[item.capability] = item.measures["value"]
         external_turnover = _optional_decimal(specialist_metrics.get("TRADED_VOLUME"))
         external_depth = _optional_decimal(specialist_metrics.get("ORDER_BOOK"))
         open_interest = _optional_decimal(specialist_metrics.get("OPEN_INTEREST"))
-        if actual and external_turnover is not None:
-            turnover = external_turnover
         if category == MarketCategory.COMMODITY:
+            if actual and external_turnover is not None:
+                turnover = external_turnover
             depth = external_depth or open_interest or Decimal("0")
             actual_liquidity_required_met = bool(actual and open_interest and turnover > 0)
             if actual_liquidity_required_met:
@@ -806,6 +816,8 @@ def _research_inputs(
                 liquidity = assessed.execution_quality
                 liquidity_evidence = assessed.evidence
         elif category == MarketCategory.CRYPTO:
+            if actual and external_turnover is not None:
+                turnover = external_turnover
             depth = external_depth or Decimal("0")
             actual_liquidity_required_met = bool(actual and external_depth and turnover > 0)
             if actual_liquidity_required_met:
@@ -817,16 +829,12 @@ def _research_inputs(
                 )
                 liquidity = assessed.execution_quality
                 liquidity_evidence = assessed.evidence
-        elif actual and external_depth is not None and external_turnover is not None:
-            depth = external_depth
-            assessed = assess_liquidity(
-                turnover=turnover,
-                spread_bps=spread_bps,
-                depth=depth,
-            )
-            liquidity = assessed.execution_quality
-            liquidity_evidence = ("TRADED_VOLUME_ACTUAL", "ORDER_BOOK_ACTUAL")
-        elif mandatory_source_complete:
+        elif mandatory_source_complete and broker_turnover > 0 and broker_depth > 0:
+            # Forex liquidity remains broker-account specific even when Cboe evidence
+            # supplements the run. Venue volume/depth never replaces MT5 spread and
+            # quote/tick activity or becomes a claimed consolidated FX order book.
+            turnover = broker_turnover
+            depth = broker_depth
             assessed = assess_asset_liquidity(
                 category=category,
                 turnover=turnover,
@@ -835,6 +843,9 @@ def _research_inputs(
             )
             liquidity = assessed.execution_quality
             liquidity_evidence = assessed.evidence
+            actual_liquidity_required_met = True
+        elif category == MarketCategory.FOREX:
+            actual_liquidity_required_met = False
     inputs = EligibilityInputs(
         broker_available=instrument.status != InstrumentStatus.QUARANTINED,
         data_verified=data_verified,

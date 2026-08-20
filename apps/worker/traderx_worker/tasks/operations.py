@@ -1,16 +1,17 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import UTC, datetime
 from uuid import UUID
 
 import httpx
 from celery import shared_task
 from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
 from traderx.integrations.broker_model import Mt5BridgeAgent
 from traderx.integrations.crypto import EncryptedSecret, SecretBox
-from traderx.integrations.health import provider_health_state
 from traderx.integrations.model import CredentialVersion, Integration, IntegrationHealthObservation
 from traderx.integrations.providers.anthropic_messages import AnthropicMessagesAdapter
 from traderx.integrations.providers.openai_responses import OpenAIResponsesAdapter
@@ -27,7 +28,7 @@ from traderx.notifications.providers import (
     UnconfiguredExternalProvider,
     WebInboxProvider,
 )
-from traderx.notifications.router import retryable, route_event
+from traderx.notifications.router import notify_market_research_owners, retryable, route_event
 from traderx.shared.config import get_settings
 from traderx.shared.types import utc_now
 from traderx.strategies.health import observe_live_strategy_health
@@ -121,7 +122,14 @@ def poll_health(self) -> dict[str, str]:  # type: ignore[no-untyped-def]
                     .order_by(IntegrationHealthObservation.observed_at.desc())
                     .limit(1)
                 )
-                status, affected = provider_health_state(integration, latest, now=now)
+                if integration.state == "DISABLED":
+                    status = "DISABLED"
+                    reason = None
+                    latency_ms = None
+                else:
+                    status, reason, latency_ms = _live_probe_status(database, integration)
+                    integration.state = status
+                affected = tuple(integration.capabilities) if status != "HEALTHY" else ()
                 database.add(
                     IntegrationHealthObservation(
                         integration_id=integration.id,
@@ -135,16 +143,37 @@ def poll_health(self) -> dict[str, str]:  # type: ignore[no-untyped-def]
                             "credential_redacted": True,
                         },
                         observed_at=now,
-                        last_success_at=latest.last_success_at if latest else None,
-                        affected_capabilities=list(affected),
-                        current_error=(
-                            "ENTITLEMENT_VERIFICATION_REQUIRED"
-                            if approved_provider(integration.provider).entitlement_required
-                            and integration.entitlement_status != "VERIFIED"
+                        last_success_at=(
+                            now
+                            if status == "HEALTHY"
+                            else latest.last_success_at
+                            if latest
                             else None
                         ),
+                        latency_ms=latency_ms,
+                        affected_capabilities=list(affected),
+                        current_error=reason,
                     )
                 )
+                if reason and (latest is None or latest.current_error != reason):
+                    kind = (
+                        "ENTITLEMENT_LOST"
+                        if approved_provider(integration.provider).entitlement_required
+                        and reason in {"ENTITLEMENT_EVIDENCE_REQUIRED", "PROVIDER_AUTHORIZATION"}
+                        else "SOURCE_STALE"
+                    )
+                    notify_market_research_owners(
+                        database,
+                        kind=kind,
+                        subject_id=f"{integration.id}:{integration.version}:{reason}",
+                        payload={
+                            "integration_id": str(integration.id),
+                            "provider": integration.provider,
+                            "current_error": reason,
+                            "affected_capabilities": list(affected),
+                        },
+                        created_at=now,
+                    )
                 observed += 1
                 continue
             bridge = database.scalar(
@@ -225,38 +254,18 @@ def run_queued_qualifications(self) -> dict[str, object]:  # type: ignore[no-unt
             status, reason = _qualify(database, integration, now=utc_now())
             job.progress = {"stage": "COMPLETED", "qualification_status": status}
             job.error_code = reason
-            job.result_ref = f"/api/v1/integrations/non-broker"
+            job.result_ref = "/api/v1/integrations/non-broker"
             job.transition(JobState.COMPLETED)
             job.finished_at = utc_now()
             completed.append(str(job.id))
     return {"status": "COMPLETED", "jobs": completed}
 
 
-def _qualify(database, integration: Integration, *, now: datetime) -> tuple[str, str | None]:  # type: ignore[no-untyped-def]
+def _qualify(
+    database: Session, integration: Integration, *, now: datetime
+) -> tuple[str, str | None]:
     definition = approved_provider(integration.provider)
-    credential = database.scalar(
-        select(CredentialVersion).where(
-            CredentialVersion.integration_id == integration.id,
-            CredentialVersion.active.is_(True),
-        )
-    )
-    reason: str | None = None
-    if definition.credential_required and credential is None:
-        reason = "CREDENTIAL_REQUIRED"
-    elif definition.entitlement_required and integration.entitlement_status not in {
-        "DECLARED",
-        "VERIFIED",
-    }:
-        reason = "ENTITLEMENT_EVIDENCE_REQUIRED"
-    else:
-        try:
-            credentials = _decrypt_credential(integration, credential)
-            _probe(integration, credentials)
-        except ProviderTransportError as error:
-            reason = f"PROVIDER_{error.kind}"
-        except (httpx.HTTPError, KeyError, TypeError, ValueError):
-            reason = "PROVIDER_QUALIFICATION_FAILED"
-    status = "HEALTHY" if reason is None else "DEGRADED"
+    status, reason, latency_ms = _live_probe_status(database, integration)
     integration.state = status
     if status == "HEALTHY" and definition.entitlement_required:
         integration.entitlement_status = "VERIFIED"
@@ -277,11 +286,56 @@ def _qualify(database, integration: Integration, *, now: datetime) -> tuple[str,
             },
             observed_at=now,
             last_success_at=now if status == "HEALTHY" else None,
+            latency_ms=latency_ms,
             current_error=reason,
             affected_capabilities=list(integration.capabilities) if reason else [],
         )
     )
     return status, reason
+
+
+def _live_probe_status(
+    database: Session, integration: Integration
+) -> tuple[str, str | None, int | None]:
+    """Probe a reviewed provider; never infer freshness from an older observation."""
+
+    definition = approved_provider(integration.provider)
+    credential = database.scalar(
+        select(CredentialVersion)
+        .where(
+            CredentialVersion.integration_id == integration.id,
+            CredentialVersion.active.is_(True),
+        )
+        .order_by(CredentialVersion.created_at.desc())
+        .limit(1)
+    )
+    if definition.credential_required and credential is None:
+        return "DEGRADED", "CREDENTIAL_REQUIRED", None
+    if definition.entitlement_required and integration.entitlement_status not in {
+        "DECLARED",
+        "VERIFIED",
+    }:
+        return "DEGRADED", "ENTITLEMENT_EVIDENCE_REQUIRED", None
+
+    started = time.perf_counter()
+    try:
+        credentials = _decrypt_credential(integration, credential)
+        _probe(integration, credentials)
+    except ProviderTransportError as error:
+        reason = f"PROVIDER_{error.kind}"
+        status = (
+            "FAILED"
+            if error.kind in {"AUTHENTICATION", "AUTHORIZATION", "PERMANENT_INPUT"}
+            else "DEGRADED"
+        )
+        return status, reason, int((time.perf_counter() - started) * 1000)
+    except (httpx.HTTPError, KeyError, TypeError, ValueError):
+        return (
+            "DEGRADED",
+            "PROVIDER_QUALIFICATION_FAILED",
+            int((time.perf_counter() - started) * 1000),
+        )
+    return "HEALTHY", None, int((time.perf_counter() - started) * 1000)
 
 
 def _decrypt_credential(

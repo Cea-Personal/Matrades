@@ -1,6 +1,6 @@
 # Constitution compliance check
 
-Checked on 2026-08-14.
+Checked on 2026-08-20.
 
 Automated implementation status: **PASS**. Production-release status:
 **BLOCKED / NOT APPROVED**.
@@ -37,8 +37,9 @@ Automated implementation status: **PASS**. Production-release status:
 ## Evidence executed
 
 - Ruff and strict Mypy pass (147 typed source files).
-- All 187 Python tests pass.
-- All 3 web component tests pass; 19 pre-amendment Playwright journeys have prior passing evidence.
+- All 189 Python tests pass.
+- All 3 web component tests and all 22 Playwright journeys pass, including the amended Markets,
+  provider lifecycle, and accessibility scenarios.
 - The optimized Next.js build and both Compose configurations render successfully.
 - Fresh migration rehearsal reaches `0023_market_research_automation`.
 - The existing PostgreSQL database migrated transactionally from `0014` to `0022` after correcting
@@ -54,15 +55,12 @@ Automated implementation status: **PASS**. Production-release status:
 2. A real external MT5 demo-terminal reconciliation/freshness run has not been recorded.
 3. An off-host encrypted backup/restore operator drill has not been recorded.
 4. Production Email/Telegram delivery and deployment dynamic scanning have not been recorded.
-5. The two new market-research/provider Playwright journeys were not executed because the current
-   environment denied the local Next server bind on `127.0.0.1:3100`; lint, typecheck, Vitest, and
-   production build are not substitutes for this browser evidence.
-6. Legally usable production CME/Cboe entitlements, provider retention approval, and a running
+5. Legally usable production CME/Cboe entitlements, provider retention approval, and a running
    browser-closed scheduler/worker restart drill have not been recorded.
-7. Success criteria requiring external timing or moderated-user percentages do not yet have
+6. Success criteria requiring external timing or moderated-user percentages do not yet have
    qualifying evidence; see `traceability.md`.
 
 The amended Constitution Check was re-run and its decision is **BLOCKED / NOT APPROVED** until the
-listed external and browser gates pass. This recorded decision completes the check itself without
+listed external gates pass. This recorded decision completes the check itself without
 waiving T245/T246/T248/T260/T327. Nothing here authorizes deployment, guarantees profitability, or
 permits TraderX to execute a real-money trade.

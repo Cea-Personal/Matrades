@@ -77,7 +77,7 @@ one Commodity, one Forex, and one Cryptocurrency category run. Set an interval f
 so closing the browser does not stop research. If the preceding coordinated run is still active,
 TraderX records an overlap skip and does not create catch-up runs.
 
-Before enabling the schedule, use **Account connection → Reviewed research providers** to connect
+Before enabling the schedule, use **Integrations → Reviewed research providers** to connect
 and qualify the fixed sources:
 
 - CME Group for Commodity venue volume, open interest, and entitled book evidence;

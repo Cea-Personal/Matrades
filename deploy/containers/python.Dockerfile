@@ -4,9 +4,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 RUN useradd --create-home --uid 10001 traderx
 COPY --from=ghcr.io/astral-sh/uv:0.9.16 /uv /uvx /usr/local/bin/
-# Dependencies are resolved while the image is built, when network access is
-# available. Runtime services live on a private network and must never attempt
-# a dependency sync on startup.
+# Dependencies are resolved while the image is built. Runtime services must
+# never attempt a dependency sync on startup; only explicitly designated
+# provider workers receive outbound network access.
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 COPY src ./src

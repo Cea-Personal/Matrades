@@ -21,6 +21,11 @@ Record legal/licensing approval outside TraderX, acknowledge the notice in the U
 approval reference in the deployment change record. An acknowledgement does not create an
 entitlement. CME/Cboe stay `DEGRADED` until an operator verifies the entitlement evidence.
 
+Provider qualification and collection execute only on `worker-research`. That service must be
+attached to both the internal `private` network and the outbound `provider-egress` network; it
+publishes no inbound port. All provider HTTP calls remain restricted in application code to the
+catalogue-reviewed fixed HTTPS origins and GET-only market-data requests.
+
 ## Credential lifecycle
 
 Credentials are entered once and returned only as `WRITE_ONLY`. TraderX encrypts each version with

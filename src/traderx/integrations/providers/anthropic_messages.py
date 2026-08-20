@@ -80,7 +80,10 @@ class AnthropicMessagesAdapter:
             return LlmAnalysisResponse(
                 "FAILED", None, provider_request_id=request_id, reason=f"PROVIDER_HTTP_{response.status_code}"
             )
-        payload = response.json()
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = {}
         return LlmAnalysisResponse(
             "COMPLETED",
             _anthropic_analysis(payload),
@@ -113,7 +116,10 @@ def _anthropic_analysis(payload: dict[str, object]) -> dict[str, object] | None:
         return None
     for block in content:
         if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str):
-            parsed = json.loads(block["text"])
+            try:
+                parsed = json.loads(block["text"])
+            except json.JSONDecodeError:
+                return None
             return parsed if isinstance(parsed, dict) else None
     return None
 

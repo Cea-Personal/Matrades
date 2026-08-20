@@ -1,6 +1,6 @@
 # Quickstart validation results
 
-Validated on 2026-08-14.
+Validated on 2026-08-20.
 
 ## Automated and local-stack evidence
 
@@ -8,10 +8,10 @@ Validated on 2026-08-14.
 |---|---|
 | Ruff lint across the repository | PASS |
 | Mypy across source, API, and workers | PASS (147 source files, strict mode) |
-| Python unit/contract/integration/data-quality/reproducibility/safety/security/performance suite | PASS (187 tests) |
+| Python unit/contract/integration/data-quality/reproducibility/safety/security/performance suite | PASS (189 tests) |
 | Web TypeScript and ESLint | PASS |
 | Web component suite | PASS (3 files, 3 tests) |
-| Existing Playwright integrated browser journeys | PASS (19 tests, previously recorded); two amendment journeys authored but current rerun BLOCKED by local port permission |
+| Playwright integrated browser journeys | PASS (22 tests), including market automation, provider operations, accessibility, and recovery states |
 | Optimized Next.js production build | PASS (10 application routes plus not-found) |
 | Fresh SQLite Alembic rehearsal | PASS (`0001` through `0023_market_research_automation`) |
 | Existing PostgreSQL forward migration | NOT RE-RUN for `0023`; Compose config and SQLite migration test pass |
@@ -65,7 +65,7 @@ that limit for the full migration chain.
 | Authenticated schedule/model/coordinated/report/retry API | PASS | market-research automation contract test |
 | Reviewed provider lifecycle, encrypted write-only secret, arbitrary URL/model rejection | PASS | provider catalogue contract/security tests |
 | Existing Markets/Integrations/System UI compile and production build | PASS | Vitest, ESLint, TypeScript, Next build |
-| Markets and provider browser journeys | NOT EXECUTED in this pass | Playwright could not start `127.0.0.1:3100` (`EPERM`); escalation was unavailable. Test definitions remain release-blocking. |
+| Markets and provider browser journeys | PASS | 22/22 Playwright journeys pass, including embedded model/schedule controls, coordinated evidence, advisory retry, credential lifecycle, and non-colour accessibility states. |
 | Browser-closed live schedule/worker restart | NOT EXECUTED | Database scheduler logic and worker routing pass static/integration checks; running Postgres/Celery restart drill remains required |
 
 ## Existing phase closure evidence
@@ -85,7 +85,7 @@ that limit for the full migration chain.
 - US9: durable jobs, notification preferences/inbox, provider/MT5 lifecycle, health, strategy
   health, and append-only redacted audit are operated from the current authenticated UI.
 
-The Python suite reported one dependency deprecation warning and the existing intentional audit
+The Python suite reported dependency deprecation warnings and the existing intentional audit
 identity-conflict warning; Vitest emitted no test warnings. The Next build emitted a Turbopack root
 warning because an unrelated parent `package-lock.json` exists outside this repository; output was
 otherwise successful.

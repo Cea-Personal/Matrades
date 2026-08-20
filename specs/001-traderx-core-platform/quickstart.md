@@ -57,7 +57,9 @@ docker compose -f deploy/compose.yaml ps
 
 Expected outcomes:
 
-- only the HTTPS development entry point is exposed outside the private network;
+- only the HTTPS development entry point publishes a host port;
+- only `worker-research` joins the outbound `provider-egress` network so reviewed fixed provider
+  endpoints such as Coinbase Exchange can be qualified and queried;
 - PostgreSQL and Redis report healthy;
 - the API, workers, scheduler, and outbox dispatcher report ready;
 - `/api/v1/health` reveals liveness without sensitive configuration;

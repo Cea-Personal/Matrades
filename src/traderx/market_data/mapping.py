@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from traderx.audit.model import AuditEvent
 from traderx.identity.authorization import Actor, Role, require_role
+from traderx.integrations.model import Integration
 from traderx.integrations.registry import approved_provider
 from traderx.market_data.model import Instrument, InstrumentAlias
 
@@ -76,7 +77,18 @@ def approve_symbol_mapping(
     correlation_id: str,
     idempotency_key: str | None = None,
 ) -> InstrumentAlias:
-    require_role(actor, {Role.OWNER, Role.ADMIN}, "market.mapping.approve", require_mfa=True)
+    require_role(actor, {Role.OWNER}, "market.mapping.approve", require_mfa=True)
+    integration = database.get(Integration, integration_id)
+    if integration is None or integration.removed_at is not None:
+        raise ValueError("SPECIALIST_INTEGRATION_UNAVAILABLE")
+    definition = approved_provider(provider)
+    if integration.provider != provider or integration.state != "HEALTHY":
+        raise ValueError("SPECIALIST_INTEGRATION_UNQUALIFIED")
+    if integration.catalogue_revision != catalogue_revision:
+        raise ValueError("CATALOGUE_REVISION_MISMATCH")
+    entitlement_verified = (
+        not definition.entitlement_required or integration.entitlement_status == "VERIFIED"
+    )
     validation = validate_mapping(
         MappingCandidate(
             category=instrument.category,
@@ -86,7 +98,7 @@ def approve_symbol_mapping(
             venue=venue,
             catalogue_revision=catalogue_revision,
             mt5_supported=True,
-            entitlement_verified=True,
+            entitlement_verified=entitlement_verified,
             approved=True,
             contract_variant=contract_variant,
         )
@@ -116,6 +128,8 @@ def approve_symbol_mapping(
         )
         database.add(alias)
     else:
+        if alias.instrument_id != instrument.id:
+            raise ValueError("PROVIDER_SYMBOL_ALREADY_MAPPED")
         previous = {
             "instrument_id": str(alias.instrument_id),
             "mapping_revision": alias.mapping_revision,
@@ -129,6 +143,10 @@ def approve_symbol_mapping(
         alias.approved_by = actor.id
         alias.approved_at = now
         alias.valid_to = None
+    instrument.contract_spec = {
+        **instrument.contract_spec,
+        "specialist_mapping_revision": mapping_revision,
+    }
     database.flush()
     database.add(
         AuditEvent.create(

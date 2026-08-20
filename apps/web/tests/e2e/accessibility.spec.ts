@@ -65,12 +65,12 @@ test("market automation exposes labelled controls and non-colour evidence states
   await expect(page.getByLabel("Research interval")).toBeVisible();
   await expect(page.getByLabel("Anchor start")).toBeVisible();
   await expect(page.getByLabel("Account time zone")).toBeVisible();
-  await page.getByRole("button", { name: "Run all three markets" }).click();
+  await page.getByRole("button", { name: "Run all three categories" }).click();
   const report = page.getByRole("region", { name: "Coordinated market research" });
   await expect(report).toContainText("BLOCKED");
   await expect(report).toContainText("analysis unavailable");
-  await report.getByRole("button", { name: "Retry pinned analysis" }).focus();
-  await expect(report.getByRole("button", { name: "Retry pinned analysis" })).toBeFocused();
+  await report.getByRole("button", { name: "Retry Forex pinned analysis" }).focus();
+  await expect(report.getByRole("button", { name: "Retry Forex pinned analysis" })).toBeFocused();
   const overflow = await page.evaluate(() => [...document.querySelectorAll("body *")]
     .filter((element) => element.getBoundingClientRect().right > window.innerWidth + 1)
     .map((element) => element.tagName));

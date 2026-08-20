@@ -4,7 +4,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from traderx.identity.authorization import Actor, Role
@@ -20,8 +20,10 @@ from traderx.integrations.service import (
     set_state,
     transition_persisted_integration,
 )
+from traderx.market_data.providers.http import ProviderTransportError
 from traderx.shared.db import Base, load_model_metadata
 from traderx.shared.events import OutboxEvent
+from traderx_worker.tasks.operations import _live_probe_status
 
 
 def test_only_allowlisted_read_capabilities_can_be_enabled() -> None:
@@ -152,8 +154,40 @@ def test_non_broker_lifecycle_rotation_and_reconnect_are_audited_and_write_only(
                 item.event_type == "com.traderx.integration.credential-rotated.v1"
                 for item in outbox
             )
-            assert "rotated-private-token" not in json.dumps(
-                [item.envelope for item in outbox]
-            )
+            assert "rotated-private-token" not in json.dumps([item.envelope for item in outbox])
     finally:
         engine.dispose()
+
+
+def test_live_health_probe_reports_truth_instead_of_copying_previous_status(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    load_model_metadata()
+    engine = create_engine("sqlite+pysqlite://")
+    Base.metadata.create_all(engine)
+    with Session(engine) as database, database.begin():
+        integration = Integration(
+            name="Coinbase health",
+            category="MARKET_DATA",
+            provider="COINBASE_EXCHANGE",
+            state="HEALTHY",
+            capabilities=["MARKET_DATA_READ"],
+            configuration={},
+            official_source=True,
+            catalogue_revision="2026-08-14.v1",
+            adapter_revision="v1",
+            entitlement_status="NOT_REQUIRED",
+        )
+        database.add(integration)
+        database.flush()
+        monkeypatch.setattr(
+            "traderx_worker.tasks.operations._probe",
+            lambda _integration, _credentials: None,
+        )
+        assert _live_probe_status(database, integration)[:2] == ("HEALTHY", None)
+
+        def unavailable(_integration, _credentials) -> None:  # type: ignore[no-untyped-def]
+            raise ProviderTransportError("TRANSIENT", "provider unavailable")
+
+        monkeypatch.setattr("traderx_worker.tasks.operations._probe", unavailable)
+        status, reason, latency_ms = _live_probe_status(database, integration)
+        assert (status, reason) == ("DEGRADED", "PROVIDER_TRANSIENT")
+        assert latency_ms is not None and latency_ms >= 0

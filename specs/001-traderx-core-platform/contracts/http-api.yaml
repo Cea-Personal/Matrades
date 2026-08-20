@@ -360,9 +360,28 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items: {$ref: '#/components/schemas/ProviderCatalogueEntry'}
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/ProviderCatalogueEntry'}
   /integrations/non-broker:
+    get:
+      tags: [Integrations]
+      operationId: listReviewedNonBrokerIntegrations
+      responses:
+        '200':
+          description: Configured market-data and LLM integrations with write-only credential status
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/Integration'}
     post:
       tags: [Integrations]
       operationId: createReviewedNonBrokerIntegration
@@ -418,12 +437,17 @@ paths:
       description: Revokes the managed MT5 bridge, unbinds any TraderX account, and removes the connection from the active UI while retaining audit evidence.
       parameters:
         - $ref: '#/components/parameters/IntegrationId'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
       responses:
         '200':
-          description: MT5 integration removed and bridge credential revoked
+          description: Integration removed and all active credentials revoked
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/RemovedManagedMt5Integration'}
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/RemovedManagedMt5Integration'
+                  - $ref: '#/components/schemas/RemovedIntegration'
         '409': {$ref: '#/components/responses/Problem'}
   /integrations/{integration_id}/test:
     post:
@@ -431,6 +455,7 @@ paths:
       operationId: testIntegration
       parameters:
         - $ref: '#/components/parameters/IntegrationId'
+        - $ref: '#/components/parameters/IdempotencyKey'
       responses:
         '202': {$ref: '#/components/responses/AcceptedJob'}
   /integrations/{integration_id}/credentials/rotate:
@@ -439,6 +464,7 @@ paths:
       operationId: rotateIntegrationCredential
       parameters:
         - $ref: '#/components/parameters/IntegrationId'
+        - $ref: '#/components/parameters/IfMatch'
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
@@ -446,7 +472,55 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/WriteOnlyCredentialCommand'}
       responses:
-        '202': {$ref: '#/components/responses/AcceptedJob'}
+        '200':
+          description: Credential replaced with a new encrypted write-only version; provider must be requalified
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Integration'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '412': {$ref: '#/components/responses/Problem'}
+  /integrations/{integration_id}/entitlement:
+    put:
+      tags: [Integrations]
+      operationId: declareProviderEntitlement
+      parameters:
+        - $ref: '#/components/parameters/IntegrationId'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EntitlementDeclarationCommand'}
+      responses:
+        '200':
+          description: Hashed entitlement evidence recorded pending provider qualification
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Integration'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '412': {$ref: '#/components/responses/Problem'}
+  /integrations/{integration_id}/non-broker/state:
+    put:
+      tags: [Integrations]
+      operationId: transitionReviewedNonBrokerIntegration
+      parameters:
+        - $ref: '#/components/parameters/IntegrationId'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/IntegrationLifecycleCommand'}
+      responses:
+        '200':
+          description: Lifecycle state updated; enable/reconnect remains degraded until qualification
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Integration'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '412': {$ref: '#/components/responses/Problem'}
   /integrations/{integration_id}/accounts:
     get:
       tags: [Integrations]
@@ -481,6 +555,31 @@ paths:
               schema:
                 type: array
                 items: {$ref: '#/components/schemas/Instrument'}
+  /markets/instruments/{instrument_id}/mapping:
+    put:
+      tags: [Markets]
+      operationId: approveSpecialistSymbolMapping
+      description: Owner and MFA approval of one catalogue-bound specialist symbol for an MT5-supported instrument; an external symbol cannot be reassigned silently.
+      parameters:
+        - name: instrument_id
+          in: path
+          required: true
+          schema: {$ref: '#/components/schemas/Id'}
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SymbolMappingCommand'}
+      responses:
+        '200':
+          description: Approved immutable mapping revision
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SymbolMapping'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '412': {$ref: '#/components/responses/Problem'}
   /markets/research/schedule:
     get:
       tags: [Markets]
@@ -539,6 +638,28 @@ paths:
         '409': {$ref: '#/components/responses/Problem'}
         '422': {$ref: '#/components/responses/Problem'}
   /markets/research/coordinated:
+    get:
+      tags: [Markets]
+      operationId: listCoordinatedMarketResearch
+      parameters:
+        - name: account_id
+          in: query
+          schema: {$ref: '#/components/schemas/Id'}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+      responses:
+        '200':
+          description: Durable coordinated run history, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/CoordinatedMarketResearchReport'}
     post:
       tags: [Markets]
       operationId: startCoordinatedMarketResearch
@@ -1092,13 +1213,13 @@ components:
         state: {type: string, enum: [ARMED, TRIPPED, ACKNOWLEDGED, CLEARED]}
     ProviderCatalogueEntry:
       type: object
-      required: [provider_key, catalogue_revision, adapter_revision, category, status, capabilities]
+      required: [provider, catalogue_revision, adapter_revision, category, lifecycle, capabilities]
       properties:
-        provider_key: {type: string, enum: [MT5_TERMINAL_BRIDGE, CME_GROUP, CBOE_FX_SPOT, COINBASE_EXCHANGE, OPENAI_RESPONSES, ANTHROPIC_MESSAGES]}
+        provider: {type: string, enum: [MT5_TERMINAL_BRIDGE, CME_GROUP, CBOE_FX_SPOT, COINBASE_EXCHANGE, OPENAI_RESPONSES, ANTHROPIC_MESSAGES]}
         catalogue_revision: {type: string}
         adapter_revision: {type: string}
-        category: {type: string, enum: [BROKER, MARKET_DATA, LLM]}
-        status: {type: string, enum: [APPROVED, DEPRECATED, RETIRED]}
+        category: {type: string, enum: [BROKER_ACCOUNT_DATA, MARKET_DATA, LLM]}
+        lifecycle: {type: string, enum: [APPROVED, DEPRECATED, RETIRED]}
         asset_categories: {type: array, items: {$ref: '#/components/schemas/MarketCategory'}}
         venues: {type: array, items: {type: string}}
         capabilities: {type: array, items: {type: string}}
@@ -1107,39 +1228,64 @@ components:
         licensing_notice: {type: string}
         retention_posture: {type: string, enum: [NOT_APPLICABLE, STANDARD, ADMIN_VERIFIED]}
         credential_required: {type: boolean}
+        entitlement_required: {type: boolean}
+        credentials_are_write_only: {type: boolean, const: true}
+        verification_only: {type: boolean}
     NonBrokerIntegrationCommand:
       type: object
-      required: [provider_key, display_name, configuration]
+      required: [provider, name, configuration, credentials, capabilities, reason]
       additionalProperties: false
       properties:
-        provider_key: {type: string}
-        display_name: {type: string, minLength: 1, maxLength: 128}
+        provider: {type: string}
+        name: {type: string, minLength: 1, maxLength: 128}
         configuration: {type: object, additionalProperties: true}
         credentials: {type: object, additionalProperties: true, writeOnly: true}
+        capabilities: {type: array, items: {type: string}, uniqueItems: true}
+        official_source: {type: boolean, default: true}
         licensing_accepted: {type: boolean}
+        retention_accepted: {type: boolean}
+        reason: {type: string, minLength: 8, maxLength: 2000}
     WriteOnlyCredentialCommand:
       type: object
       required: [credentials]
       additionalProperties: false
       properties:
         credentials: {type: object, additionalProperties: true, writeOnly: true}
+    EntitlementDeclarationCommand:
+      type: object
+      additionalProperties: false
+      required: [confirmation, evidence_reference, reason]
+      properties:
+        confirmation: {type: string, const: CONFIRM_ENTITLEMENT}
+        evidence_reference: {type: string, minLength: 4, maxLength: 256, writeOnly: true}
+        reason: {type: string, minLength: 8, maxLength: 2000}
+    IntegrationLifecycleCommand:
+      type: object
+      additionalProperties: false
+      required: [action, reason]
+      properties:
+        action: {type: string, enum: [ENABLE, DISABLE, RECONNECT]}
+        reason: {type: string, minLength: 8, maxLength: 2000}
     Integration:
       type: object
-      required: [id, version, category, provider, name, status]
+      required: [id, version, category, provider, name]
       properties:
         id: {$ref: '#/components/schemas/Id'}
         version: {type: integer}
-        category: {type: string, enum: [BROKER, MARKET_DATA, LLM, ECONOMIC, MACRO, CRYPTO, EMAIL, MESSAGING]}
+        category: {type: string, enum: [BROKER_ACCOUNT_DATA, MARKET_DATA, LLM, NOTIFICATION]}
         name: {type: string}
         mt5_account_login: {type: string, description: MT5 account login selected for this managed bridge.}
         mt5_server: {type: string, description: Broker server selected for this managed bridge.}
         provider: {type: string, description: Reviewed provider catalogue key.}
         catalogue_revision: {type: string}
         capabilities: {type: array, items: {type: string}}
-        entitlement_status: {type: string, enum: [NOT_REQUIRED, UNVERIFIED, VERIFIED, MISSING, EXPIRED]}
+        entitlement_status: {type: string, enum: [NOT_REQUIRED, UNVERIFIED, DECLARED, VERIFIED, MISSING, EXPIRED]}
         retention_posture: {type: string, enum: [NOT_APPLICABLE, STANDARD, ADMIN_VERIFIED]}
         status: {type: string, enum: [HEALTHY, DEGRADED, FAILED, DISABLED]}
+        state: {type: string, enum: [HEALTHY, DEGRADED, FAILED, DISABLED]}
         credential_hint: {type: string, description: Masked value only}
+        credential_status: {type: string, enum: [CONFIGURED, NOT_CONFIGURED]}
+        credential: {type: string, const: WRITE_ONLY}
     ManagedMt5EnrollmentCommand:
       type: object
       required: [account_login, server]
@@ -1168,6 +1314,12 @@ components:
         integration_id: {$ref: '#/components/schemas/Id'}
         status: {const: REMOVED}
         unbound_account_count: {type: integer, minimum: 0}
+    RemovedIntegration:
+      type: object
+      required: [integration_id, status]
+      properties:
+        integration_id: {$ref: '#/components/schemas/Id'}
+        status: {const: REMOVED}
     ProviderAccountCandidate:
       type: object
       required: [provider_account_id, provider, verification_status]
@@ -1249,9 +1401,20 @@ components:
         semantics: {type: string, enum: [ACTUAL, BROKER_PROXY, UNAVAILABLE]}
         source_role: {type: string, enum: [MT5_BROKER_AUTHORITY, SPECIALIST_PRIMARY, FALLBACK_MT5, FALLBACK_CACHED_EXTERNAL]}
         observed_at: {$ref: '#/components/schemas/Instant'}
+        received_at: {$ref: '#/components/schemas/Instant'}
         freshness: {type: string, enum: [FRESH, STALE, UNKNOWN]}
+        age_seconds: {type: integer}
         freshness_policy_version: {type: string}
+        provider_symbol: {type: string}
+        canonical_instrument_id: {$ref: '#/components/schemas/Id'}
+        mapping_revision: {type: string}
+        entitlement_status: {type: string}
+        complete: {type: boolean}
+        quality: {type: string}
+        conflict_state: {type: string, enum: [CLEAR, MATERIAL_CONFLICT, UNCHECKED]}
         fallback_reason: {type: string}
+        raw_reference: {type: string}
+        measures: {type: object, additionalProperties: {type: string}, readOnly: true}
     LlmAnalysisStatus:
       type: object
       required: [provider, exact_model_id, catalogue_revision, state, authoritative]
@@ -1267,18 +1430,48 @@ components:
         retry_eligible: {type: boolean}
         reason: {type: string}
         analysis: {type: object, additionalProperties: true, readOnly: true}
-    CategoryResearchResult:
+        failure_reason: {type: string}
+        attempt_count: {type: integer, minimum: 0}
+    CoordinatedMarketCandidate:
       type: object
-      required: [id, category, outcome, candidates, source_evidence, llm_analysis, active_assignment_changed]
+      required: [id, instrument_id, symbol, display_name, eligible, confidence, exclusions, components, rationale, source_evidence]
       properties:
         id: {$ref: '#/components/schemas/Id'}
-        category: {$ref: '#/components/schemas/MarketCategory'}
-        outcome: {type: string, enum: [RECOMMENDED, NO_ELIGIBLE_CANDIDATE, BLOCKED]}
-        block_reasons: {type: array, items: {type: string}}
-        candidates: {type: array, items: {type: object, additionalProperties: true}}
+        instrument_id: {$ref: '#/components/schemas/Id'}
+        symbol: {type: string}
+        display_name: {type: string}
+        eligible: {type: boolean}
+        score: {type: string}
+        rank: {type: integer}
+        confidence: {type: string}
+        exclusions: {type: array, items: {type: string}}
+        components: {type: object, additionalProperties: true, readOnly: true}
+        rationale: {type: object, additionalProperties: true, readOnly: true}
         source_evidence: {type: array, items: {$ref: '#/components/schemas/SourceEvidence'}}
-        llm_analysis: {$ref: '#/components/schemas/LlmAnalysisStatus'}
+    CategorySelectionProposal:
+      type: object
+      required: [state, candidate, active_assignment_changed]
+      properties:
+        state: {type: string, const: REVIEW_REQUIRED}
+        candidate: {$ref: '#/components/schemas/CoordinatedMarketCandidate'}
         active_assignment_changed: {type: boolean, const: false}
+    CategoryResearchResult:
+      type: object
+      required: [run_id, category, state, outcome, candidates, source_manifest, fallback_path, policy_pins, llm_analysis, activation_state]
+      properties:
+        run_id: {$ref: '#/components/schemas/Id'}
+        category: {$ref: '#/components/schemas/MarketCategory'}
+        state: {type: string}
+        outcome: {type: string, enum: [PENDING, RECOMMENDED, NO_ELIGIBLE_CANDIDATE, BLOCKED]}
+        block_reasons: {type: array, items: {type: string}}
+        candidates: {type: array, items: {$ref: '#/components/schemas/CoordinatedMarketCandidate'}}
+        source_manifest: {type: object, additionalProperties: true, readOnly: true}
+        fallback_path: {type: array, items: {type: object, additionalProperties: true}}
+        deterministic_result_hash: {type: string}
+        policy_pins: {type: object, additionalProperties: true, readOnly: true}
+        llm_analysis: {$ref: '#/components/schemas/LlmAnalysisStatus'}
+        activation_state: {type: string, const: REQUIRES_SEPARATE_HUMAN_CONFIRMATION}
+        selection_proposal: {$ref: '#/components/schemas/CategorySelectionProposal'}
     CoordinatedMarketResearchReport:
       type: object
       required: [id, state, trigger, methodology_version, categories, ranking_is_not_activation]
@@ -1287,6 +1480,11 @@ components:
         state: {type: string, enum: [QUEUED, RUNNING, PARTIAL, COMPLETED, FAILED]}
         trigger: {type: string, enum: [MANUAL, SCHEDULED]}
         methodology_version: {type: string}
+        source_catalogue_revision: {type: string}
+        exact_model_id: {type: string}
+        freshness_policy_manifest: {type: object, additionalProperties: {type: string}, readOnly: true}
+        retry_policy_manifest: {type: object, additionalProperties: {type: string}, readOnly: true}
+        model_pin: {type: object, additionalProperties: true, readOnly: true}
         occurrence_status: {type: string, enum: [STARTED, SKIPPED_OVERLAP, COMPLETED, PARTIAL, FAILED]}
         categories:
           type: array
@@ -1294,6 +1492,29 @@ components:
           maxItems: 3
           items: {$ref: '#/components/schemas/CategoryResearchResult'}
         ranking_is_not_activation: {type: boolean, const: true}
+    SymbolMappingCommand:
+      type: object
+      additionalProperties: false
+      required: [integration_id, provider_symbol, venue, mapping_revision, reason]
+      properties:
+        integration_id: {$ref: '#/components/schemas/Id'}
+        provider_symbol: {type: string, minLength: 1, maxLength: 256}
+        venue: {type: string, minLength: 1, maxLength: 128}
+        mapping_revision: {type: string, minLength: 1, maxLength: 64}
+        contract_variant: {type: string, minLength: 1, maxLength: 128}
+        reason: {type: string, minLength: 8, maxLength: 2000}
+    SymbolMapping:
+      type: object
+      required: [id, instrument_id, provider, provider_symbol, venue, mapping_revision, status]
+      properties:
+        id: {$ref: '#/components/schemas/Id'}
+        instrument_id: {$ref: '#/components/schemas/Id'}
+        provider: {type: string}
+        provider_symbol: {type: string}
+        venue: {type: string}
+        mapping_revision: {type: string}
+        contract_variant: {type: string}
+        status: {type: string, const: APPROVED}
     MarketResearchCommand:
       type: object
       required: [account_id, category, methodology_version]

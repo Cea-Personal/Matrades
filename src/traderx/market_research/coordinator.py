@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -18,11 +19,53 @@ from traderx.market_research.events import (
 from traderx.market_research.model import (
     CandidateAssessment,
     CoordinatedMarketResearchRun,
+    LlmAnalysisAttempt,
     MarketResearchOccurrence,
     MarketResearchRun,
 )
+from traderx.notifications.router import notify_market_research_owners
 
 CATEGORIES = ("COMMODITY", "CRYPTO", "FOREX")
+
+
+@dataclass(frozen=True, slots=True)
+class CategoryRunClaim:
+    run_id: UUID
+    lease_token: str
+    attempt_count: int
+
+
+def claim_category_run(
+    database: Session,
+    run_id: UUID,
+    *,
+    now: datetime,
+    lease_owner: str,
+    lease_token: str,
+    lease_duration: timedelta = timedelta(minutes=15),
+) -> CategoryRunClaim | None:
+    """Atomically claim a category run or fence an at-least-once redelivery."""
+
+    run = database.scalar(
+        select(MarketResearchRun)
+        .where(MarketResearchRun.id == run_id)
+        .with_for_update(skip_locked=True)
+    )
+    if run is None or run.state in {"COMPLETED", "BLOCKED", "FAILED"}:
+        return None
+    lease_expires_at = run.lease_expires_at
+    if lease_expires_at is not None and lease_expires_at.tzinfo is None:
+        lease_expires_at = lease_expires_at.replace(tzinfo=now.tzinfo)
+    if run.state == "RUNNING" and lease_expires_at is not None and lease_expires_at > now:
+        return None
+    run.state = "RUNNING"
+    run.lease_owner = lease_owner
+    run.lease_token = lease_token
+    run.lease_expires_at = now + lease_duration
+    run.attempt_count += 1
+    run.current_error = None
+    database.flush()
+    return CategoryRunClaim(run.id, lease_token, run.attempt_count)
 
 
 def create_coordinated_run(
@@ -111,16 +154,21 @@ def record_category_outcome(
     block_reasons: list[str] | None = None,
     correlation_id: str = "market-research-worker",
 ) -> None:
-    run.state = "BLOCKED" if outcome == "BLOCKED" else "COMPLETED"
+    run.state = (
+        "BLOCKED" if outcome == "BLOCKED" else "FAILED" if outcome == "FAILED" else "COMPLETED"
+    )
     run.block_reasons = list(block_reasons or [])
     run.completed_at = completed_at
+    run.lease_owner = None
+    run.lease_token = None
+    run.lease_expires_at = None
     parent = (
         database.get(CoordinatedMarketResearchRun, run.coordinated_run_id)
         if run.coordinated_run_id
         else None
     )
     if parent is not None:
-        if outcome == "BLOCKED":
+        if outcome in {"BLOCKED", "FAILED"}:
             emit_market_research_fact(
                 database,
                 aggregate_type="market_research_run",
@@ -135,11 +183,21 @@ def record_category_outcome(
                 now=completed_at,
                 correlation_id=correlation_id,
             )
+            notify_market_research_owners(
+                database,
+                kind="CATEGORY_BLOCKED",
+                subject_id=str(run.id),
+                payload={
+                    "category": run.category,
+                    "outcome": outcome,
+                    "block_reasons": list(block_reasons or []),
+                    "active_assignment_changed": False,
+                },
+                created_at=completed_at,
+            )
         children = list(
             database.scalars(
-                select(MarketResearchRun).where(
-                    MarketResearchRun.coordinated_run_id == parent.id
-                )
+                select(MarketResearchRun).where(MarketResearchRun.coordinated_run_id == parent.id)
             )
         )
         if all(child.state in {"COMPLETED", "BLOCKED", "FAILED"} for child in children):
@@ -150,6 +208,13 @@ def record_category_outcome(
                 "completed": len(children) - blocked,
                 "blocked_or_failed": blocked,
             }
+            if parent.occurrence_id is not None:
+                occurrence = database.get(MarketResearchOccurrence, parent.occurrence_id)
+                if occurrence is not None:
+                    occurrence.state = parent.state
+                    occurrence.lease_owner = None
+                    occurrence.lease_token = None
+                    occurrence.lease_expires_at = None
             emit_market_research_fact(
                 database,
                 aggregate_type="coordinated_market_research_run",
@@ -158,9 +223,7 @@ def record_category_outcome(
                 event_type=COORDINATED_COMPLETED,
                 data={
                     "state": parent.state,
-                    "category_outcomes": {
-                        child.category: child.state for child in children
-                    },
+                    "category_outcomes": {child.category: child.state for child in children},
                     "source_catalogue_revision": parent.source_catalogue_revision,
                     "exact_model_id": parent.exact_model_id,
                     "active_assignments_changed": False,
@@ -190,41 +253,90 @@ def coordinated_report(database: Session, run_id: UUID) -> dict[str, object]:
             .where(CandidateAssessment.research_run_id == child.id)
             .order_by(CandidateAssessment.rank, Instrument.symbol)
         ).all()
-        categories.append({
-            "run_id": str(child.id),
-            "category": child.category,
-            "state": child.state,
-            "outcome": (
-                "BLOCKED"
-                if child.state in {"BLOCKED", "FAILED"}
-                else "RECOMMENDED"
-                if child.state == "COMPLETED"
-                else "PENDING"
+        candidate_rows = [
+            {
+                "id": str(assessment.id),
+                "instrument_id": str(instrument.id),
+                "symbol": instrument.symbol,
+                "display_name": instrument.display_name,
+                "eligible": assessment.eligible,
+                "score": str(assessment.score) if assessment.score is not None else None,
+                "rank": assessment.rank,
+                "confidence": str(assessment.confidence),
+                "exclusions": assessment.gate_evidence.get("reason_codes", []),
+                "components": assessment.components,
+                "rationale": assessment.explanation,
+                "source_evidence": assessment.source_evidence,
+            }
+            for assessment, instrument in assessment_rows
+        ]
+        eligible_candidates = [
+            item for item in candidate_rows if child.state == "COMPLETED" and item["eligible"]
+        ]
+        proposed_candidate = min(
+            eligible_candidates,
+            key=lambda item: (item["rank"] is None, item["rank"] or 999999, item["symbol"]),
+            default=None,
+        )
+        latest_attempt = database.scalar(
+            select(LlmAnalysisAttempt)
+            .where(LlmAnalysisAttempt.research_run_id == child.id)
+            .order_by(LlmAnalysisAttempt.attempt_number.desc())
+            .limit(1)
+        )
+        llm_analysis: dict[str, object] = {
+            "state": child.llm_analysis_state,
+            "authoritative": False,
+            "provider": parent.llm_provider_key,
+            "exact_model_id": parent.exact_model_id,
+            "catalogue_revision": parent.llm_catalogue_revision,
+            "adapter_revision": parent.llm_adapter_revision,
+            "prompt_template_version": parent.prompt_template_version,
+            "output_schema_version": parent.output_schema_version,
+            "inference_policy_version": parent.inference_policy_version,
+            "attempt_count": latest_attempt.attempt_number if latest_attempt else 0,
+            "retry_eligible": child.llm_analysis_state not in {"COMPLETED", "RUNNING"},
+            "analysis": latest_attempt.analysis if latest_attempt else None,
+            "failure_reason": (
+                latest_attempt.failure_reason or latest_attempt.state
+                if latest_attempt and latest_attempt.state != "COMPLETED"
+                else child.current_error
             ),
-            "block_reasons": child.block_reasons,
-            "source_manifest": child.source_manifest,
-            "fallback_path": child.fallback_path,
-            "deterministic_result_hash": child.deterministic_result_hash,
-            "llm_analysis": {
-                "state": child.llm_analysis_state,
-                "authoritative": False,
-            },
-            "activation_state": "REQUIRES_SEPARATE_HUMAN_CONFIRMATION",
-            "candidates": [
-                {
-                    "id": str(assessment.id),
-                    "symbol": instrument.symbol,
-                    "display_name": instrument.display_name,
-                    "eligible": assessment.eligible,
-                    "score": str(assessment.score) if assessment.score is not None else None,
-                    "rank": assessment.rank,
-                    "confidence": str(assessment.confidence),
-                    "exclusions": assessment.gate_evidence.get("reason_codes", []),
-                    "components": assessment.components,
-                }
-                for assessment, instrument in assessment_rows
-            ],
-        })
+        }
+        outcome = (
+            "BLOCKED"
+            if child.state in {"BLOCKED", "FAILED"}
+            else "RECOMMENDED"
+            if child.state == "COMPLETED" and proposed_candidate is not None
+            else "NO_ELIGIBLE_CANDIDATE"
+            if child.state == "COMPLETED"
+            else "PENDING"
+        )
+        categories.append(
+            {
+                "run_id": str(child.id),
+                "category": child.category,
+                "state": child.state,
+                "outcome": outcome,
+                "block_reasons": child.block_reasons,
+                "source_manifest": child.source_manifest,
+                "fallback_path": child.fallback_path,
+                "deterministic_result_hash": child.deterministic_result_hash,
+                "policy_pins": child.policy_pins,
+                "llm_analysis": llm_analysis,
+                "activation_state": "REQUIRES_SEPARATE_HUMAN_CONFIRMATION",
+                "candidates": candidate_rows,
+                "selection_proposal": (
+                    {
+                        "state": "REVIEW_REQUIRED",
+                        "candidate": proposed_candidate,
+                        "active_assignment_changed": False,
+                    }
+                    if proposed_candidate is not None
+                    else None
+                ),
+            }
+        )
     return {
         "id": str(parent.id),
         "state": parent.state,
@@ -234,6 +346,17 @@ def coordinated_report(database: Session, run_id: UUID) -> dict[str, object]:
         "methodology_version": parent.methodology_version,
         "source_catalogue_revision": parent.source_catalogue_revision,
         "exact_model_id": parent.exact_model_id,
+        "freshness_policy_manifest": parent.freshness_policy_manifest,
+        "retry_policy_manifest": parent.retry_policy_manifest,
+        "model_pin": {
+            "provider": parent.llm_provider_key,
+            "exact_model_id": parent.exact_model_id,
+            "catalogue_revision": parent.llm_catalogue_revision,
+            "adapter_revision": parent.llm_adapter_revision,
+            "prompt_template_version": parent.prompt_template_version,
+            "output_schema_version": parent.output_schema_version,
+            "inference_policy_version": parent.inference_policy_version,
+        },
         "categories": categories,
         "ranking_is_not_activation": True,
         "active_assignments_changed": False,

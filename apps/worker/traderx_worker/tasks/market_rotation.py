@@ -5,7 +5,7 @@ from typing import cast
 from uuid import UUID
 
 from celery import shared_task
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 
 from traderx.market_data.model import Instrument
 from traderx.market_research.coordinator import create_coordinated_run
@@ -17,6 +17,7 @@ from traderx.market_research.model import (
 )
 from traderx.market_research.scheduling import claim_occurrence
 from traderx.market_research.service import refresh_mt5_instrument_catalog
+from traderx.notifications.router import notify_market_research_owners
 from traderx.shared.types import utc_now
 from traderx.strategies.model import Strategy, StrategyVersion
 from traderx.strategies.staleness import classify_evidence
@@ -37,10 +38,12 @@ def scan_due_schedules(self) -> dict[str, object]:  # type: ignore[no-untyped-de
     with session_factory().begin() as database:
         schedules = list(
             database.scalars(
-                select(MarketResearchSchedule).where(
+                select(MarketResearchSchedule)
+                .where(
                     MarketResearchSchedule.enabled.is_(True),
                     MarketResearchSchedule.next_run_at <= now,
                 )
+                .with_for_update(skip_locked=True)
             )
         )
         for schedule in schedules:
@@ -60,6 +63,18 @@ def scan_due_schedules(self) -> dict[str, object]:  # type: ignore[no-untyped-de
                 lease_token=f"schedule-{schedule.id}-{now.isoformat()}",
             )
             if active is not None:
+                notify_market_research_owners(
+                    database,
+                    kind="SCHEDULE_OVERLAP",
+                    subject_id=str(occurrence.id),
+                    payload={
+                        "schedule_id": str(schedule.id),
+                        "scheduled_for": occurrence.scheduled_for.isoformat(),
+                        "active_run_id": str(active.id),
+                        "reason": occurrence.reason,
+                    },
+                    created_at=now,
+                )
                 overlaps += 1
                 continue
             model = database.scalar(
@@ -105,7 +120,16 @@ def scan_due_schedules(self) -> dict[str, object]:  # type: ignore[no-untyped-de
                 select(MarketResearchRun.id)
                 .where(
                     MarketResearchRun.coordinated_run_id == parent.id,
-                    MarketResearchRun.state.in_(["QUEUED", "RUNNING"]),
+                    or_(
+                        MarketResearchRun.state == "QUEUED",
+                        and_(
+                            MarketResearchRun.state == "RUNNING",
+                            or_(
+                                MarketResearchRun.lease_expires_at.is_(None),
+                                MarketResearchRun.lease_expires_at <= now,
+                            ),
+                        ),
+                    ),
                 )
                 .limit(1)
             )
@@ -118,7 +142,14 @@ def scan_due_schedules(self) -> dict[str, object]:  # type: ignore[no-untyped-de
             str(run_id)
             for run_id in database.scalars(
                 select(MarketResearchRun.id).where(
-                    MarketResearchRun.llm_analysis_state == "RETRY_QUEUED"
+                    or_(
+                        MarketResearchRun.llm_analysis_state == "RETRY_QUEUED",
+                        and_(
+                            MarketResearchRun.llm_analysis_state == "RUNNING",
+                            MarketResearchRun.lease_owner == "celery-market-research-llm",
+                            MarketResearchRun.lease_expires_at <= now,
+                        ),
+                    )
                 )
             )
         ]
