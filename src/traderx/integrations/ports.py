@@ -73,6 +73,13 @@ class LlmAnalysisRequest:
     evidence: dict[str, object]
     timeout_seconds: int = 180
     store: bool = False
+    # The market researcher and strategy researcher use the same advisory-only
+    # provider boundary, but their strictly validated outputs are different.
+    # Keeping the schema on the request avoids a generic free-text model call.
+    output_schema_name: str = "market_advisory"
+    output_schema: dict[str, object] | None = None
+    system_instruction: str | None = None
+    user_instruction: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

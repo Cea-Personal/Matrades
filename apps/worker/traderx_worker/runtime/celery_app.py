@@ -12,6 +12,7 @@ celery_app = Celery(
     include=[
         "traderx_worker.tasks.broker_account_sync",
         "traderx_worker.tasks.market_research",
+        "traderx_worker.tasks.strategy_research",
         "traderx_worker.tasks.validation",
         "traderx_worker.tasks.paper",
         "traderx_worker.tasks.opportunities",

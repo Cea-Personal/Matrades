@@ -152,6 +152,7 @@ def configure_model(
     llm_integration_id: UUID,
     provider_key: str,
     exact_model_id: str,
+    research_brief: str,
     reason: str,
     expected_etag: str,
     idempotency_key: str,
@@ -163,6 +164,9 @@ def configure_model(
         exact_model_id = validate_llm_model_id(provider_key, exact_model_id)
     except ValueError as exc:
         raise InvalidTransition(str(exc)) from exc
+    research_brief = research_brief.strip()
+    if len(research_brief) < 8:
+        raise InvalidTransition("the research brief must contain at least 8 characters")
     idempotency, replay_id = _start_configuration_request(
         database,
         actor,
@@ -172,6 +176,7 @@ def configure_model(
             "llm_integration_id": llm_integration_id,
             "provider_key": provider_key,
             "exact_model_id": exact_model_id,
+            "research_brief": research_brief,
             "reason": reason,
             "expected_etag": expected_etag,
         },
@@ -208,6 +213,7 @@ def configure_model(
         "prompt_template_version": PROMPT_TEMPLATE_VERSION,
         "output_schema_version": OUTPUT_SCHEMA_VERSION,
         "inference_policy_version": INFERENCE_POLICY_VERSION,
+        "research_brief": research_brief,
         "effective_at": now,
         "changed_by": _actor_id(actor),
         "change_reason": reason,
@@ -312,6 +318,7 @@ def _model_payload(
         "prompt_template_version": configuration.prompt_template_version,
         "output_schema_version": configuration.output_schema_version,
         "inference_policy_version": configuration.inference_policy_version,
+        "research_brief": configuration.research_brief,
         "effective_at": configuration.effective_at.isoformat(),
         "version": configuration.version,
         "applies_to": "FUTURE_RUNS_ONLY",

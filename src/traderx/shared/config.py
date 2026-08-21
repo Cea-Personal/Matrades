@@ -56,6 +56,10 @@ class Settings(BaseModel):
     provider_retention_posture: str = Field(
         default="STANDARD", pattern=r"^(STANDARD|ADMIN_VERIFIED)$"
     )
+    # Deployment secret for the private LiteLLM administration surface.  It is
+    # never returned to the browser; the owner UI operates through TraderX.
+    litellm_gateway_admin_key: SecretStr | None = None
+    litellm_gateway_url: str = "http://litellm:4000"
     # This is intentionally off by default.  It controls a local-only scraper
     # experiment and is not a provider entitlement or an approval to use its
     # output for live decisions.
@@ -81,6 +85,12 @@ class Settings(BaseModel):
                     "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
                 )
             ),
+            litellm_gateway_admin_key=(
+                SecretStr(getenv("TRADERX_LITELLM_GATEWAY_ADMIN_KEY"))
+                if getenv("TRADERX_LITELLM_GATEWAY_ADMIN_KEY")
+                else None
+            ),
+            litellm_gateway_url=getenv("TRADERX_LITELLM_GATEWAY_URL", "http://litellm:4000"),
             experimental_calendar_scraper_enabled=(
                 getenv("TRADERX_ENABLE_EXPERIMENTAL_CALENDAR_SCRAPER", "false").lower()
                 == "true"

@@ -23,6 +23,8 @@ from traderx.market_data.model import (
     InstrumentAlias,
     InstrumentStatus,
 )
+from traderx.market_data.providers.coinbase_exchange import CoinbaseExchangeAdapter
+from traderx.market_data.providers.http import ProviderHttpTransport, ProviderTransportError
 from traderx.market_data.source_evidence import ConflictState, SourceEvidence
 from traderx.market_research.eligibility import EligibilityInputs, evaluate_eligibility
 from traderx.market_research.events import SOURCE_FALLBACK_SELECTED, emit_market_research_fact
@@ -113,6 +115,9 @@ _FOREX_CODES = {
 }
 _CRYPTO_CODES = {"BTC", "ETH", "SOL", "XRP", "ADA", "DOGE", "LTC", "BCH"}
 _COMMODITY_CODES = {"XAU", "XAG", "XPT", "XPD", "WTI", "XTI", "BRENT", "XBR", "NGAS"}
+_COINBASE_AUTOMATIC_QUOTES = {"USD"}
+_COINBASE_UNIVERSE_REVISION = "coinbase-automatic-universe-v1"
+_MT5_UNIVERSE_REVISION = "mt5-automatic-universe-v1"
 
 
 def normalize_category(value: str) -> MarketCategory:
@@ -136,6 +141,10 @@ def classify_mt5_instrument(payload: dict[str, object]) -> MarketCategory | None
     path = f"{payload.get('path', '')} {payload.get('description', '')}".lower()
     base = str(payload.get("currency_base", symbol[:3])).upper()
     quote = str(payload.get("currency_profit", symbol[3:6])).upper()
+    # Currency-named ETFs (for example Nasdaq\\ETF\\FXA) are not Forex
+    # pairs.  Exclude non-FX asset folders before the currency-code fallback.
+    if any(word in path for word in ("nasdaq", "stock", "etf", "equity", "index", "indices")):
+        return None
     if "crypto" in path or base in _CRYPTO_CODES or quote in _CRYPTO_CODES:
         return MarketCategory.CRYPTO
     if any(word in path for word in ("commodity", "metal", "energy")) or base in _COMMODITY_CODES:
@@ -169,12 +178,19 @@ def refresh_mt5_instrument_catalog(database: Session) -> int:
             continue
         record = {str(key): value for key, value in raw_record.items()}
         category = classify_mt5_instrument(record)
+        safe_record = _json_safe(record)
         if category is None:
+            _quarantine_unsupported_mt5_symbol(
+                database,
+                provider=integration.provider,
+                native_symbol=str(record["symbol"]).strip(),
+                record=safe_record,
+                observed_at=observed_at,
+            )
             continue
         native_symbol = str(record["symbol"]).strip()
         symbol = native_symbol.upper()
         instrument = database.scalar(select(Instrument).where(Instrument.symbol == symbol))
-        safe_record = _json_safe(record)
         if instrument is None:
             instrument = Instrument(
                 symbol=symbol,
@@ -207,14 +223,266 @@ def refresh_mt5_instrument_catalog(database: Session) -> int:
             database.add(
                 InstrumentAlias(
                     instrument_id=instrument.id,
+                    integration_id=integration.id,
                     provider=integration.provider,
                     native_symbol=native_symbol,
+                    venue="MT5_BROKER",
+                    mapping_revision=_MT5_UNIVERSE_REVISION,
+                    provider_metadata={
+                        "automatic_universe": True,
+                        "policy": "MT5_CONNECTED_ACCOUNT_CATALOG",
+                        "semantics": SourceSemantics.BROKER_PROXY.value,
+                    },
+                    approved_at=observed_at,
                     valid_from=observed_at,
                 )
             )
+        elif alias.instrument_id == instrument.id:
+            # MT5 symbols are discovered from the connected read-only account.
+            # This is a policy-approved universe, not a per-symbol owner action.
+            alias.integration_id = integration.id
+            alias.venue = "MT5_BROKER"
+            if alias.approved_by is None:
+                alias.mapping_revision = _MT5_UNIVERSE_REVISION
+                alias.approved_at = observed_at
+                alias.provider_metadata = {
+                    "automatic_universe": True,
+                    "policy": "MT5_CONNECTED_ACCOUNT_CATALOG",
+                    "semantics": SourceSemantics.BROKER_PROXY.value,
+                }
         imported += 1
     database.flush()
     return imported
+
+
+def _quarantine_unsupported_mt5_symbol(
+    database: Session,
+    *,
+    provider: str,
+    native_symbol: str,
+    record: dict[str, object],
+    observed_at: datetime,
+) -> None:
+    """Retain a previously imported non-target symbol without offering it as FX."""
+
+    alias = database.scalar(
+        select(InstrumentAlias).where(
+            InstrumentAlias.provider == provider,
+            InstrumentAlias.native_symbol == native_symbol,
+        )
+    )
+    if alias is None:
+        return
+    instrument = database.get(Instrument, alias.instrument_id)
+    if instrument is None:
+        return
+    instrument.category = "UNSUPPORTED"
+    instrument.status = InstrumentStatus.QUARANTINED
+    instrument.contract_spec = record
+    instrument.trading_hours = {
+        "provider": provider,
+        "observed_at": observed_at.isoformat(),
+        "reason": "OUTSIDE_TRADERX_MARKET_UNIVERSE",
+    }
+
+
+def refresh_coinbase_instrument_catalog(database: Session) -> int:
+    """Import the reviewed Coinbase USD spot universe without per-pair approval.
+
+    Coinbase remains the venue authority for crypto evidence.  The policy limits
+    discovery to the core crypto assets TraderX supports and active USD spot
+    products, avoiding automatic expansion into every long-tail or stablecoin
+    listing while allowing research to select the strongest eligible pair.
+    """
+
+    integration = database.scalar(
+        select(Integration).where(
+            Integration.provider == "COINBASE_EXCHANGE",
+            Integration.state == "HEALTHY",
+            Integration.removed_at.is_(None),
+        )
+    )
+    if integration is None:
+        return 0
+    transport = ProviderHttpTransport("COINBASE_EXCHANGE")
+    try:
+        records = CoinbaseExchangeAdapter(transport).discover_instruments("CRYPTO")
+    except ProviderTransportError:
+        transport.close()
+        return 0
+
+    observed_at = utc_now()
+    imported = 0
+    for record in records:
+        base, quote, native_symbol = _coinbase_product_identity(record)
+        if not base or not quote or not native_symbol:
+            continue
+        if base not in _CRYPTO_CODES or quote not in _COINBASE_AUTOMATIC_QUOTES:
+            continue
+        if not _coinbase_product_is_active(record):
+            continue
+        symbol = f"{base}{quote}"
+        try:
+            market_snapshot = CoinbaseExchangeAdapter(transport).get_instrument_market_snapshot(
+                native_symbol
+            )
+        except ProviderTransportError:
+            # Keep the approved listing available, but do not manufacture quote,
+            # candle, or sizing evidence when Coinbase has not supplied it.
+            market_snapshot = {}
+        instrument = database.scalar(select(Instrument).where(Instrument.symbol == symbol))
+        contract_spec = _coinbase_contract_spec(
+            record=record,
+            market_snapshot=market_snapshot,
+            observed_at=observed_at,
+        )
+        if instrument is None:
+            instrument = Instrument(
+                symbol=symbol,
+                display_name=str(record.get("display_name") or f"{base} / {quote}"),
+                category=MarketCategory.CRYPTO.value,
+                status=InstrumentStatus.INACTIVE,
+                contract_spec=contract_spec,
+                trading_hours=_coinbase_trading_hours(integration.provider, observed_at),
+            )
+            database.add(instrument)
+            database.flush()
+        elif instrument.category == MarketCategory.CRYPTO.value:
+            instrument.display_name = str(record.get("display_name") or instrument.display_name)
+            instrument.contract_spec = contract_spec
+            instrument.trading_hours = _coinbase_trading_hours(integration.provider, observed_at)
+        else:
+            # A cross-category symbol collision cannot be remapped silently.
+            continue
+        alias = database.scalar(
+            select(InstrumentAlias).where(
+                InstrumentAlias.provider == integration.provider,
+                InstrumentAlias.native_symbol == native_symbol,
+            )
+        )
+        if alias is None:
+            database.add(
+                InstrumentAlias(
+                    instrument_id=instrument.id,
+                    integration_id=integration.id,
+                    provider=integration.provider,
+                    native_symbol=native_symbol,
+                    venue="COINBASE_EXCHANGE",
+                    mapping_revision=_COINBASE_UNIVERSE_REVISION,
+                    provider_metadata={
+                        "automatic_universe": True,
+                        "policy": "ACTIVE_CORE_CRYPTO_USD_SPOT",
+                        "semantics": SourceSemantics.ACTUAL.value,
+                    },
+                    approved_at=observed_at,
+                    valid_from=observed_at,
+                )
+            )
+        elif alias.instrument_id == instrument.id:
+            alias.integration_id = integration.id
+            alias.venue = "COINBASE_EXCHANGE"
+            if alias.approved_by is None:
+                alias.mapping_revision = _COINBASE_UNIVERSE_REVISION
+                alias.approved_at = observed_at
+                alias.provider_metadata = {
+                    "automatic_universe": True,
+                    "policy": "ACTIVE_CORE_CRYPTO_USD_SPOT",
+                    "semantics": SourceSemantics.ACTUAL.value,
+                }
+        imported += 1
+    database.flush()
+    transport.close()
+    return imported
+
+
+def _coinbase_product_identity(record: dict[str, object]) -> tuple[str, str, str]:
+    native_symbol = str(record.get("id") or record.get("product_id") or "").upper().strip()
+    base = str(record.get("base_currency") or "").upper().strip()
+    quote = str(record.get("quote_currency") or "").upper().strip()
+    if (not base or not quote) and native_symbol.count("-") == 1:
+        base, quote = native_symbol.split("-", maxsplit=1)
+    return base, quote, native_symbol
+
+
+def _coinbase_product_is_active(record: dict[str, object]) -> bool:
+    if record.get("trading_disabled") is True or record.get("cancel_only") is True:
+        return False
+    status = str(record.get("status") or "online").lower()
+    return status in {"online", "active"}
+
+
+def _coinbase_contract_spec(
+    *,
+    record: dict[str, object],
+    market_snapshot: dict[str, object],
+    observed_at: datetime,
+) -> dict[str, object]:
+    product = market_snapshot.get("product")
+    ticker = market_snapshot.get("ticker")
+    product_payload = product if isinstance(product, dict) else record
+    ticker_payload = ticker if isinstance(ticker, dict) else {}
+    snapshot_time = _coinbase_snapshot_time(
+        ticker_payload.get("time") or market_snapshot.get("received_at"), observed_at
+    )
+    return {
+        "coinbase_product": _json_safe(product_payload),
+        "coinbase_ticker": _json_safe(ticker_payload),
+        "closes": _coinbase_close_series(market_snapshot.get("candles")),
+        "bid": ticker_payload.get("bid"),
+        "ask": ticker_payload.get("ask"),
+        "price_increment": product_payload.get("quote_increment")
+        or product_payload.get("price_increment"),
+        "base_increment": product_payload.get("base_increment"),
+        # Exchange products can express the minimum in base size or quote
+        # funds. Both are authoritative minimum-order constraints.
+        "minimum_order_size": product_payload.get("base_min_size")
+        or product_payload.get("base_minimum_size")
+        or product_payload.get("min_market_funds"),
+        "observed_at": snapshot_time.isoformat(),
+        "market_type": "SPOT",
+        "source_semantics": SourceSemantics.ACTUAL.value,
+        "universe_policy": _COINBASE_UNIVERSE_REVISION,
+    }
+
+
+def _coinbase_close_series(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    closes: list[tuple[int, str]] = []
+    for entry in value:
+        if isinstance(entry, list) and len(entry) >= 5:
+            timestamp, close = entry[0], entry[4]
+        elif isinstance(entry, dict):
+            timestamp, close = entry.get("time"), entry.get("close")
+        else:
+            continue
+        try:
+            parsed_time = int(str(timestamp))
+            # Coinbase candle payloads use JSON numbers. Convert through text
+            # before the financial boundary so binary floats are not retained.
+            parsed_close = as_decimal(str(close))
+        except (TypeError, ValueError):
+            continue
+        if parsed_close > 0:
+            closes.append((parsed_time, str(parsed_close)))
+    return [close for _, close in sorted(closes)]
+
+
+def _coinbase_snapshot_time(value: object, fallback: datetime) -> datetime:
+    if value is None:
+        return fallback
+    try:
+        return _as_utc(datetime.fromisoformat(str(value).replace("Z", "+00:00")))
+    except ValueError:
+        return fallback
+
+
+def _coinbase_trading_hours(provider: str, observed_at: datetime) -> dict[str, object]:
+    return {
+        "provider": provider,
+        "schedule": "CONTINUOUS_24_7",
+        "observed_at": observed_at.isoformat(),
+    }
 
 
 def execute_market_research(
@@ -234,6 +502,8 @@ def execute_market_research(
     ):
         raise InvalidTransition("market suitability weights must sum to one")
     refresh_mt5_instrument_catalog(database)
+    if canonical_category == MarketCategory.CRYPTO:
+        refresh_coinbase_instrument_catalog(database)
     instruments = list(
         database.scalars(
             select(Instrument)
@@ -457,6 +727,52 @@ def market_research_report(database: Session, run_id: UUID) -> dict[str, object]
     }
 
 
+def activation_candidate_for_instrument(
+    database: Session, *, instrument_id: UUID
+) -> dict[str, object]:
+    """Return the latest eligible, completed assessment for a deliberate activation review.
+
+    The library may initiate review for any eligible assessed instrument, not just
+    the category's rank-one proposal. It never creates an assessment, relaxes a
+    gate, or changes the active assignment; the existing approval command still
+    requires a reason, confirmation, current ETag, and explicit replacement.
+    """
+
+    row = database.execute(
+        select(CandidateAssessment, Instrument, MarketResearchRun)
+        .join(Instrument, Instrument.id == CandidateAssessment.instrument_id)
+        .join(MarketResearchRun, MarketResearchRun.id == CandidateAssessment.research_run_id)
+        .where(
+            CandidateAssessment.instrument_id == instrument_id,
+            CandidateAssessment.eligible.is_(True),
+            CandidateAssessment.rank.is_not(None),
+            MarketResearchRun.state == ResearchRunState.COMPLETED,
+        )
+        .order_by(MarketResearchRun.completed_at.desc(), CandidateAssessment.rank, CandidateAssessment.id)
+        .limit(1)
+    ).first()
+    if row is None:
+        raise InvalidTransition(
+            "this instrument has no current eligible research assessment; run coordinated research first"
+        )
+    assessment, instrument, _run = row
+    return {
+        "id": str(assessment.id),
+        "instrument_id": str(instrument.id),
+        "symbol": instrument.symbol,
+        "display_name": instrument.display_name,
+        "category": instrument.category,
+        "eligible": assessment.eligible,
+        "score": str(assessment.score) if assessment.score is not None else None,
+        "rank": assessment.rank,
+        "confidence": str(assessment.confidence),
+        "exclusions": assessment.gate_evidence.get("reason_codes", []),
+        "components": assessment.components,
+        "rationale": assessment.explanation,
+        "source_evidence": assessment.source_evidence,
+    }
+
+
 def instrument_library_payload(
     database: Session, *, category: str | None = None, status: str | None = None
 ) -> list[dict[str, object]]:
@@ -500,7 +816,13 @@ def instrument_library_payload(
                         "provider_symbol": alias.native_symbol,
                         "venue": alias.venue,
                         "mapping_revision": alias.mapping_revision,
-                        "mapping_status": "APPROVED" if alias.approved_at else "BROKER_AUTHORITY",
+                        "mapping_status": (
+                            "AUTOMATIC_POLICY"
+                            if alias.provider_metadata.get("automatic_universe") is True
+                            else "APPROVED"
+                            if alias.approved_at
+                            else "BROKER_AUTHORITY"
+                        ),
                         "entitlement_status": alias.provider_metadata.get(
                             "entitlement_status", "NOT_REQUIRED"
                         ),
@@ -739,6 +1061,7 @@ def _research_inputs(
     source_evidence: tuple[SourceEvidence, ...] | None = None,
 ) -> tuple[EligibilityInputs, dict[str, str], DataQuality]:
     spec = instrument.contract_spec
+    category = MarketCategory(instrument.category)
     closes = _decimal_list(spec.get("closes"))
     tick_volumes = _decimal_list(spec.get("tick_volumes"))
     bid = _optional_decimal(spec.get("bid"))
@@ -750,10 +1073,18 @@ def _research_inputs(
         spread_bps = (ask - bid) / ((ask + bid) / Decimal("2")) * Decimal("10000")
     else:
         spread_bps = Decimal("999999")
-    sizing_supported = all(
-        (_optional_decimal(spec.get(field)) or Decimal("0")) > 0
-        for field in ("tick_size", "tick_value", "contract_size", "volume_min", "volume_step")
-    )
+    if category == MarketCategory.CRYPTO:
+        # Coinbase spot sizing uses exchange increments and a minimum order rule;
+        # an MT5 contract-size/tick-value check is inapplicable here.
+        sizing_supported = all(
+            (_optional_decimal(spec.get(field)) or Decimal("0")) > 0
+            for field in ("price_increment", "base_increment", "minimum_order_size")
+        )
+    else:
+        sizing_supported = all(
+            (_optional_decimal(spec.get(field)) or Decimal("0")) > 0
+            for field in ("tick_size", "tick_value", "contract_size", "volume_min", "volume_step")
+        )
     returns = [
         abs((current - previous) / previous)
         for previous, current in zip(closes, closes[1:], strict=False)
@@ -789,7 +1120,6 @@ def _research_inputs(
         )
         actual = any(item.semantics == SourceSemantics.ACTUAL for item in qualified)
         broker_proxy = any(item.semantics == SourceSemantics.BROKER_PROXY for item in qualified)
-        category = MarketCategory(instrument.category)
         specialist_metrics: dict[str, str] = {}
         for item in source_evidence:
             if item.canonical_instrument_id != str(instrument.id):
@@ -868,7 +1198,11 @@ def _research_inputs(
         depth=depth,
         sizing_supported=sizing_supported,
         gap_risk_acceptable=gap_risk_acceptable,
-        hours_supported=trade_mode in {1, 2, 4},
+        hours_supported=(
+            instrument.trading_hours.get("schedule") == "CONTINUOUS_24_7"
+            if category == MarketCategory.CRYPTO
+            else trade_mode in {1, 2, 4}
+        ),
         prop_permitted=bool(spec.get("prop_permitted", True)),
         mandatory_source_evidence_complete=mandatory_source_complete,
         source_conflict=source_conflict,

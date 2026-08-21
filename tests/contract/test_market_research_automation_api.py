@@ -215,12 +215,14 @@ def test_market_research_automation_routes_are_authenticated_and_operational() -
                 "llm_integration_id": llm_id,
                 "provider_key": "LITELLM_PROXY",
                 "exact_model_id": "openrouter/google/gemini-2.5-pro",
+                "research_brief": "Focus on macro risk and high-quality volatility context.",
                 "reason": "Use the configured LiteLLM research model",
             },
         )
         assert model.status_code == 200
         assert model.json()["applies_to"] == "FUTURE_RUNS_ONLY"
         assert model.json()["exact_model_id"] == "openrouter/google/gemini-2.5-pro"
+        assert model.json()["research_brief"] == "Focus on macro risk and high-quality volatility context."
 
         started = client.post(
             "/api/v1/markets/research/coordinated",
@@ -233,6 +235,7 @@ def test_market_research_automation_routes_are_authenticated_and_operational() -
         )
         assert report.status_code == 200
         assert len(report.json()["categories"]) == 3
+        assert report.json()["research_brief"] == "Focus on macro risk and high-quality volatility context."
         assert report.json()["ranking_is_not_activation"] is True
         assert all(
             item["llm_analysis"]["authoritative"] is False for item in report.json()["categories"]

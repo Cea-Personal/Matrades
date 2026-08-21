@@ -3,28 +3,20 @@ from __future__ import annotations
 from uuid import UUID
 
 from celery import shared_task
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy import select
 
 from traderx.accounts.model import TradingAccount
 from traderx.integrations.broker_service import sync_selected_broker_account
 from traderx.integrations.model import Integration
-from traderx.shared.config import get_settings
-from traderx.shared.db import load_model_metadata
 from traderx.shared.types import InvalidTransition
-
-
-def _session_factory() -> sessionmaker[Session]:
-    load_model_metadata()
-    engine = create_engine(get_settings().database_url.unicode_string(), pool_pre_ping=True)
-    return sessionmaker(bind=engine, expire_on_commit=False)
+from traderx_worker.tasks.database import session_factory
 
 
 @shared_task(name="traderx.broker.sync_account", bind=True, acks_late=True)
 def sync_account(self, integration_id: str) -> dict[str, str]:  # type: ignore[no-untyped-def]
     """Perform one bounded, read-only broker poll; incomplete data remains fail-closed."""
 
-    session = _session_factory()()
+    session = session_factory()()
     try:
         integration = session.get(Integration, UUID(integration_id))
         if integration is None:
@@ -50,7 +42,7 @@ def sync_account(self, integration_id: str) -> dict[str, str]:  # type: ignore[n
 def sync_all_accounts(self) -> dict[str, int]:  # type: ignore[no-untyped-def]
     """Schedule individual account polls so one degraded source cannot block other accounts."""
 
-    session = _session_factory()()
+    session = session_factory()()
     try:
         ids = [
             str(integration_id)

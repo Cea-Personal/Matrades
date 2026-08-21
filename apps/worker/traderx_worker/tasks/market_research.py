@@ -49,7 +49,11 @@ from traderx.market_research.model import (
     CoordinatedMarketResearchRun,
     MarketResearchRun,
 )
-from traderx.market_research.service import execute_market_research, refresh_mt5_instrument_catalog
+from traderx.market_research.service import (
+    execute_market_research,
+    refresh_coinbase_instrument_catalog,
+    refresh_mt5_instrument_catalog,
+)
 from traderx.market_research.source_selection import (
     SourceAttempt,
     SourceSelection,
@@ -69,7 +73,7 @@ def synchronize_market_data(
     cursor: str | None = None,
     background_job_id: str | None = None,
 ) -> dict[str, str | None]:
-    if provider != "MT5_TERMINAL_BRIDGE":
+    if provider not in {"MT5_TERMINAL_BRIDGE", "COINBASE_EXCHANGE"}:
         return {"provider": provider, "cursor": cursor, "status": "REJECTED_UNAPPROVED_PROVIDER"}
     with session_factory().begin() as database:
         job = _start_job(database, background_job_id)
@@ -78,18 +82,22 @@ def synchronize_market_data(
                 job,
                 completed=0,
                 total=1,
-                message="Refreshing the broker instrument catalog",
+                message="Refreshing the governed provider instrument catalog",
                 now=utc_now(),
             )
             if job.state in {JobState.CANCELLED, JobState.PAUSED}:
                 return {"provider": provider, "cursor": cursor, "status": str(job.state)}
-        imported = refresh_mt5_instrument_catalog(database)
+        imported = (
+            refresh_mt5_instrument_catalog(database)
+            if provider == "MT5_TERMINAL_BRIDGE"
+            else refresh_coinbase_instrument_catalog(database)
+        )
         if job is not None:
             checkpoint(
                 job,
                 completed=1,
                 total=1,
-                message="Broker instrument catalog refreshed",
+                message="Governed provider instrument catalog refreshed",
                 now=utc_now(),
             )
             job.transition(JobState.COMPLETED)
@@ -373,6 +381,14 @@ def _collect_category_sources(database: Session, category: str) -> SourceSelecti
     """Collect mapped specialist evidence, then apply the governed fallback order."""
 
     now = utc_now()
+    if category in {"FOREX", "COMMODITY"}:
+        # MT5 snapshots arrive through the read-only bridge.  Refresh the
+        # governed broker universe before deriving its current liquidity proxy.
+        refresh_mt5_instrument_catalog(database)
+    if category == "CRYPTO":
+        # The active Coinbase product catalogue is the policy-approved crypto
+        # universe.  It is refreshed before aliases are used for evidence.
+        refresh_coinbase_instrument_catalog(database)
     provider = _SPECIALISTS[category]
     integration = database.scalar(
         select(Integration).where(
@@ -476,6 +492,11 @@ def _collect_specialist_evidence(
     for alias in aliases:
         for capability in _COLLECT_CAPABILITIES[category]:
             observations = adapter.get_observations(alias.native_symbol, capability)
+            # Provider observations are received during this collection loop.
+            # Evaluate freshness after the response arrives; using the parent
+            # run's earlier timestamp incorrectly makes a current response look
+            # like it arrived in the future.
+            evidence_evaluated_at = utc_now()
             policy = _freshness_policy(database, integration.provider, capability.value)
             value = _observation_metric(observations, capability)
             coherent = bool(observations) and _observations_are_coherent(observations)
@@ -534,7 +555,7 @@ def _collect_specialist_evidence(
                 source_role=SourceRole.SPECIALIST_PRIMARY,
                 observed_at=latest,
                 received_at=max((item.received_at for item in observations), default=evaluated_at),
-                evaluated_at=evaluated_at,
+                evaluated_at=evidence_evaluated_at,
                 policy=policy,
                 venue=alias.venue,
                 provider_symbol=alias.native_symbol,
@@ -673,7 +694,11 @@ def _mt5_fallback_evidence(
             continue
         broker_activity = sum(tick_volumes, Decimal("0"))
         observed_at = _instant(spec.get("observed_at"))
-        policy = _freshness_policy(database, "MT5_TERMINAL_BRIDGE", "CANDLES")
+        # This record is broker-proxy liquidity evidence derived from the most
+        # recent MT5 tick activity.  Its freshness policy must therefore have
+        # the same capability as the evidence we publish; using the candle
+        # policy here makes evidence validation fail closed.
+        policy = _freshness_policy(database, "MT5_TERMINAL_BRIDGE", "LIQUIDITY")
         evidence.append(
             build_source_evidence(
                 provider="MT5_TERMINAL_BRIDGE",
@@ -883,8 +908,10 @@ def _advisory_evidence(database: Session, run: MarketResearchRun) -> dict[str, o
             .order_by(CandidateAssessment.rank, CandidateAssessment.id)
         )
     )
+    parent = database.get(CoordinatedMarketResearchRun, run.coordinated_run_id) if run.coordinated_run_id else None
     return {
         "category": run.category,
+        "research_brief": parent.research_brief if parent and parent.research_brief else None,
         "methodology_version": run.method_version,
         "deterministic_result_hash": run.deterministic_result_hash,
         "source_manifest": run.source_manifest,

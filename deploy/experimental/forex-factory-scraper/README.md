@@ -15,6 +15,9 @@ TRADERX_ENABLE_EXPERIMENTAL_CALENDAR_SCRAPER=true \
 docker compose -f deploy/compose.yaml --profile experimental-calendar-scraper up --build
 ```
 
+The Compose profile passes that environment value only to its dedicated
+experimental worker. If it is omitted or `false`, the worker rejects imports.
+
 Then, as an MFA-verified owner, use **Markets → Experimental scraped calendar**.
 Enter a start and end date (maximum 31 days), an optional comma-separated source
 list (`forex`, `cryptocraft`, `energyexch`, `metalsmine`), plus `limit` and

@@ -20,6 +20,20 @@ def _add_columns(table: str, columns: tuple[sa.Column[object], ...]) -> None:
             op.add_column(table, column)
 
 
+def _add_unique_constraint_if_missing(table: str, name: str, columns: list[str]) -> None:
+    existing = {
+        constraint["name"]
+        for constraint in sa.inspect(op.get_bind()).get_unique_constraints(table)
+    }
+    if name not in existing:
+        op.create_unique_constraint(name, table, columns)
+
+
+def _create_table_if_missing(name: str, *columns: sa.Column[object] | sa.Constraint) -> None:
+    if not sa.inspect(op.get_bind()).has_table(name):
+        op.create_table(name, *columns)
+
+
 def upgrade() -> None:
     _add_columns(
         "economic_events",
@@ -40,8 +54,10 @@ def upgrade() -> None:
             sa.Column("revision_number", sa.Integer(), nullable=False, server_default="1"),
         ),
     )
-    op.create_unique_constraint("uq_economic_event_source", "economic_events", ["source_provider", "external_id"])
-    op.create_table(
+    _add_unique_constraint_if_missing(
+        "economic_events", "uq_economic_event_source", ["source_provider", "external_id"]
+    )
+    _create_table_if_missing(
         "calendar_coverages",
         sa.Column("id", sa.Uuid(), primary_key=True),
         sa.Column("source_provider", sa.String(128), nullable=False),
@@ -55,7 +71,7 @@ def upgrade() -> None:
         sa.Column("version", sa.Integer(), nullable=False),
         sa.UniqueConstraint("source_provider", "scope_key", name="uq_calendar_coverage_scope"),
     )
-    op.create_table(
+    _create_table_if_missing(
         "economic_event_revisions",
         sa.Column("id", sa.Uuid(), primary_key=True),
         sa.Column("economic_event_id", sa.Uuid(), sa.ForeignKey("economic_events.id"), nullable=False),
@@ -69,7 +85,7 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("version", sa.Integer(), nullable=False),
     )
-    op.create_table(
+    _create_table_if_missing(
         "event_risk_policy_versions",
         sa.Column("id", sa.Uuid(), primary_key=True),
         sa.Column("account_id", sa.Uuid(), sa.ForeignKey("trading_accounts.id"), nullable=False),

@@ -35,7 +35,7 @@ describe("CommandCenterWorkspace", () => {
     render(<CommandCenterWorkspace account={{ id: "account-1", name: "Primary", mode: "DEMO", currency: "USD", starting_balance: "100000", status: "ACTIVE", version: 1, etag: '"account-1"', prop_profile_configured: true, risk_policy_configured: true }} onAccountChanged={async () => undefined} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Markets" }));
-    expect(await screen.findByRole("button", { name: "Run Forex research" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Run all three categories now" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Strategies" }));
     expect(await screen.findByRole("button", { name: "Save immutable draft" })).toBeTruthy();

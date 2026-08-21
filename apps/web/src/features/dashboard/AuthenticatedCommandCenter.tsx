@@ -28,9 +28,15 @@ export function AuthenticatedCommandCenter() {
   }, [router]);
 
   useEffect(() => {
-    // Defer the request to an asynchronous task so this effect only establishes
-    // the external fetch, rather than synchronously cascading a state update.
+    const refreshDashboard = () => {
+      void loadDashboard();
+    };
+    // Defer the initial request so this effect only establishes the external
+    // fetch. Workspace mutations can also request a dashboard refresh without
+    // remounting the current workspace.
     void Promise.resolve().then(loadDashboard);
+    window.addEventListener("traderx:dashboard-refresh", refreshDashboard);
+    return () => window.removeEventListener("traderx:dashboard-refresh", refreshDashboard);
   }, [loadDashboard]);
 
   if (error) return <p role="alert">{error}</p>;

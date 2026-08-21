@@ -67,6 +67,8 @@ type ExperimentalCalendarEvent = {
   official_url: string;
 };
 
+type LiteLlmModel = { id: string; alias: string };
+
 const providerNames: Record<string, string> = {
   TWELVE_DATA: "Twelve Data",
   COINBASE_EXCHANGE: "Coinbase Exchange",
@@ -360,6 +362,42 @@ function ResearchProviders() {
   const [message, setMessage] = useState<string>();
   const [error, setError] = useState<string>();
   const [experimentalEvents, setExperimentalEvents] = useState<ExperimentalCalendarEvent[]>([]);
+  const [experimentalImportStatus, setExperimentalImportStatus] = useState<string>();
+  const [experimentalCacheState, setExperimentalCacheState] = useState<
+    "LOADING" | "EMPTY" | "READY" | "UNAVAILABLE" | "IMPORT_QUEUED"
+  >("LOADING");
+  const [liteLlmModels, setLiteLlmModels] = useState<LiteLlmModel[]>([]);
+  const [liteLlmGatewayState, setLiteLlmGatewayState] = useState<"LOADING" | "HEALTHY" | "UNAVAILABLE">("LOADING");
+
+  const loadLiteLlmModels = useCallback(async () => {
+    try {
+      const response = await fetch("/api/v1/integrations/litellm/models", { credentials: "same-origin" });
+      if (!response.ok) throw new Error("gateway unavailable");
+      const payload = await response.json() as { gateway_state?: "HEALTHY" | "UNAVAILABLE"; items?: LiteLlmModel[] };
+      setLiteLlmModels(payload.items ?? []);
+      setLiteLlmGatewayState(payload.gateway_state === "HEALTHY" ? "HEALTHY" : "UNAVAILABLE");
+    } catch {
+      setLiteLlmModels([]);
+      setLiteLlmGatewayState("UNAVAILABLE");
+    }
+  }, []);
+
+  const loadExperimentalEvents = useCallback(async () => {
+    setExperimentalCacheState("LOADING");
+    try {
+      const response = await fetch(
+        "/api/v1/economic-calendar/experimental/forex-factory/cache?limit=100&offset=0",
+        { credentials: "same-origin" }
+      );
+      if (!response.ok) throw new Error("experimental cache unavailable");
+      const payload = await response.json() as { items: ExperimentalCalendarEvent[] };
+      setExperimentalEvents(payload.items);
+      setExperimentalCacheState(payload.items.length ? "READY" : "EMPTY");
+    } catch {
+      setExperimentalEvents([]);
+      setExperimentalCacheState("UNAVAILABLE");
+    }
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -377,12 +415,17 @@ function ResearchProviders() {
 
   useEffect(() => { void Promise.resolve().then(load); }, [load]);
   useEffect(() => {
-    void fetch("/api/v1/economic-calendar/events", { credentials: "same-origin" })
-      .then(async (response) => response.ok ? response.json() as Promise<Array<ExperimentalCalendarEvent & { source_origin: string }>> : [])
-      .then((events) => setExperimentalEvents(events.filter((event) => event.source_origin === "SCRAPED_EXPERIMENTAL")))
-      .catch(() => setExperimentalEvents([]));
-  }, []);
+    void loadExperimentalEvents();
+  }, [loadExperimentalEvents]);
   const definition = catalogue.find((item) => item.provider === selected);
+  const liteLlmConnection = configured.find((item) => item.provider === "LITELLM_PROXY");
+  useEffect(() => {
+    if (liteLlmConnection) void loadLiteLlmModels();
+    else {
+      setLiteLlmModels([]);
+      setLiteLlmGatewayState("UNAVAILABLE");
+    }
+  }, [liteLlmConnection, loadLiteLlmModels]);
   const healthyProviders = catalogue.filter((item) =>
     configured.some(
       (integration) => integration.provider === item.provider && integration.state === "HEALTHY"
@@ -409,6 +452,47 @@ function ResearchProviders() {
     finally { setBusy(false); }
   }
 
+  async function configureLiteLlmModel(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    setBusy(true); setError(undefined); setMessage(undefined);
+    try {
+      const response = await fetch("/api/v1/integrations/litellm/models", {
+        method: "POST", credentials: "same-origin",
+        headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({
+          alias: form.get("litellm-alias"),
+          provider_model: form.get("litellm-provider-model"),
+          provider_api_key: form.get("litellm-provider-api-key"),
+          provider_api_base: form.get("litellm-provider-api-base") || undefined,
+          reason: form.get("litellm-reason")
+        })
+      });
+      const result = await response.json() as ApiProblem & { alias?: string };
+      if (!response.ok) { setError(messageFor(result)); return; }
+      formElement.reset();
+      setMessage(`LiteLLM model ${result.alias ?? "alias"} was saved. Its upstream API key remains write-only.`);
+      await loadLiteLlmModels();
+    } catch { setError("TraderX could not save the LiteLLM model configuration."); }
+    finally { setBusy(false); }
+  }
+
+  async function removeLiteLlmModel(model: LiteLlmModel) {
+    if (!window.confirm(`Remove LiteLLM model alias “${model.alias}”? This removes its provider configuration from the private gateway.`)) return;
+    setBusy(true); setError(undefined); setMessage(undefined);
+    try {
+      const response = await fetch(`/api/v1/integrations/litellm/models/${encodeURIComponent(model.id)}`, {
+        method: "DELETE", credentials: "same-origin", headers: { "Idempotency-Key": crypto.randomUUID() }
+      });
+      const result = await response.json() as ApiProblem;
+      if (!response.ok) { setError(messageFor(result)); return; }
+      setMessage(`LiteLLM model ${model.alias} was removed from the private gateway.`);
+      await loadLiteLlmModels();
+    } catch { setError("TraderX could not remove the LiteLLM model alias."); }
+    finally { setBusy(false); }
+  }
+
   async function importExperimentalCalendar(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -430,16 +514,48 @@ function ResearchProviders() {
           offset: Number(form.get("scraper-offset"))
         })
       });
-      const result = await response.json() as ApiProblem;
+      const result = await response.json() as ApiProblem & { task_id?: string };
       if (!response.ok) { setError(messageFor(result)); return; }
+      setExperimentalCacheState("IMPORT_QUEUED");
+      setExperimentalImportStatus("Queued — waiting for the experimental worker.");
       setMessage("Experimental scraper import queued. Its events remain excluded from calendar coverage and all recommendation gates.");
-      window.setTimeout(() => {
-        void fetch("/api/v1/economic-calendar/events", { credentials: "same-origin" })
-          .then(async (eventsResponse) => eventsResponse.ok ? eventsResponse.json() as Promise<Array<ExperimentalCalendarEvent & { source_origin: string }>> : [])
-          .then((events) => setExperimentalEvents(events.filter((item) => item.source_origin === "SCRAPED_EXPERIMENTAL")));
-      }, 1500);
+      if (result.task_id) void pollExperimentalImport(result.task_id);
     } catch { setError("TraderX could not queue the experimental calendar import. Start the experimental scraper profile first."); }
     finally { setBusy(false); }
+  }
+
+  async function pollExperimentalImport(taskId: string, attempt = 0): Promise<void> {
+    try {
+      const response = await fetch(
+        `/api/v1/economic-calendar/experimental/forex-factory/imports/${taskId}`,
+        { credentials: "same-origin" }
+      );
+      const payload = await response.json() as {
+        state?: string;
+        result?: { status?: string; events?: number; detail?: string };
+      } & ApiProblem;
+      if (!response.ok) { setExperimentalImportStatus(messageFor(payload)); return; }
+      if (payload.state === "SUCCESS") {
+        if (payload.result?.status === "IMPORTED_EXPERIMENTAL_NOT_FOR_GATING") {
+          setExperimentalImportStatus(`Import completed — ${payload.result.events ?? 0} event(s) stored in the experimental cache.`);
+          await loadExperimentalEvents();
+        } else {
+          setExperimentalImportStatus(
+            `Import did not store results: ${payload.result?.detail ?? payload.result?.status ?? "unknown experimental worker result"}.`
+          );
+          setExperimentalCacheState("EMPTY");
+        }
+        return;
+      }
+      if (payload.state === "FAILURE") {
+        setExperimentalImportStatus("Experimental worker failed before it could import data. Check its Docker logs.");
+        return;
+      }
+      setExperimentalImportStatus(`${payload.state ?? "PENDING"} — waiting for the experimental worker.`);
+      if (attempt < 15) window.setTimeout(() => { void pollExperimentalImport(taskId, attempt + 1); }, 2000);
+    } catch {
+      setExperimentalImportStatus("TraderX could not read the experimental import status.");
+    }
   }
 
   async function lifecycle(integration: ResearchIntegration, action: "ENABLE" | "DISABLE" | "RECONNECT") {
@@ -455,6 +571,12 @@ function ResearchProviders() {
       await load();
     } catch { setError("TraderX could not change the provider lifecycle."); }
     finally { setBusy(false); }
+  }
+
+  async function refreshExperimentalCache() {
+    setBusy(true); setError(undefined);
+    await loadExperimentalEvents();
+    setBusy(false);
   }
 
   async function testProvider(integration: ResearchIntegration) {
@@ -533,6 +655,26 @@ function ResearchProviders() {
       <p className="section-kicker">Provider connections</p>
       <h2 id="research-providers">Reviewed research providers</h2>
       <p>Configure specialist market data and advisory models here in the current Integrations workspace. Credentials are write-only. Licensing and retention must be reviewed before connection.</p>
+      {liteLlmConnection ? <section className="setup-card" aria-labelledby="litellm-model-heading">
+        <p className="section-kicker">LiteLLM gateway connection</p>
+        <h3 id="litellm-model-heading">Configure models for {liteLlmConnection.name}</h3>
+        <p>Add the model alias and upstream provider credential here. TraderX sends this only to the private LiteLLM gateway; it never writes provider keys into YAML or returns them to the browser.</p>
+        {liteLlmGatewayState === "LOADING" ? <p className="field-hint">Checking the private LiteLLM gateway…</p> : null}
+        {liteLlmGatewayState === "UNAVAILABLE" ? <p className="field-hint">The private gateway is not available yet. Start the <code>llm-gateway</code> Docker profile with <code>LITELLM_MASTER_KEY</code>, then refresh this page.</p> : null}
+        <form className="setup-form" onSubmit={configureLiteLlmModel}>
+          <div className="form-row">
+            <label>TraderX model alias<input name="litellm-alias" pattern="[A-Za-z0-9][A-Za-z0-9._:-]{0,127}" placeholder="research-fast" required /></label>
+            <label>Provider model ID<input name="litellm-provider-model" pattern="[A-Za-z0-9][A-Za-z0-9._:/-]{1,255}" placeholder="openai/gpt-4.1-mini" required /></label>
+          </div>
+          <label>Provider API key<input autoComplete="new-password" name="litellm-provider-api-key" required type="password" /></label>
+          <label>Provider API base (optional)<input name="litellm-provider-api-base" placeholder="https://api.example.com/v1" type="url" /></label>
+          <label>Reason<textarea minLength={8} name="litellm-reason" required /></label>
+          <button disabled={busy || liteLlmGatewayState !== "HEALTHY"} type="submit">Save LiteLLM model</button>
+        </form>
+        <div className="integration-form-actions"><h4>Configured aliases</h4><button className="secondary-button" disabled={busy} onClick={() => void loadLiteLlmModels()} type="button">Refresh models</button></div>
+        {liteLlmGatewayState === "HEALTHY" && liteLlmModels.length === 0 ? <p className="empty-state">No model aliases configured yet.</p> : null}
+        {liteLlmModels.length ? <div className="integration-list">{liteLlmModels.map((model) => <article className="integration-card" key={model.id}><div><strong>{model.alias}</strong><small>Private gateway model alias</small></div><button className="danger-button" disabled={busy} onClick={() => void removeLiteLlmModel(model)} type="button">Remove model</button></article>)}</div> : null}
+      </section> : null}
       <section className="setup-card" aria-labelledby="experimental-scraper-heading">
         <p className="section-kicker">Experimental provider</p>
         <h3 id="experimental-scraper-heading">ForexFactory scraper</h3>
@@ -550,7 +692,13 @@ function ResearchProviders() {
           <p className="field-hint">Leave sources blank for ForexFactory. The date range is limited to 31 days; each source/date uses the scraper's daily endpoint.</p>
           <button className="secondary-button" disabled={busy} type="submit">Run experimental scraper import</button>
         </form>
-        {experimentalEvents.length ? <div className="evidence-metrics">{experimentalEvents.slice(0, 6).map((event) => <div key={event.id}><strong>{event.importance} · {event.event_type}</strong><span>{event.title} · {new Date(event.scheduled_at).toLocaleString()} · SCRAPED_EXPERIMENTAL</span><a href={event.official_url} rel="noreferrer" target="_blank">Scraped source</a></div>)}</div> : null}
+        {experimentalImportStatus ? <p className="field-hint" role="status">{experimentalImportStatus}</p> : null}
+        <div className="integration-form-actions"><h4>Cached import results</h4><button className="secondary-button" disabled={busy} onClick={() => void refreshExperimentalCache()} type="button">Refresh cached results</button></div>
+        {experimentalCacheState === "LOADING" ? <p className="field-hint">Loading the persisted experimental cache…</p> : null}
+        {experimentalCacheState === "IMPORT_QUEUED" ? <p className="field-hint">Import queued. TraderX will refresh this cache automatically; use Refresh cached results if it takes longer.</p> : null}
+        {experimentalCacheState === "EMPTY" ? <p className="empty-state">No cached experimental events yet. Start the experimental Docker profile, submit an import, then refresh this result list.</p> : null}
+        {experimentalCacheState === "UNAVAILABLE" ? <p className="status-message" data-tone="error">TraderX could not read the experimental cache. Confirm that the API is running and that you are signed in.</p> : null}
+        {experimentalCacheState === "READY" ? <div className="evidence-metrics">{experimentalEvents.slice(0, 6).map((event) => <div key={event.id}><strong>{event.importance} · {event.event_type}</strong><span>{event.title} · {new Date(event.scheduled_at).toLocaleString()} · SCRAPED_EXPERIMENTAL</span><a href={event.official_url} rel="noreferrer" target="_blank">Scraped source</a></div>)}</div> : null}
       </section>
       {healthyProviders.length > 0 ? <><h3>Healthy connections</h3><div className="active-market-grid">{healthyProviders.map((item) => <article key={item.provider}><span>{item.category === "LLM" ? "Advisory model" : item.asset_categories.join(", ") || "Market data"}</span><strong>{providerNames[item.provider]}</strong><small>Connected and healthy · {item.retention_posture}</small>{item.category === "LLM" ? <small>Models: choose any compatible model ID in Markets</small> : item.permitted_models.length ? <small>Models: {item.permitted_models.join(", ")}</small> : null}</article>)}</div></> : <p className="empty-state">No healthy research-provider connections yet. Select a reviewed provider below to configure and test it.</p>}
       {definition ? <form aria-label="Connect reviewed research provider" className="integration-form" onSubmit={connect}><label htmlFor="provider-kind">Research provider<select id="provider-kind" onChange={(event) => setSelected(event.target.value)} value={selected}>{catalogue.map((item) => <option key={item.provider} value={item.provider}>{providerNames[item.provider]}</option>)}</select></label><label htmlFor="provider-name">Connection name<input defaultValue={`${providerNames[definition.provider]} research`} id="provider-name" name="provider-name" required /></label>{definition.provider === "LITELLM_PROXY" ? <p className="field-hint">LiteLLM keeps the underlying provider credentials, routing, and configured model aliases in one gateway. For the bundled service use <code>http://litellm:4000/v1</code>; for a remote gateway use its HTTPS API base URL.</p> : null}{definition.configuration_fields.map((field) => <label key={field}>{field.replaceAll("_", " ")}<input defaultValue={definition.provider === "LITELLM_PROXY" && field === "base_url" ? "http://litellm:4000/v1" : undefined} name={`configuration-${field}`} required /></label>)}{definition.credential_fields.map((field) => <label key={field}>{field.replaceAll("_", " ")}<input autoComplete="new-password" name={`credential-${field}`} required type="password" /></label>)}<label className="confirmation-check"><input name="licensing-accepted" required={Boolean(definition.licensing_notice)} type="checkbox" /> I accept the licensing/data-use prerequisites.</label><label className="confirmation-check"><input name="retention-accepted" required={definition.retention_posture !== "NOT_APPLICABLE"} type="checkbox" /> I reviewed the provider retention posture.</label><label htmlFor="provider-reason">Reason<textarea id="provider-reason" minLength={8} name="provider-reason" required /></label><button disabled={busy} type="submit">Connect reviewed provider</button></form> : null}

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from typing import Annotated
+from urllib.parse import urlparse
 from uuid import UUID
 
+import httpx
 from fastapi import APIRouter, Depends, Header, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -27,6 +29,11 @@ from traderx.integrations.broker_service import (
     test_broker_integration,
 )
 from traderx.integrations.crypto import SecretBox
+from traderx.integrations.llm_profiles import (
+    model_prompt_profile,
+    prompt_profile_configuration,
+    remove_prompt_profile,
+)
 from traderx.integrations.model import Integration
 from traderx.integrations.registry import approved_providers
 from traderx.integrations.service import (
@@ -176,6 +183,26 @@ class NonBrokerIntegrationCommand(BaseModel):
 
 class CredentialRotationCommand(BaseModel):
     credentials: dict[str, object]
+
+
+class LiteLlmModelCommand(BaseModel):
+    """Restricted owner-only configuration for the bundled LiteLLM gateway."""
+
+    alias: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+    provider_model: str = Field(
+        min_length=3, max_length=256, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]{1,255}$"
+    )
+    provider_api_key: str = Field(min_length=8, max_length=4096)
+    provider_api_base: str | None = Field(default=None, max_length=512)
+    system_message: str | None = Field(default=None, max_length=6000)
+    user_message: str | None = Field(default=None, max_length=6000)
+    reason: str = Field(min_length=8, max_length=2000)
+
+
+class LiteLlmPromptProfileCommand(BaseModel):
+    system_message: str | None = Field(default=None, max_length=6000)
+    user_message: str | None = Field(default=None, max_length=6000)
+    reason: str = Field(min_length=8, max_length=2000)
 
 
 class EntitlementDeclarationCommand(BaseModel):
@@ -349,6 +376,300 @@ def provider_catalog(
             if definition.provider not in {"OPENAI_RESPONSES", "ANTHROPIC_MESSAGES"}
         ]
     }
+
+
+def _litellm_admin_headers() -> dict[str, str]:
+    key = get_settings().litellm_gateway_admin_key
+    if key is None or not key.get_secret_value().strip():
+        raise InvalidTransition(
+            "LiteLLM gateway administration is not enabled. Set LITELLM_MASTER_KEY when starting "
+            "Compose so TraderX can configure the private gateway from this screen."
+        )
+    value = key.get_secret_value()
+    normalized = value if value.startswith("sk-") else f"sk-{value}"
+    return {
+        "Authorization": f"Bearer {normalized}",
+        "Content-Type": "application/json",
+    }
+
+
+def _litellm_admin_url(path: str) -> str:
+    return f"{get_settings().litellm_gateway_url.rstrip('/')}{path}"
+
+
+def _litellm_error(response: httpx.Response) -> InvalidTransition:
+    # Never reflect a provider key or an unbounded gateway body to the browser.
+    if response.status_code in {401, 403}:
+        return InvalidTransition("TraderX could not authenticate to the private LiteLLM gateway.")
+    if response.status_code == 409:
+        return InvalidTransition("A LiteLLM model with that alias already exists. Choose another alias.")
+    return InvalidTransition(
+        "LiteLLM rejected the model configuration. Confirm the provider model and gateway deployment."
+    )
+
+
+def _validated_litellm_api_base(value: str | None) -> str | None:
+    if value is None or not value.strip():
+        return None
+    parsed = urlparse(value.strip())
+    if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
+        raise InvalidTransition("a custom LiteLLM provider API base must be an absolute HTTPS URL")
+    return value.strip()
+
+
+@router.get("/litellm/models")
+def list_litellm_models(
+    context: Annotated[AuthenticationContext, Depends(authenticated_context)],
+    database: DatabaseSession,
+) -> dict[str, object]:
+    """List aliases without exposing LiteLLM's upstream provider credentials."""
+
+    _require_manager(context)
+    try:
+        response = httpx.get(
+            _litellm_admin_url("/model/info"),
+            headers=_litellm_admin_headers(),
+            timeout=get_settings().provider_connect_timeout_seconds,
+        )
+    except httpx.HTTPError:
+        return {"gateway_state": "UNAVAILABLE", "items": []}
+    if response.status_code >= 400:
+        return {"gateway_state": "UNAVAILABLE", "items": []}
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = {}
+    data = payload.get("data", payload.get("model_info", [])) if isinstance(payload, dict) else []
+    integration = database.scalar(
+        select(Integration).where(
+            Integration.provider == "LITELLM_PROXY", Integration.state != "REMOVED"
+        )
+    )
+    items: list[dict[str, object]] = []
+    if isinstance(data, list):
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("model_name") or item.get("model") or item.get("id")
+            model_info = item.get("model_info")
+            model_id = item.get("id")
+            params = item.get("litellm_params")
+            if isinstance(model_info, dict):
+                model_id = model_id or model_info.get("id")
+            if isinstance(name, str) and isinstance(model_id, str):
+                profile = model_prompt_profile(integration.configuration, name) if integration else {}
+                provider_model = profile.get("provider_model")
+                if not provider_model and isinstance(params, dict) and isinstance(params.get("model"), str):
+                    provider_model = params["model"]
+                items.append(
+                    {
+                        "id": model_id,
+                        "alias": name,
+                        "provider_model": provider_model or "Not reported by gateway",
+                        "system_message": profile.get("system_message"),
+                        "user_message": profile.get("user_message"),
+                    }
+                )
+    return {"gateway_state": "HEALTHY", "items": items}
+
+
+@router.post("/litellm/models", status_code=201)
+def configure_litellm_model(
+    payload: LiteLlmModelCommand,
+    context: Annotated[AuthenticationContext, Depends(authenticated_context)],
+    database: DatabaseSession,
+) -> dict[str, object]:
+    """Create a model alias through the gateway rather than editing its YAML."""
+
+    actor = _require_manager(context)
+    params: dict[str, object] = {"model": payload.provider_model, "api_key": payload.provider_api_key}
+    api_base = _validated_litellm_api_base(payload.provider_api_base)
+    if api_base:
+        params["api_base"] = api_base
+    try:
+        response = httpx.post(
+            _litellm_admin_url("/model/new"),
+            headers=_litellm_admin_headers(),
+            json={"model_name": payload.alias, "litellm_params": params},
+            timeout=get_settings().provider_read_timeout_seconds,
+        )
+    except httpx.HTTPError as exc:
+        raise InvalidTransition(
+            "TraderX could not reach the private LiteLLM gateway. Start the llm-gateway Docker profile first."
+        ) from exc
+    if response.status_code >= 400:
+        raise _litellm_error(response)
+    integration = database.scalar(
+        select(Integration).where(
+            Integration.provider == "LITELLM_PROXY", Integration.state != "REMOVED"
+        )
+    )
+    if integration is None:
+        raise InvalidTransition("connect the LiteLLM Gateway integration before configuring model aliases")
+    try:
+        integration.configuration = prompt_profile_configuration(
+            integration.configuration,
+            alias=payload.alias,
+            provider_model=payload.provider_model,
+            system_message=payload.system_message,
+            user_message=payload.user_message,
+        )
+    except ValueError as exc:
+        raise InvalidTransition(str(exc)) from exc
+    database.add(
+        AuditEvent.create(
+            actor_type="USER",
+            actor_id=context.user.id,
+            actor_role=context.user.role,
+            action="integration.litellm.model.configure",
+            outcome="SUCCEEDED",
+            target_type="litellm_model_alias",
+            target_id=None,
+            target_version=None,
+            reason=payload.reason,
+            assurance=actor.assurance,
+            correlation_id=correlation_id.get() or "unavailable",
+            causation_id=None,
+            idempotency_key=None,
+            previous_value=None,
+            new_value={
+                "alias": payload.alias,
+                "provider_model": payload.provider_model,
+                "system_message_configured": bool(payload.system_message and payload.system_message.strip()),
+                "user_message_configured": bool(payload.user_message and payload.user_message.strip()),
+                "custom_api_base": bool(api_base),
+                "credential_redacted": True,
+            },
+            occurred_at=utc_now(),
+        )
+    )
+    database.commit()
+    return {
+        "alias": payload.alias,
+        "provider_model": payload.provider_model,
+        "credential": "WRITE_ONLY",
+        "gateway_state": "CONFIGURED",
+        "message": "Model alias saved in LiteLLM. It is ready to select after the gateway connection is healthy.",
+    }
+
+
+@router.put("/litellm/models/{model_id}/prompt-profile")
+def update_litellm_prompt_profile(
+    model_id: str,
+    payload: LiteLlmPromptProfileCommand,
+    context: Annotated[AuthenticationContext, Depends(authenticated_context)],
+    database: DatabaseSession,
+) -> dict[str, object]:
+    """Update TraderX-owned prompts without exposing the gateway's provider key."""
+
+    actor = _require_manager(context)
+    if not model_id or len(model_id) > 256:
+        raise InvalidTransition("invalid LiteLLM model identifier")
+    try:
+        response = httpx.get(
+            _litellm_admin_url("/model/info"),
+            headers=_litellm_admin_headers(),
+            timeout=get_settings().provider_connect_timeout_seconds,
+        )
+        gateway_models = response.json().get("data", []) if response.status_code < 400 else []
+    except (httpx.HTTPError, ValueError):
+        gateway_models = []
+    model = next(
+        (
+            item for item in gateway_models
+            if isinstance(item, dict) and item.get("id") == model_id and isinstance(item.get("model_name"), str)
+        ),
+        None,
+    )
+    if not isinstance(model, dict):
+        raise InvalidTransition("the LiteLLM model alias no longer exists in the private gateway")
+    alias = str(model["model_name"])
+    params = model.get("litellm_params")
+    provider_model = params.get("model") if isinstance(params, dict) else None
+    if not isinstance(provider_model, str):
+        raise InvalidTransition("the gateway did not return the provider model for this alias")
+    integration = database.scalar(
+        select(Integration).where(Integration.provider == "LITELLM_PROXY", Integration.state != "REMOVED")
+    )
+    if integration is None:
+        raise InvalidTransition("the LiteLLM Gateway integration does not exist")
+    try:
+        integration.configuration = prompt_profile_configuration(
+            integration.configuration,
+            alias=alias,
+            provider_model=provider_model,
+            system_message=payload.system_message,
+            user_message=payload.user_message,
+        )
+    except ValueError as exc:
+        raise InvalidTransition(str(exc)) from exc
+    database.add(AuditEvent.create(
+        actor_type="USER", actor_id=context.user.id, actor_role=context.user.role,
+        action="integration.litellm.model.prompt-profile.configure", outcome="SUCCEEDED",
+        target_type="litellm_model_alias", target_id=None, target_version=None, reason=payload.reason,
+        assurance=actor.assurance, correlation_id=correlation_id.get() or "unavailable", causation_id=None,
+        idempotency_key=None, previous_value=None,
+        new_value={"alias": alias, "system_message_configured": bool(payload.system_message and payload.system_message.strip()), "user_message_configured": bool(payload.user_message and payload.user_message.strip())},
+        occurred_at=utc_now(),
+    ))
+    database.commit()
+    return {"id": model_id, "alias": alias, "provider_model": provider_model, "state": "CONFIGURED"}
+
+
+@router.delete("/litellm/models/{model_id}")
+def remove_litellm_model(
+    model_id: str,
+    context: Annotated[AuthenticationContext, Depends(authenticated_context)],
+    database: DatabaseSession,
+) -> dict[str, object]:
+    """Delete one explicitly selected gateway model; credentials remain redacted."""
+
+    actor = _require_manager(context)
+    if not model_id or len(model_id) > 256:
+        raise InvalidTransition("invalid LiteLLM model identifier")
+    try:
+        response = httpx.post(
+            _litellm_admin_url("/model/delete"),
+            headers=_litellm_admin_headers(),
+            json={"id": model_id},
+            timeout=get_settings().provider_read_timeout_seconds,
+        )
+    except httpx.HTTPError as exc:
+        raise InvalidTransition("TraderX could not reach the private LiteLLM gateway.") from exc
+    if response.status_code >= 400:
+        raise _litellm_error(response)
+    integration = database.scalar(
+        select(Integration).where(Integration.provider == "LITELLM_PROXY", Integration.state != "REMOVED")
+    )
+    if integration is not None:
+        profiles = integration.configuration.get("model_prompt_profiles")
+        if isinstance(profiles, dict):
+            for alias, profile in profiles.items():
+                if isinstance(profile, dict) and str(profile.get("gateway_id", "")) == model_id:
+                    integration.configuration = remove_prompt_profile(integration.configuration, str(alias))
+                    break
+    database.add(
+        AuditEvent.create(
+            actor_type="USER",
+            actor_id=context.user.id,
+            actor_role=context.user.role,
+            action="integration.litellm.model.remove",
+            outcome="SUCCEEDED",
+            target_type="litellm_model_alias",
+            target_id=None,
+            target_version=None,
+            reason="Owner explicitly removed LiteLLM model alias",
+            assurance=actor.assurance,
+            correlation_id=correlation_id.get() or "unavailable",
+            causation_id=None,
+            idempotency_key=None,
+            previous_value={"model_id": model_id, "credential_redacted": True},
+            new_value=None,
+            occurred_at=utc_now(),
+        )
+    )
+    database.commit()
+    return {"model_id": model_id, "state": "REMOVED"}
 
 
 @router.get("/non-broker")

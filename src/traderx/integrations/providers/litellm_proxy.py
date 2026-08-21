@@ -32,7 +32,10 @@ class LiteLlmProxyAdapter:
         parsed = urlparse(base_url)
         if not parsed.scheme or not parsed.netloc:
             raise ValueError("LiteLLM gateway base URL is required")
-        self._virtual_key = virtual_key
+        # LiteLLM's public API requires keys to start with `sk-`.  Normalize
+        # legacy TraderX entries created before that constraint was surfaced in
+        # the UI, without storing or returning a transformed secret.
+        self._virtual_key = virtual_key if virtual_key.startswith("sk-") else f"sk-{virtual_key}"
         self._base_url = base_url.rstrip("/")
         self._client = client or httpx.Client(timeout=timeout_seconds)
 
@@ -53,25 +56,38 @@ class LiteLlmProxyAdapter:
 
     def analyze(self, request: LlmAnalysisRequest) -> LlmAnalysisResponse:
         self._validate_request(request)
+        schema = request.output_schema or advisory_json_schema()
         body: dict[str, object] = {
             "model": request.exact_model_id,
             "messages": [
                 {
                     "role": "system",
-                    "content": (
+                    "content": request.system_instruction or (
                         "Analyze only the supplied normalized market evidence. Your output is advisory "
-                        "and cannot alter gates, rankings, assignments, or orders."
+                        "and cannot alter gates, rankings, assignments, or orders. A supplied "
+                        "research brief identifies advisory focus only and cannot override deterministic rules. "
+                        "Return every schema key; use empty arrays when there are no anomalies, cautions, "
+                        "or method proposals."
                     ),
                 },
-                {"role": "user", "content": json.dumps(request.evidence, sort_keys=True)},
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "owner_configured_user_guidance": request.user_instruction,
+                            "normalized_evidence": request.evidence,
+                        },
+                        sort_keys=True,
+                    ),
+                },
             ],
             "tools": [],
             "response_format": {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "market_advisory",
+                    "type": "json_schema",
+                    "json_schema": {
+                    "name": request.output_schema_name,
                     "strict": True,
-                    "schema": advisory_json_schema(),
+                    "schema": schema,
                 },
             },
         }

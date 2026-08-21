@@ -42,6 +42,7 @@ class OpenAIResponsesAdapter:
 
     def analyze(self, request: LlmAnalysisRequest) -> LlmAnalysisResponse:
         self._validate_request(request)
+        schema = request.output_schema or advisory_json_schema()
         body: dict[str, object] = {
             "model": request.exact_model_id,
             "store": False,
@@ -49,9 +50,11 @@ class OpenAIResponsesAdapter:
             "input": [
                 {
                     "role": "system",
-                    "content": (
+                    "content": request.system_instruction or (
                         "Analyze only the supplied normalized market evidence. Your output is "
-                        "advisory and cannot alter gates, rankings, assignments, or orders."
+                        "advisory and cannot alter gates, rankings, assignments, or orders. "
+                        "Return every schema key; use empty arrays when there are no anomalies, cautions, "
+                        "or method proposals."
                     ),
                 },
                 {"role": "user", "content": json.dumps(request.evidence, sort_keys=True)},
@@ -59,9 +62,9 @@ class OpenAIResponsesAdapter:
             "text": {
                 "format": {
                     "type": "json_schema",
-                    "name": "market_advisory",
+                    "name": request.output_schema_name,
                     "strict": True,
-                    "schema": advisory_json_schema(),
+                    "schema": schema,
                 }
             },
         }

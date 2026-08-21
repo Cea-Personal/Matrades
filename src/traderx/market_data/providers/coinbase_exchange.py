@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from traderx.integrations.ports import MarketDataCapability, ProviderObservation, SourceSemantics
 from traderx.market_data.providers.http import ProviderHttpTransport, ProviderTransportError
@@ -28,6 +28,37 @@ class CoinbaseExchangeAdapter:
         if category.upper() not in {"CRYPTO", "CRYPTOCURRENCY"}:
             return []
         return self._records(self._request("/products"))
+
+    def get_instrument_market_snapshot(self, provider_symbol: str) -> dict[str, object]:
+        """Read the immutable product rules plus current quote and H1 close history.
+
+        Coinbase spot trades continuously, so these fields are the exchange-native
+        counterpart of an MT5 contract specification.  They are used for research
+        quality and sizing checks only; this adapter has no order methods.
+        """
+
+        now = datetime.now(UTC)
+        product = self._request(f"/products/{provider_symbol}")
+        ticker = self._request(f"/products/{provider_symbol}/ticker")
+        candles = self._request(
+            f"/products/{provider_symbol}/candles",
+            params={
+                "granularity": 3600,
+                "start": (now - timedelta(hours=72)).isoformat(),
+                "end": now.isoformat(),
+            },
+        )
+        if not isinstance(product, dict) or not isinstance(ticker, dict):
+            raise ProviderTransportError("UNKNOWN", "Coinbase returned an invalid product snapshot")
+        candle_rows: object = candles if isinstance(candles, list) else candles.get("items", [])
+        if not isinstance(candle_rows, list):
+            raise ProviderTransportError("UNKNOWN", "Coinbase returned invalid candles")
+        return {
+            "product": dict(product),
+            "ticker": dict(ticker),
+            "candles": [dict(row) if isinstance(row, dict) else list(row) if isinstance(row, list) else row for row in candle_rows],
+            "received_at": now.isoformat(),
+        }
 
     def get_historical_observations(
         self, provider_symbol: str, kind: str, interval: str, start: datetime, end: datetime

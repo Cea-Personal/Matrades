@@ -196,22 +196,29 @@ string DealsJson()
 string InstrumentsJson()
   {
    string result="[";
-   // Read the terminal's visible broker universe. Historical reads are evidence-only and
-   // never select a symbol, alter Market Watch, or invoke a trading operation.
-   int total=SymbolsTotal(true);
+   // Read the broker's complete server catalogue, rather than only the symbols
+   // displayed in Market Watch. Historical reads are evidence-only and never
+   // select a symbol, alter Market Watch, or invoke a trading operation.
+   int total=SymbolsTotal(false);
    for(int index=0;index<total;index++)
      {
-      string symbol=SymbolName(index,true);
+      string symbol=SymbolName(index,false);
       if(StringLen(symbol)==0)
+         continue;
+      string path=SymbolInfoString(symbol,SYMBOL_PATH);
+      if(!ResearchMarketPath(path))
          continue;
       int digits=(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS);
       if(StringLen(result)>1)
          result+=",";
       result+="{\"symbol\":\""+JsonString(symbol)+"\","+
-              "\"observed_at\":\""+IntegerToString((long)TimeCurrent())+"\","+
+              // TimeCurrent is the broker-server clock, which can be in a
+              // non-UTC timezone.  TraderX receives epoch seconds as UTC, so
+              // use the terminal's GMT clock for a truthful freshness timestamp.
+              "\"observed_at\":\""+IntegerToString((long)TimeGMT())+"\","+
               "\"source_semantics\":\"BROKER_PROXY\","+
               "\"description\":\""+JsonString(SymbolInfoString(symbol,SYMBOL_DESCRIPTION))+"\","+
-              "\"path\":\""+JsonString(SymbolInfoString(symbol,SYMBOL_PATH))+"\","+
+              "\"path\":\""+JsonString(path)+"\","+
               "\"currency_base\":\""+JsonString(SymbolInfoString(symbol,SYMBOL_CURRENCY_BASE))+"\","+
               "\"currency_profit\":\""+JsonString(SymbolInfoString(symbol,SYMBOL_CURRENCY_PROFIT))+"\","+
               "\"digits\":"+IntegerToString(digits)+","+
@@ -233,6 +240,16 @@ string InstrumentsJson()
               "\"depth\":"+MarketDepthJson(symbol,digits)+"}";
      }
   return(result+"]");
+  }
+
+bool ResearchMarketPath(const string raw_path)
+  {
+   string path=raw_path;
+   StringToLower(path);
+   return(StringFind(path,"forex")>=0 ||
+          StringFind(path,"metal")>=0 ||
+          StringFind(path,"commodity")>=0 ||
+          StringFind(path,"energy")>=0);
   }
 
 string BarsJson(const string symbol,const ENUM_TIMEFRAMES timeframe,const int digits)

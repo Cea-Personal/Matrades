@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
@@ -40,6 +40,7 @@ from traderx.market_research.model import (
 )
 from traderx.market_research.service import (
     active_markets_payload,
+    activation_candidate_for_instrument,
     deactivate_active_market,
     execute_market_research,
     instrument_library_payload,
@@ -104,6 +105,7 @@ class ResearchModelCommand(BaseModel):
     exact_model_id: str = Field(
         min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
     )
+    research_brief: str = Field(min_length=8, max_length=4000)
     reason: str = Field(min_length=8, max_length=2000)
 
 
@@ -187,15 +189,30 @@ def import_experimental_forex_factory_calendar(
             status_code=422,
             detail=f"unsupported scraper sources: {', '.join(sorted(unsupported))}",
         )
-    from traderx_worker.tasks.economic_calendar import synchronize_forex_factory_experimental
+    try:
+        # Import the configured app, not only the shared task. Importing a
+        # shared task by itself binds it to Celery's localhost default app.
+        from traderx_worker.runtime.celery_app import celery_app
 
-    task = synchronize_forex_factory_experimental.delay(
-        start_date=payload.start_date.isoformat(),
-        end_date=payload.end_date.isoformat(),
-        sources=sources or ["forex"],
-        limit=payload.limit,
-        offset=payload.offset,
-    )
+        task = celery_app.send_task(
+            "traderx.economic_calendar.sync_forex_factory_experimental",
+            kwargs={
+                "start_date": payload.start_date.isoformat(),
+                "end_date": payload.end_date.isoformat(),
+                "sources": sources or ["forex"],
+                "limit": payload.limit,
+                "offset": payload.offset,
+            },
+            queue="experimental",
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "TraderX could not reach the experimental queue. Start the "
+                "experimental-calendar-scraper Docker profile with the explicit opt-in flag."
+            ),
+        ) from exc
     return {
         "status": "QUEUED_EXPERIMENTAL_NOT_FOR_GATING",
         "task_id": task.id,
@@ -207,7 +224,65 @@ def import_experimental_forex_factory_calendar(
             "limit": payload.limit,
             "offset": payload.offset,
         },
+        "cache_endpoint": "/api/v1/economic-calendar/experimental/forex-factory/cache",
     }
+
+
+@calendar_router.get("/experimental/forex-factory/cache")
+def get_experimental_forex_factory_cache(
+    database: DatabaseSession,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0, le=10000),
+) -> dict[str, object]:
+    """Return persisted experimental imports without making another scrape request."""
+    if start_date and end_date and end_date < start_date:
+        raise HTTPException(status_code=422, detail="end_date must not be before start_date")
+    query = (
+        select(EconomicEvent)
+        .where(
+            EconomicEvent.source_provider == "FOREX_FACTORY_SCRAPER",
+            EconomicEvent.source_origin == "SCRAPED_EXPERIMENTAL",
+        )
+        .order_by(EconomicEvent.scheduled_at.desc())
+    )
+    if start_date:
+        query = query.where(
+            EconomicEvent.scheduled_at >= datetime.combine(start_date, time.min, tzinfo=UTC)
+        )
+    if end_date:
+        query = query.where(
+            EconomicEvent.scheduled_at
+            < datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=UTC)
+        )
+    events = database.scalars(query.offset(offset).limit(limit)).all()
+    return {
+        "items": [event_payload(event) for event in events],
+        "cache": "PERSISTENT_NORMALIZED_DATABASE",
+        "provider": "FOREX_FACTORY_SCRAPER",
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@calendar_router.get("/experimental/forex-factory/imports/{task_id}")
+def get_experimental_forex_factory_import(task_id: str) -> dict[str, object]:
+    """Expose a redacted experimental task state so a queued import is observable."""
+    try:
+        from traderx_worker.runtime.celery_app import celery_app
+
+        result = celery_app.AsyncResult(task_id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503, detail="TraderX could not read the experimental queue state"
+        ) from exc
+    payload: dict[str, object] = {"task_id": task_id, "state": result.state}
+    if result.successful() and isinstance(result.result, dict):
+        payload["result"] = result.result
+    elif result.failed():
+        payload["result"] = {"status": "WORKER_FAILURE"}
+    return payload
 
 
 @calendar_router.post("/owner-cited-events", status_code=201)
@@ -241,6 +316,16 @@ def instrument_library(
         "category": normalize_category(category).value if category else None,
         "data_status": "AVAILABLE" if items else "NO_DATA",
     }
+
+
+@router.get("/instruments/{instrument_id}/activation-candidate")
+def instrument_activation_candidate(
+    instrument_id: UUID,
+    context: Operator,
+    database: DatabaseSession,
+) -> dict[str, object]:
+    require_role(_actor(context), {Role.OWNER, Role.ADMIN}, "active-market.review", require_mfa=True)
+    return activation_candidate_for_instrument(database, instrument_id=instrument_id)
 
 
 @router.put("/instruments/{instrument_id}/mapping")
@@ -470,6 +555,7 @@ def put_research_model_configuration(
         llm_integration_id=payload.llm_integration_id,
         provider_key=payload.provider_key,
         exact_model_id=payload.exact_model_id,
+        research_brief=payload.research_brief,
         reason=payload.reason,
         expected_etag=if_match,
         idempotency_key=idempotency_key,
@@ -523,6 +609,7 @@ def start_coordinated_research(
             "prompt_template_version": configuration.prompt_template_version,
             "output_schema_version": configuration.output_schema_version,
             "inference_policy_version": configuration.inference_policy_version,
+            "research_brief": configuration.research_brief,
         }
     run = create_coordinated_run(
         database,
@@ -637,9 +724,24 @@ def retry_category_analysis(
         actor_id=context.user.id,
     )
     database.commit()
+    # The database state is durable before the task is sent.  If delivery is
+    # temporarily unavailable, the scheduled recovery scan will still process
+    # RETRY_QUEUED, but a normal button click should not wait for that scan.
+    dispatch_state = "DISPATCHED"
+    try:
+        from traderx_worker.runtime.celery_app import celery_app
+
+        celery_app.send_task(
+            "traderx.market_research.retry_llm",
+            args=[str(run.id)],
+            queue="research",
+        )
+    except Exception:
+        dispatch_state = "QUEUED_FOR_RECOVERY"
     return {
         "run_id": str(run.id),
         "state": run.llm_analysis_state,
+        "dispatch_state": dispatch_state,
         "same_pinned_model": True,
         "requested_by": str(context.user.id),
         "idempotency_key": idempotency_key,

@@ -31,6 +31,11 @@ services:
       TRADERX_DATABASE_PASSWORD_FILE: /run/secrets/postgres_password
       TRADERX_REDIS_URL: redis://redis:6379/0
       TRADERX_ENVIRONMENT: development
+      # Private gateway administration is performed by the API, never by the
+      # browser. This is the same deployment secret used by LiteLLM itself.
+      TRADERX_LITELLM_GATEWAY_ADMIN_KEY: ${LITELLM_MASTER_KEY:-}
+      TRADERX_LITELLM_GATEWAY_URL: http://litellm:4000
+      TRADERX_ENABLE_EXPERIMENTAL_CALENDAR_SCRAPER: ${TRADERX_ENABLE_EXPERIMENTAL_CALENDAR_SCRAPER:-false}
     depends_on:
       postgres: { condition: service_healthy }
     secrets: [postgres_password]
@@ -66,15 +71,28 @@ services:
     networks: [private, provider-egress]
 
   litellm:
-    # Optional multi-provider gateway. Enable only after setting LITELLM_MASTER_KEY
-    # and configuring one or more model aliases in deploy/litellm/config.yaml.
+    # Optional multi-provider gateway. Model aliases and upstream credentials
+    # are configured through TraderX's Integrations workspace.
     profiles: ["llm-gateway"]
     image: ghcr.io/berriai/litellm:main-latest
-    command: ["--config", "/app/config.yaml"]
+    # Override the image's `litellm`-prefixing entrypoint: this command must
+    # first read the database Docker secret, then launch LiteLLM.
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - >-
+        database_password="$(python -c 'from pathlib import Path; from urllib.parse import quote; print(quote(Path("/run/secrets/postgres_password").read_text().strip(), safe=""))')";
+        gateway_key="$${LITELLM_MASTER_KEY#sk-}";
+        export LITELLM_MASTER_KEY="sk-$${gateway_key}";
+        export DATABASE_URL="postgresql://traderx:$${database_password}@postgres:5432/traderx";
+        exec litellm --config /app/config.yaml
     environment:
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-}
+      STORE_MODEL_IN_DB: "True"
     volumes:
       - ./litellm/config.yaml:/app/config.yaml:ro
+    depends_on:
+      postgres: { condition: service_healthy }
+    secrets: [postgres_password]
     networks: [private, provider-egress]
 
   worker-notifications:
@@ -107,7 +125,11 @@ services:
       DEBUG: "false"
       PYTHONDONTWRITEBYTECODE: "1"
     read_only: true
-    tmpfs: [/tmp:rw,noexec,nosuid,size=32m]
+    # Keep the experimental scraper filesystem read-only apart from its
+    # temporary directory. Docker Desktop variants disagree on parsing the
+    # comma-separated tmpfs options, so use the portable form here.
+    tmpfs:
+      - /tmp
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     networks: [private, provider-egress]
@@ -118,7 +140,6 @@ services:
     command: ["celery", "-A", "traderx_worker.runtime.celery_app", "worker", "-Q", "experimental", "--loglevel=INFO"]
     environment:
       <<: *app_environment
-      TRADERX_ENABLE_EXPERIMENTAL_CALENDAR_SCRAPER: "true"
     depends_on: [postgres, redis, forex-factory-scraper]
     secrets: [postgres_password]
     networks: [private]

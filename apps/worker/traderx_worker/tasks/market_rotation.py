@@ -92,6 +92,7 @@ def scan_due_schedules(self) -> dict[str, object]:  # type: ignore[no-untyped-de
                     "prompt_template_version": model.prompt_template_version,
                     "output_schema_version": model.output_schema_version,
                     "inference_policy_version": model.inference_policy_version,
+                    "research_brief": model.research_brief,
                 }
                 if model
                 else None

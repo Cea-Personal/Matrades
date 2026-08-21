@@ -44,7 +44,9 @@ export interface MarketResearchModelConfiguration {
   llm_integration_id?: string;
   provider_key?: "LITELLM_PROXY";
   exact_model_id?: string;
+  research_brief?: string;
   catalogue_revision?: string;
+  version?: number;
   applies_to: "FUTURE_RUNS_ONLY";
   configured?: boolean;
 }
@@ -92,6 +94,7 @@ export interface AdvisoryAnalysisStatus {
   authoritative: false;
   provider?: string | null;
   exact_model_id?: string | null;
+  research_brief?: string | null;
   catalogue_revision?: string | null;
   adapter_revision?: string | null;
   prompt_template_version?: string | null;
@@ -130,6 +133,7 @@ export interface CoordinatedMarketResearchReport {
   methodology_version: string;
   source_catalogue_revision: string;
   exact_model_id?: string | null;
+  research_brief?: string | null;
   freshness_policy_manifest: Record<string, string>;
   retry_policy_manifest: Record<string, string>;
   model_pin: {
@@ -140,6 +144,7 @@ export interface CoordinatedMarketResearchReport {
     prompt_template_version?: string | null;
     output_schema_version?: string | null;
     inference_policy_version?: string | null;
+    research_brief?: string | null;
   };
   categories: CoordinatedCategoryReport[];
   ranking_is_not_activation: true;

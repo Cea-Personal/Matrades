@@ -29,6 +29,13 @@ ALLOWED_CAPABILITIES = frozenset(
 )
 
 
+def _removed_name(name: str, integration_id: object) -> str:
+    """Retain a removed record for audit without reserving its user-facing name."""
+
+    suffix = f" [removed {str(integration_id)[:12]}]"
+    return f"{name[: 128 - len(suffix)]}{suffix}"
+
+
 @dataclass(frozen=True, slots=True)
 class ManagedIntegration:
     name: str
@@ -89,8 +96,14 @@ def create_non_broker_integration(
         raise ValueError("this calendar uses owner-cited schedule entries rather than a credentialed integration")
     if definition.retention_posture != "NOT_APPLICABLE" and not retention_accepted:
         raise ValueError("provider retention posture must be acknowledged")
-    if database.scalar(select(Integration.id).where(Integration.name == name)) is not None:
-        raise ValueError("an integration with this name already exists")
+    existing = database.scalar(select(Integration).where(Integration.name == name))
+    if existing is not None:
+        if existing.state != "REMOVED":
+            raise ValueError("an integration with this name already exists")
+        # Repair names held by integrations removed before name release was
+        # introduced. The record, credentials, and audit history remain intact.
+        existing.name = _removed_name(existing.name, existing.id)
+        database.flush()
     catalogue = database.scalar(
         select(ProviderCatalogueEntry).where(
             ProviderCatalogueEntry.provider_key == definition.provider,
@@ -145,8 +158,10 @@ def remove_non_broker_integration(
     if integration.provider == "MT5_TERMINAL_BRIDGE":
         raise ValueError("managed MT5 removal uses the broker integration workflow")
     previous = integration.state
+    previous_name = integration.name
     integration.state = "REMOVED"
     integration.removed_at = now
+    integration.name = _removed_name(integration.name, integration.id)
     for credential in database.scalars(
         select(CredentialVersion).where(
             CredentialVersion.integration_id == integration.id,
@@ -159,8 +174,8 @@ def remove_non_broker_integration(
         actor,
         integration,
         action="integration.remove",
-        previous={"state": previous, "credential": "WRITE_ONLY"},
-        current={"state": "REMOVED", "credential": "REVOKED"},
+        previous={"state": previous, "name": previous_name, "credential": "WRITE_ONLY"},
+        current={"state": "REMOVED", "name_released": True, "credential": "REVOKED"},
         reason=reason,
         now=now,
         correlation_id=correlation_id,

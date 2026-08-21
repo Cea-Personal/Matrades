@@ -13,9 +13,11 @@ class MarketAdvisoryAnalysis(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     summary: str = Field(min_length=1, max_length=2000)
-    anomalies: list[str] = Field(default_factory=list, max_length=20)
-    cautions: list[str] = Field(default_factory=list, max_length=20)
-    method_proposals: list[str] = Field(default_factory=list, max_length=20)
+    # OpenAI-compatible strict JSON schemas require every property to be listed
+    # in `required`.  The model must return empty arrays when no item applies.
+    anomalies: list[str] = Field(max_length=20)
+    cautions: list[str] = Field(max_length=20)
+    method_proposals: list[str] = Field(max_length=20)
 
 
 _PROHIBITED_EVIDENCE_KEYS = {

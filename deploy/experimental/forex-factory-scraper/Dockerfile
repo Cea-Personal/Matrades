@@ -5,12 +5,14 @@ FROM python:3.12-slim
 
 ARG FOREX_FACTORY_SCRAPER_REF=main
 
-RUN apt-get update \
-    && apt-get install --no-install-recommends -y git \
-    && rm -rf /var/lib/apt/lists/* \
-    && git clone --depth 1 --branch "${FOREX_FACTORY_SCRAPER_REF}" \
-      https://github.com/AtaCanYmc/ForexFactoryScrapper.git /opt/forex-factory-scraper \
-    && pip install --no-cache-dir -r /opt/forex-factory-scraper/requirements.txt \
+# Avoid installing Git in the short-lived experimental image.  The archive is
+# fetched only when this explicitly opted-in profile is built. The upstream
+# requirements file also contains pytest and pre-commit, so only API runtime
+# dependencies are installed below.
+RUN python -c "import sys, urllib.request, zipfile; ref = sys.argv[1]; urllib.request.urlretrieve(f'https://github.com/AtaCanYmc/ForexFactoryScrapper/archive/refs/heads/{ref}.zip', '/tmp/source.zip'); zipfile.ZipFile('/tmp/source.zip').extractall('/opt'); __import__('pathlib').Path('/opt/ForexFactoryScrapper-' + ref).rename('/opt/forex-factory-scraper')" "${FOREX_FACTORY_SCRAPER_REF}" \
+    && rm /tmp/source.zip \
+    && pip install --no-cache-dir \
+      "Flask~=3.0.3" "Flask-Cors~=3.0.10" "forex-pytory==0.1.0" "python-dotenv~=1.0.0" \
     && useradd --system --uid 10001 scraper \
     && chown -R scraper:scraper /opt/forex-factory-scraper
 

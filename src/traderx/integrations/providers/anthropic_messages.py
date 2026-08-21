@@ -50,12 +50,13 @@ class AnthropicMessagesAdapter:
 
     def analyze(self, request: LlmAnalysisRequest) -> LlmAnalysisResponse:
         self._validate_request(request)
+        schema = request.output_schema or advisory_json_schema()
         body: dict[str, object] = {
             "model": request.exact_model_id,
             "max_tokens": 1200,
-            "system": (
+            "system": request.system_instruction or (
                 "Analyze only normalized market evidence. Return JSON matching this schema: "
-                f"{json.dumps(advisory_json_schema(), sort_keys=True)}. The analysis is advisory "
+                f"{json.dumps(schema, sort_keys=True)}. The analysis is advisory "
                 "and cannot alter deterministic results or trigger financial actions."
             ),
             "messages": [

@@ -3,12 +3,13 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { ResearchBacktest, type BacktestEvidence } from "./ResearchBacktest";
-import { StrategyBuilder, type StrategyDraft } from "./StrategyBuilder";
+import { AiStrategyResearch, type AiStrategyResearchReport } from "./AiStrategyResearch";
 import { StrategyVersions, type StrategySummary, type StrategyVersionSummary } from "./StrategyVersions";
 import { ValidationReport, type ValidationEvidence } from "./ValidationReport";
 
 type ActiveMarket = { instrument_id: string; symbol: string; category: string };
 type ApiProblem = { detail?: string; title?: string };
+type LiteLlmModel = { id: string; alias: string };
 
 function problemMessage(result: ApiProblem): string {
   return result.detail ?? result.title ?? "TraderX could not complete the strategy operation.";
@@ -26,20 +27,37 @@ export function StrategiesWorkspace() {
   const [backtest, setBacktest] = useState<BacktestEvidence>();
   const [backtestJobId, setBacktestJobId] = useState<string>();
   const [validation, setValidation] = useState<ValidationEvidence>();
+  const [aiResearch, setAiResearch] = useState<AiStrategyResearchReport>();
+  const [modelAliases, setModelAliases] = useState<string[]>([]);
+  const [fullModelAlias, setFullModelAlias] = useState("");
+  const [manualModelAlias, setManualModelAlias] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string>();
   const [error, setError] = useState<string>();
 
   const load = useCallback(async () => {
     try {
-      const [marketsResponse, strategiesResponse] = await Promise.all([
+      const [marketsResponse, strategiesResponse, aliasesResponse, latestResearchResponse] = await Promise.all([
         fetch("/api/v1/markets/active", { credentials: "same-origin" }),
-        fetch("/api/v1/strategies", { credentials: "same-origin" })
+        fetch("/api/v1/strategies", { credentials: "same-origin" }),
+        fetch("/api/v1/integrations/litellm/models", { credentials: "same-origin" }),
+        fetch("/api/v1/strategies/ai-research/latest", { credentials: "same-origin" })
       ]);
       if (!marketsResponse.ok || !strategiesResponse.ok) throw new Error("unavailable");
       setMarkets((await result<{ items: ActiveMarket[] }>(marketsResponse)).items);
       const loaded = (await result<{ items: StrategySummary[] }>(strategiesResponse)).items;
       setStrategies(loaded);
+      if (aliasesResponse.ok) {
+        const aliases = (await result<{ items?: LiteLlmModel[] }>(aliasesResponse)).items ?? [];
+        const values = aliases.map((item) => item.alias).sort();
+        setModelAliases(values);
+        setFullModelAlias((current) => values.includes(current) ? current : (values[0] ?? ""));
+        setManualModelAlias((current) => values.includes(current) ? current : (values[0] ?? ""));
+      }
+      if (latestResearchResponse.ok) {
+        const latest = await result<{ job: AiStrategyResearchReport["job"] | null; result: AiStrategyResearchReport["result"] | null }>(latestResearchResponse);
+        if (latest.job) setAiResearch({ job: latest.job, result: latest.result ?? undefined });
+      }
       if (selected) {
         const refreshed = loaded.find((item) => item.id === selected.id);
         setSelected(refreshed);
@@ -57,39 +75,98 @@ export function StrategiesWorkspace() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function saveStrategy(draft: StrategyDraft) {
+  async function startAiResearch() {
+    if (!fullModelAlias) {
+      setError("Choose a healthy LiteLLM model alias before starting strategy research.");
+      return;
+    }
     setBusy(true);
     setError(undefined);
     setMessage(undefined);
     try {
-      const endpoint = selected ? `/api/v1/strategies/${selected.id}/versions` : "/api/v1/strategies";
-      const response = await fetch(endpoint, {
+      const response = await fetch("/api/v1/strategies/ai-research", {
         method: "POST",
         credentials: "same-origin",
         headers: {
           "Content-Type": "application/json",
-          "Idempotency-Key": crypto.randomUUID(),
-          ...(selected ? { "If-Match": selected.etag } : {})
+          "Idempotency-Key": crypto.randomUUID()
         },
-        body: JSON.stringify(selected
-          ? { definition: draft.definition, change_summary: draft.change_summary }
-          : draft)
+        body: JSON.stringify({ model_alias: fullModelAlias })
       });
-      const saved = await result<(StrategySummary & { created_version?: StrategyVersionSummary }) | StrategyVersionSummary | ApiProblem>(response);
+      const saved = await result<{ job?: { id: string }; detail?: string } & ApiProblem>(response);
       if (!response.ok) {
         setError(problemMessage(saved as ApiProblem));
         return;
       }
-      setBacktest(undefined);
-      setValidation(undefined);
-      setMessage(selected ? "A new immutable draft version was created." : "Strategy and immutable draft version created.");
-      await load();
+      if (!saved.job?.id) {
+        setError("TraderX did not return an AI strategy research job.");
+        return;
+      }
+      setAiResearch({ job: { id: saved.job.id, state: "QUEUED", progress: { message: "Queued" } } });
+      setMessage("AI strategy research is queued for all three active markets.");
     } catch {
-      setError("TraderX could not save this strategy definition.");
+      setError("TraderX could not start AI strategy research.");
     } finally {
       setBusy(false);
     }
   }
+
+  async function developStrategyIdea(instrumentId: string, description: string) {
+    if (!manualModelAlias) {
+      setError("Choose a healthy LiteLLM model alias before developing a strategy idea.");
+      return;
+    }
+    setBusy(true);
+    setError(undefined);
+    setMessage(undefined);
+    try {
+      const response = await fetch("/api/v1/strategies/ai-research/from-idea", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({ instrument_id: instrumentId, description, model_alias: manualModelAlias })
+      });
+      const saved = await result<{ job?: { id: string } } & ApiProblem>(response);
+      if (!response.ok) {
+        setError(problemMessage(saved));
+        return;
+      }
+      if (!saved.job?.id) {
+        setError("TraderX did not return an AI strategy idea research job.");
+        return;
+      }
+      setAiResearch({ job: { id: saved.job.id, state: "QUEUED", progress: { message: "Queued" } } });
+      setMessage("AI is developing your strategy idea into a bounded draft.");
+    } catch {
+      setError("TraderX could not start AI strategy idea research.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!aiResearch || !["QUEUED", "RUNNING"].includes(aiResearch.job.state)) return;
+    const timer = window.setInterval(() => {
+      void (async () => {
+        try {
+          const response = await fetch(`/api/v1/strategies/ai-research/${aiResearch.job.id}`, { credentials: "same-origin" });
+          const report = await result<AiStrategyResearchReport & ApiProblem>(response);
+          if (!response.ok) {
+            setError(problemMessage(report));
+            return;
+          }
+          setAiResearch(report);
+          if (report.job.state === "COMPLETED") {
+            setMessage("AI strategy research completed. Review a draft below, then backtest it.");
+            await load();
+          }
+        } catch {
+          setError("TraderX could not refresh AI strategy research.");
+        }
+      })();
+    }, 2500);
+    return () => window.clearInterval(timer);
+  }, [aiResearch?.job.id, aiResearch?.job.state, load]);
 
   async function runBacktest(manifestHash?: string) {
     if (!version) return;
@@ -155,7 +232,7 @@ export function StrategiesWorkspace() {
 
   return (
     <div className="strategy-workspace">
-      <StrategyBuilder activeMarkets={markets} busy={busy} creatingVersion={Boolean(selected)} onSave={saveStrategy} />
+      <AiStrategyResearch activeMarkets={markets} busy={busy} fullModelAlias={fullModelAlias} manualModelAlias={manualModelAlias} modelAliases={modelAliases} onDevelopIdea={developStrategyIdea} onFullModelAliasChange={setFullModelAlias} onManualModelAliasChange={setManualModelAlias} onResearch={startAiResearch} report={aiResearch} />
       <StrategyVersions onSelectStrategy={selectStrategy} onSelectVersion={setVersion} selectedStrategyId={selected?.id} selectedVersionId={version?.id} strategies={strategies} />
       <ResearchBacktest backtest={backtest} busy={busy} jobId={backtestJobId} onRunBacktest={runBacktest} selectedVersion={version} />
       <ValidationReport backtest={backtest} busy={busy} onRunValidation={runValidation} validation={validation} />

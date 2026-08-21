@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import httpx
@@ -35,6 +35,12 @@ from traderx.shared.config import get_settings
 from traderx.shared.types import utc_now
 from traderx.strategies.health import observe_live_strategy_health
 from traderx_worker.tasks.database import session_factory
+
+
+# Twelve Data's free tier has a daily credit budget. Its live health probe uses
+# one `/price` request, so avoid consuming a credit each time the general
+# operational-health task runs (once a minute).
+TWELVE_DATA_HEALTH_INTERVAL = timedelta(minutes=15)
 
 
 @shared_task(name="traderx.operations.notifications", bind=True, acks_late=True)
@@ -124,6 +130,15 @@ def poll_health(self) -> dict[str, str]:  # type: ignore[no-untyped-def]
                     .order_by(IntegrationHealthObservation.observed_at.desc())
                     .limit(1)
                 )
+                if (
+                    integration.provider == "TWELVE_DATA"
+                    and latest is not None
+                    and latest.observed_at >= now - TWELVE_DATA_HEALTH_INTERVAL
+                ):
+                    # Keep the last verified observation until its dedicated
+                    # cadence is due. Other integrations retain their
+                    # one-minute operational-health checks.
+                    continue
                 if integration.state == "DISABLED":
                     status = "DISABLED"
                     reason = None

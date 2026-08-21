@@ -3,12 +3,9 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { InstrumentReactivation, type ReactivationPlan } from "./InstrumentReactivation";
-import { MarketReplacement, type ReplacementEvidence } from "./MarketReplacement";
-
 type Instrument = { id: string; symbol: string; status: string; category: string };
 
 export function MarketRotation() {
-  const [recommendations, setRecommendations] = useState<ReplacementEvidence[]>([]);
   const [instruments, setInstruments] = useState<Instrument[]>([]);
   const [instrumentId, setInstrumentId] = useState("");
   const [plan, setPlan] = useState<ReactivationPlan>();
@@ -18,13 +15,9 @@ export function MarketRotation() {
 
   const load = useCallback(async () => {
     try {
-      const responses = await Promise.all([
-        fetch("/api/v1/market-rotation/recommendations", { credentials: "same-origin" }),
-        ...["COMMODITY", "FOREX", "CRYPTO"].map((category) => fetch(`/api/v1/markets/instruments?category=${category}`, { credentials: "same-origin" }))
-      ]);
+      const responses = await Promise.all(["COMMODITY", "FOREX", "CRYPTO"].map((category) => fetch(`/api/v1/markets/instruments?category=${category}`, { credentials: "same-origin" })));
       if (responses.some((response) => !response.ok)) throw new Error("unavailable");
-      setRecommendations((await responses[0].json() as { items: ReplacementEvidence[] }).items);
-      const library = (await Promise.all(responses.slice(1).map(async (response) => (await response.json() as { items: Instrument[] }).items))).flat();
+      const library = (await Promise.all(responses.map(async (response) => (await response.json() as { items: Instrument[] }).items))).flat();
       setInstruments(library);
       if (!instrumentId && library[0]) setInstrumentId(library[0].id);
       setError(undefined);
@@ -59,5 +52,5 @@ export function MarketRotation() {
     finally { setBusy(false); }
   }
 
-  return <><MarketReplacement recommendations={recommendations} /><InstrumentReactivation busy={busy} instrumentId={instrumentId} instruments={instruments} onInspect={inspect} onRequest={requestPlan} plan={plan} />{message ? <p className="status-message" data-tone="success" role="status">{message}</p> : null}{error ? <p className="status-message" data-tone="error" role="alert">{error}</p> : null}</>;
+  return <><InstrumentReactivation busy={busy} instrumentId={instrumentId} instruments={instruments} onInspect={inspect} onRequest={requestPlan} plan={plan} />{message ? <p className="status-message" data-tone="success" role="status">{message}</p> : null}{error ? <p className="status-message" data-tone="error" role="alert">{error}</p> : null}</>;
 }

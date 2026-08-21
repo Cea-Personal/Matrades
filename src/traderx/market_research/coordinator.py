@@ -108,6 +108,7 @@ def create_coordinated_run(
         prompt_template_version=_text_or_none(pin.get("prompt_template_version")),
         output_schema_version=_text_or_none(pin.get("output_schema_version")),
         inference_policy_version=_text_or_none(pin.get("inference_policy_version")),
+        research_brief=_text_or_none(pin.get("research_brief")),
         created_at=now,
     )
     database.add(parent)
@@ -294,6 +295,7 @@ def coordinated_report(database: Session, run_id: UUID) -> dict[str, object]:
             "prompt_template_version": parent.prompt_template_version,
             "output_schema_version": parent.output_schema_version,
             "inference_policy_version": parent.inference_policy_version,
+            "research_brief": parent.research_brief,
             "attempt_count": latest_attempt.attempt_number if latest_attempt else 0,
             "retry_eligible": child.llm_analysis_state not in {"COMPLETED", "RUNNING"},
             "analysis": latest_attempt.analysis if latest_attempt else None,
@@ -346,6 +348,7 @@ def coordinated_report(database: Session, run_id: UUID) -> dict[str, object]:
         "methodology_version": parent.methodology_version,
         "source_catalogue_revision": parent.source_catalogue_revision,
         "exact_model_id": parent.exact_model_id,
+        "research_brief": parent.research_brief,
         "freshness_policy_manifest": parent.freshness_policy_manifest,
         "retry_policy_manifest": parent.retry_policy_manifest,
         "model_pin": {
@@ -356,6 +359,7 @@ def coordinated_report(database: Session, run_id: UUID) -> dict[str, object]:
             "prompt_template_version": parent.prompt_template_version,
             "output_schema_version": parent.output_schema_version,
             "inference_policy_version": parent.inference_policy_version,
+            "research_brief": parent.research_brief,
         },
         "categories": categories,
         "ranking_is_not_activation": True,

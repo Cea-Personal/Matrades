@@ -92,6 +92,12 @@ export function CommandCenter({ dashboard, onAccountChanged }: { dashboard: Dash
       detail: `${connection.required ? "Required" : "Optional"} · ${connection.complete ? "done" : "not connected"}`,
       target: "integrations" as const
     })),
+    {
+      label: "ForexFactory scraper",
+      complete: false,
+      detail: "Optional · experimental development tool",
+      target: "integrations"
+    },
     ...workspace_prerequisites.map((step) => ({ label: step.label, complete: step.complete, detail: `${step.required ? "Required" : "Optional"} for ${step.purpose} · ${step.complete ? "done" : "not ready"}`, target: step.target }))
   ];
   const readyForWorkspace = onboarding.account_configured
