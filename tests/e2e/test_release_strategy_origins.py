@@ -1,0 +1,7 @@
+from tests.integration.test_strategy_validation import test_every_stage_is_required_for_promotion
+from tests.property.test_strategy_invariants import test_origin_does_not_change_canonical_identity
+
+
+def test_release_all_strategy_origins():
+    test_origin_does_not_change_canonical_identity()
+    test_every_stage_is_required_for_promotion()

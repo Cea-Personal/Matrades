@@ -1,0 +1,1449 @@
+openapi: 3.1.0
+info:
+  title: Matrades Application API
+  version: 1.0.0
+  description: >-
+    Contract for authenticated configuration, research, strategy, risk, approval,
+    reconciliation, monitoring, journal, and performance workflows. Broker execution
+    writes are intentionally absent from V1.
+servers:
+  - url: /api/v1
+security:
+  - sessionCookie: []
+tags:
+  - name: Authentication
+  - name: Configuration
+  - name: Agents
+  - name: Accounts
+  - name: Research
+  - name: Strategies
+  - name: Knowledge
+  - name: Trading
+  - name: Operations
+paths:
+  /auth/signup:
+    post:
+      tags: [Authentication]
+      security: []
+      operationId: signup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignupRequest'
+      responses:
+        '202':
+          description: Registration accepted; email verification required
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserSecurityState' }
+        default: { $ref: '#/components/responses/Error' }
+  /auth/sessions:
+    post:
+      tags: [Authentication]
+      security: []
+      operationId: beginSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, writeOnly: true }
+      responses:
+        '202':
+          description: Primary authentication accepted; MFA challenge required
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [challenge_id, expires_at]
+                properties:
+                  challenge_id: { type: string, format: uuid }
+                  expires_at: { type: string, format: date-time }
+        default: { $ref: '#/components/responses/Error' }
+    delete:
+      tags: [Authentication]
+      operationId: revokeCurrentSession
+      responses:
+        '204': { description: Session revoked }
+        default: { $ref: '#/components/responses/Error' }
+  /auth/email-verifications:
+    post:
+      tags: [Authentication]
+      security: []
+      operationId: verifyEmail
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: { type: string }
+      responses:
+        '200':
+          description: Email verified; MFA enrollment required
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserSecurityState' }
+        default: { $ref: '#/components/responses/Error' }
+  /auth/mfa/enrollments:
+    post:
+      tags: [Authentication]
+      operationId: createMfaEnrollment
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: Pending enrollment and one-time setup material
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enrollment_id, method, setup_uri]
+                properties:
+                  enrollment_id: { type: string, format: uuid }
+                  method: { const: TOTP }
+                  setup_uri: { type: string, writeOnly: true }
+        default: { $ref: '#/components/responses/Error' }
+  /auth/mfa/challenges:
+    post:
+      tags: [Authentication]
+      operationId: verifyMfaChallenge
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [challenge_id, code]
+              properties:
+                challenge_id: { type: string, format: uuid }
+                code: { type: string, minLength: 6, maxLength: 12, writeOnly: true }
+      responses:
+        '200':
+          description: MFA verified
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserSecurityState' }
+        default: { $ref: '#/components/responses/Error' }
+  /auth/step-up:
+    post:
+      tags: [Authentication]
+      operationId: verifyStepUp
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action_scope, code]
+              properties:
+                action_scope: { type: string }
+                code: { type: string, writeOnly: true }
+      responses:
+        '200':
+          description: Single-use scoped step-up grant
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [grant_id, action_scope, expires_at]
+                properties:
+                  grant_id: { type: string, format: uuid }
+                  action_scope: { type: string }
+                  expires_at: { type: string, format: date-time }
+        default: { $ref: '#/components/responses/Error' }
+  /connections:
+    get:
+      tags: [Configuration]
+      operationId: listConnections
+      responses:
+        '200':
+          description: Authorized connections
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Connection' }
+        default: { $ref: '#/components/responses/Error' }
+    post:
+      tags: [Configuration]
+      operationId: createConnection
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConnectionCreate' }
+      responses:
+        '201':
+          description: Connection created; full secret is not returned
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Connection' }
+        default: { $ref: '#/components/responses/Error' }
+  /credentials:
+    post:
+      tags: [Configuration]
+      operationId: createCredential
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, provider, purpose, secret]
+              properties:
+                name: { type: string }
+                provider: { type: string }
+                purpose: { type: string }
+                secret: { type: string, writeOnly: true }
+      responses:
+        '201':
+          description: Masked credential reference; plaintext is never returned
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, name, provider, purpose, masked_suffix, status, version]
+                properties:
+                  id: { type: string, format: uuid }
+                  name: { type: string }
+                  provider: { type: string }
+                  purpose: { type: string }
+                  masked_suffix: { type: string }
+                  status: { enum: [UNTESTED, ACTIVE, INVALID, RETIRED] }
+                  version: { type: integer }
+        default: { $ref: '#/components/responses/Error' }
+  /credentials/{credential_id}:
+    patch:
+      tags: [Configuration]
+      operationId: replaceCredential
+      parameters:
+        - name: credential_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+        - name: Step-Up-Grant
+          in: header
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [secret]
+              properties:
+                secret: { type: string, writeOnly: true }
+      responses:
+        '200':
+          description: Credential rotated; only new masked metadata returned
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        '409': { $ref: '#/components/responses/Conflict' }
+        default: { $ref: '#/components/responses/Error' }
+  /connections/{connection_id}/test:
+    post:
+      tags: [Configuration]
+      operationId: testConnection
+      parameters:
+        - $ref: '#/components/parameters/ConnectionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '202':
+          description: Connection test scheduled or completed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HealthState' }
+        default: { $ref: '#/components/responses/Error' }
+  /models:
+    get:
+      tags: [Agents]
+      operationId: listModels
+      responses:
+        '200':
+          description: Matrades model catalog
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Model' }
+        default: { $ref: '#/components/responses/Error' }
+  /model-profiles:
+    get:
+      tags: [Agents]
+      operationId: listModelProfiles
+      responses:
+        '200':
+          description: Reusable model profiles and compatible fallbacks
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object, additionalProperties: true }
+        default: { $ref: '#/components/responses/Error' }
+    post:
+      tags: [Agents]
+      operationId: createModelProfileVersion
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, runtime_type, primary_model_id, fallback_model_ids, requirements]
+              properties:
+                name: { type: string }
+                runtime_type:
+                  enum: [CODEX_APP_SERVER, LITELLM]
+                  description: CODEX_APP_SERVER is the default; LITELLM profiles require explicit assignment
+                primary_model_id: { type: string, format: uuid }
+                fallback_model_ids: { type: array, items: { type: string, format: uuid } }
+                parameters: { type: object, additionalProperties: true }
+                requirements: { type: array, items: { type: string } }
+      responses:
+        '201':
+          description: Immutable model-profile version
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        default: { $ref: '#/components/responses/Error' }
+  /agents:
+    get:
+      tags: [Agents]
+      operationId: listAgents
+      responses:
+        '200':
+          description: Exact required logical registry and active configuration
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Agent' }
+        default: { $ref: '#/components/responses/Error' }
+  /agents/{agent_id}/configurations:
+    post:
+      tags: [Agents]
+      operationId: createAgentConfigurationVersion
+      parameters:
+        - name: agent_id
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AgentConfigurationInput' }
+      responses:
+        '201':
+          description: New immutable configuration version
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgentConfiguration' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        default: { $ref: '#/components/responses/Error' }
+  /accounts:
+    get:
+      tags: [Accounts]
+      operationId: listTradingAccounts
+      responses:
+        '200':
+          description: Authorized trading accounts
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/TradingAccount' }
+        default: { $ref: '#/components/responses/Error' }
+    post:
+      tags: [Accounts]
+      operationId: createTradingAccount
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TradingAccountInput' }
+      responses:
+        '201':
+          description: Trading account created in manual mode
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TradingAccount' }
+        default: { $ref: '#/components/responses/Error' }
+  /accounts/{account_id}/snapshots/current:
+    get:
+      tags: [Accounts]
+      operationId: getCurrentAccountSnapshot
+      parameters:
+        - $ref: '#/components/parameters/AccountId'
+      responses:
+        '200':
+          description: Latest consistent authoritative snapshot
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccountSnapshot' }
+        default: { $ref: '#/components/responses/Error' }
+  /accounts/{account_id}/effective-limits:
+    get:
+      tags: [Accounts]
+      operationId: getEffectiveLimits
+      parameters:
+        - $ref: '#/components/parameters/AccountId'
+      responses:
+        '200':
+          description: Strictest normalized constraints with sources
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/EffectiveConstraint' }
+        default: { $ref: '#/components/responses/Error' }
+  /prop-rulesets:
+    post:
+      tags: [Accounts]
+      operationId: createPropRulesetDraft
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [program_id, version, source, effective_from, rules]
+              properties:
+                program_id: { type: string, format: uuid }
+                version: { type: string }
+                source: { type: object, additionalProperties: true }
+                effective_from: { type: string, format: date-time }
+                rules: { type: array, items: { type: object, additionalProperties: true } }
+      responses:
+        '201':
+          description: Unverified, inactive ruleset draft
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        default: { $ref: '#/components/responses/Error' }
+  /prop-rulesets/{ruleset_id}/activate:
+    post:
+      tags: [Accounts]
+      operationId: activateVerifiedPropRuleset
+      parameters:
+        - name: ruleset_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Verified ruleset version activated with historical predecessor retained
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        '409': { $ref: '#/components/responses/Conflict' }
+        default: { $ref: '#/components/responses/Error' }
+  /guardrail-profiles:
+    post:
+      tags: [Accounts]
+      operationId: createGuardrailProfileVersion
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, scope, rules]
+              properties:
+                name: { type: string }
+                scope: { type: object, additionalProperties: true }
+                rules: { type: array, items: { type: object, additionalProperties: true } }
+      responses:
+        '201':
+          description: Immutable guardrail-profile version
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        default: { $ref: '#/components/responses/Error' }
+  /risk/evaluations:
+    post:
+      tags: [Accounts]
+      operationId: evaluateCandidateRisk
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RiskEvaluationRequest' }
+      responses:
+        '200':
+          description: Deterministic PASS, REDUCE_SIZE, or HARD_BLOCK result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RiskCapacityResult' }
+        default: { $ref: '#/components/responses/Error' }
+  /research-runs:
+    post:
+      tags: [Research]
+      operationId: createResearchRun
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [account_id, market_categories]
+              properties:
+                account_id: { type: string, format: uuid }
+                market_categories:
+                  type: array
+                  minItems: 3
+                  uniqueItems: true
+                  items: { enum: [FOREX, METAL, CRYPTO] }
+      responses:
+        '202':
+          description: Research run queued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ResearchRun' }
+        default: { $ref: '#/components/responses/Error' }
+  /research-runs/{run_id}:
+    get:
+      tags: [Research]
+      operationId: getResearchRun
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Ranked candidates, evidence, health, and HIL-1 state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ResearchRun' }
+        default: { $ref: '#/components/responses/Error' }
+  /market-selections/{selection_id}/decisions:
+    post:
+      tags: [Research]
+      operationId: decideMarketSelection
+      parameters:
+        - name: selection_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Hil1Decision' }
+      responses:
+        '200':
+          description: New market-selection or research-run state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApprovalDecision' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        default: { $ref: '#/components/responses/Error' }
+  /strategy-drafts:
+    post:
+      tags: [Strategies]
+      operationId: createStrategyDraft
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StrategyDraftInput' }
+      responses:
+        '201':
+          description: Saveable versioned draft
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StrategyDraft' }
+        default: { $ref: '#/components/responses/Error' }
+  /strategy-drafts/{draft_id}:
+    get:
+      tags: [Strategies]
+      operationId: getStrategyDraft
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
+      responses:
+        '200':
+          description: Draft, accepted rule revisions, provenance, and completeness
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StrategyDraft' }
+        default: { $ref: '#/components/responses/Error' }
+    patch:
+      tags: [Strategies]
+      operationId: updateStrategyDraftByUser
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_changes]
+              properties:
+                user_changes:
+                  type: array
+                  items: { $ref: '#/components/schemas/RuleChange' }
+      responses:
+        '200':
+          description: Draft revision with USER provenance
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StrategyDraft' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        default: { $ref: '#/components/responses/Error' }
+  /strategy-drafts/{draft_id}/assist:
+    post:
+      tags: [Strategies]
+      operationId: requestStrategyAssistance
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mode]
+              properties:
+                mode:
+                  enum: [COMPLETE_MISSING_RULES, FORMALIZE, SUGGEST_IMPROVEMENTS, CHALLENGE,
+                    MAKE_TESTABLE, SUGGEST_PARAMETERS, EXPLAIN_WEAKNESSES]
+                instruction: { type: string, maxLength: 4000 }
+      responses:
+        '202':
+          description: Assistance execution queued; canonical draft is unchanged
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Job' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        default: { $ref: '#/components/responses/Error' }
+  /strategy-suggestions/{suggestion_id}/decisions:
+    post:
+      tags: [Strategies]
+      operationId: decideStrategySuggestion
+      parameters:
+        - name: suggestion_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SuggestionDecision' }
+      responses:
+        '200':
+          description: Suggestion decision and resulting draft revision
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StrategyDraft' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        default: { $ref: '#/components/responses/Error' }
+  /strategy-drafts/{draft_id}/similarity:
+    post:
+      tags: [Strategies]
+      operationId: evaluateStrategySimilarity
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Versioned similarity classification and permitted resolutions
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SimilarityAssessment' }
+        default: { $ref: '#/components/responses/Error' }
+  /strategy-drafts/{draft_id}/submit:
+    post:
+      tags: [Strategies]
+      operationId: submitStrategyDraft
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '201':
+          description: Immutable strategy version or existing exact duplicate resolution
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StrategySubmissionResult' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        default: { $ref: '#/components/responses/Error' }
+  /strategy-versions/{strategy_version_id}/validation-runs:
+    post:
+      tags: [Strategies]
+      operationId: createStrategyValidationRun
+      parameters:
+        - name: strategy_version_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [instrument_profiles, stages]
+              properties:
+                instrument_profiles: { type: array, items: { type: string, format: uuid } }
+                stages:
+                  type: array
+                  items: { enum: [BACKTEST, OUT_OF_SAMPLE, WALK_FORWARD, STRESS,
+                    MONTE_CARLO, ACCOUNT_POLICY_SIMULATION, PAPER_TRADING] }
+      responses:
+        '202':
+          description: Ordered validation run queued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Job' }
+        default: { $ref: '#/components/responses/Error' }
+  /knowledge-sources:
+    get:
+      tags: [Knowledge]
+      operationId: listKnowledgeSources
+      responses:
+        '200':
+          description: Authorized sources and indexing health
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/KnowledgeSource' }
+        default: { $ref: '#/components/responses/Error' }
+    post:
+      tags: [Knowledge]
+      operationId: createKnowledgeSource
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/KnowledgeSourceInput' }
+      responses:
+        '201':
+          description: Source registered; ingestion runs asynchronously
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KnowledgeSource' }
+        default: { $ref: '#/components/responses/Error' }
+  /knowledge-search:
+    post:
+      tags: [Knowledge]
+      operationId: searchKnowledge
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/KnowledgeSearchRequest' }
+      responses:
+        '200':
+          description: Contextual authorized results with provenance; never authoritative risk facts
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KnowledgeSearchResult' }
+        default: { $ref: '#/components/responses/Error' }
+  /trade-proposals/{proposal_id}:
+    get:
+      tags: [Trading]
+      operationId: getTradeProposal
+      parameters:
+        - $ref: '#/components/parameters/ProposalId'
+      responses:
+        '200':
+          description: Proposal with complete equity snapshot and validation evidence
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TradeProposal' }
+        default: { $ref: '#/components/responses/Error' }
+  /trade-proposals/{proposal_id}/decisions:
+    post:
+      tags: [Trading]
+      operationId: decideTradeProposal
+      parameters:
+        - $ref: '#/components/parameters/ProposalId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Hil2Decision' }
+      responses:
+        '200':
+          description: TAKE, WAIT, or REJECT recorded; no broker write
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApprovalDecision' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '410':
+          description: Proposal expired or requires revalidation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        default: { $ref: '#/components/responses/Error' }
+  /reconciliations/{reconciliation_id}/decisions:
+    post:
+      tags: [Trading]
+      operationId: decideAmbiguousReconciliation
+      parameters:
+        - name: reconciliation_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: { enum: [CONFIRM_MATCH, REJECT_MATCH] }
+      responses:
+        '200':
+          description: Reconciliation decision and resulting trade state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Reconciliation' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        default: { $ref: '#/components/responses/Error' }
+  /trade-recommendations/{recommendation_id}/decisions:
+    post:
+      tags: [Trading]
+      operationId: decideTradeManagement
+      parameters:
+        - name: recommendation_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Hil3Decision' }
+      responses:
+        '200':
+          description: HIL-3 decision recorded; user performs any change manually
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApprovalDecision' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        default: { $ref: '#/components/responses/Error' }
+  /trades/{trade_id}/journal:
+    get:
+      tags: [Trading]
+      operationId: getTradeJournal
+      parameters:
+        - name: trade_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Reconstructable append-oriented trade timeline
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/JournalEvent' }
+        default: { $ref: '#/components/responses/Error' }
+  /performance/strategies/{strategy_version_id}:
+    get:
+      tags: [Trading]
+      operationId: getStrategyPerformance
+      parameters:
+        - name: strategy_version_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: account_id
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+        - name: instrument_id
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Structured performance metrics and evidence population
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [strategy_version_id, population, metrics, calculated_at]
+                properties:
+                  strategy_version_id: { type: string, format: uuid }
+                  population: { type: integer, minimum: 0 }
+                  metrics: { type: object, additionalProperties: true }
+                  dimensions: { type: object, additionalProperties: true }
+                  calculated_at: { type: string, format: date-time }
+        default: { $ref: '#/components/responses/Error' }
+  /events:
+    get:
+      tags: [Operations]
+      operationId: streamOperationalEvents
+      parameters:
+        - name: Last-Event-ID
+          in: header
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: Owner-scoped SSE projection; clients re-fetch after version gaps
+          content:
+            text/event-stream:
+              schema: { type: string }
+        default: { $ref: '#/components/responses/Error' }
+  /health:
+    get:
+      tags: [Operations]
+      operationId: getSystemHealth
+      responses:
+        '200':
+          description: Authorized component and connection health
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/HealthState' }
+        default: { $ref: '#/components/responses/Error' }
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: matrades_session
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 16, maxLength: 128 }
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: Expected aggregate/configuration version
+      schema: { type: string }
+    AccountId:
+      name: account_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ConnectionId:
+      name: connection_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    DraftId:
+      name: draft_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ProposalId:
+      name: proposal_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  responses:
+    Error:
+      description: Structured safe error
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Conflict:
+      description: Idempotency, state-transition, or optimistic-concurrency conflict
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status, code, correlation_id]
+      properties:
+        type: { type: string, format: uri-reference }
+        title: { type: string }
+        status: { type: integer }
+        code: { type: string }
+        detail: { type: string }
+        correlation_id: { type: string, format: uuid }
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              field: { type: string }
+              code: { type: string }
+              message: { type: string }
+    SignupRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 12, writeOnly: true }
+    UserSecurityState:
+      type: object
+      required: [user_id, status, next_action]
+      properties:
+        user_id: { type: string, format: uuid }
+        status: { enum: [REGISTERED, EMAIL_VERIFIED, MFA_CONFIGURED, ACTIVE, LOCKED, DISABLED] }
+        next_action: { enum: [VERIFY_EMAIL, ENROLL_MFA, COMPLETE_MFA, NONE] }
+        recovery_codes:
+          type: array
+          writeOnly: true
+          items: { type: string }
+    ConnectionCreate:
+      type: object
+      required: [type, provider, name, configuration]
+      properties:
+        type: { type: string }
+        provider: { type: string }
+        name: { type: string }
+        credential_secret: { type: string, writeOnly: true }
+        configuration: { type: object, additionalProperties: true }
+    Connection:
+      type: object
+      required: [id, type, provider, name, status, version]
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string }
+        provider: { type: string }
+        name: { type: string }
+        masked_credential: { type: string, readOnly: true }
+        status: { $ref: '#/components/schemas/HealthStatus' }
+        version: { type: integer, minimum: 1 }
+    HealthStatus:
+      enum: [HEALTHY, DEGRADED, STALE, OFFLINE, DISABLED, UNTESTED]
+    HealthState:
+      type: object
+      required: [subject_type, subject_id, status, recorded_at]
+      properties:
+        subject_type: { type: string }
+        subject_id: { type: string }
+        status: { $ref: '#/components/schemas/HealthStatus' }
+        source_time: { type: string, format: date-time }
+        recorded_at: { type: string, format: date-time }
+        freshness_seconds: { type: number, minimum: 0 }
+        error_code: { type: string }
+    Model:
+      type: object
+      required: [id, runtime_type, provider, provider_model_id, capabilities, enabled]
+      properties:
+        id: { type: string, format: uuid }
+        runtime_type: { enum: [CODEX_APP_SERVER, LITELLM] }
+        provider: { type: string }
+        provider_model_id: { type: string }
+        enabled: { type: boolean }
+        capabilities:
+          type: array
+          items: { enum: [TOOLS, STRUCTURED_OUTPUT, REASONING, VISION] }
+    Agent:
+      type: object
+      required: [id, required, protected, active_configuration]
+      properties:
+        id: { type: string }
+        required: { type: boolean }
+        protected: { const: true }
+        active_configuration: { $ref: '#/components/schemas/AgentConfiguration' }
+    PromptSelection:
+      type: object
+      required: [mode]
+      properties:
+        mode: { enum: [INHERIT, OVERRIDE] }
+        prompt_version_id: { type: string, format: uuid }
+      allOf:
+        - if:
+            properties: { mode: { const: OVERRIDE } }
+          then:
+            required: [prompt_version_id]
+    AgentConfigurationInput:
+      type: object
+      required: [runtime_mode, model_mode, system_prompt, user_prompt, timeout_seconds, retry_policy]
+      properties:
+        runtime_mode:
+          enum: [DEFAULT_CODEX, EXPLICIT_LITELLM]
+          description: No automatic cross-runtime fallback is permitted
+        model_mode: { enum: [INHERIT_ORCHESTRATOR, MODEL_PROFILE, CUSTOM_MODEL] }
+        model_profile_id: { type: string, format: uuid }
+        custom_model_id: { type: string, format: uuid }
+        parameter_overrides: { type: object, additionalProperties: true }
+        timeout_seconds: { type: integer, minimum: 1, maximum: 900 }
+        retry_policy: { type: object, additionalProperties: true }
+        system_prompt: { $ref: '#/components/schemas/PromptSelection' }
+        user_prompt: { $ref: '#/components/schemas/PromptSelection' }
+    AgentConfiguration:
+      allOf:
+        - $ref: '#/components/schemas/AgentConfigurationInput'
+        - type: object
+          required: [id, version, status, tool_permission_set_version_id]
+          properties:
+            id: { type: string, format: uuid }
+            version: { type: integer, minimum: 1 }
+            status: { enum: [DRAFT, VALID, INVALID, ACTIVE, RETIRED] }
+            resolved_runtime: { enum: [CODEX_APP_SERVER, LITELLM], readOnly: true }
+            runtime_selection_source:
+              type: string
+              enum: [PLATFORM_DEFAULT, AGENT_OVERRIDE, MODEL_PROFILE]
+              readOnly: true
+            tool_permission_set_version_id: { type: string, format: uuid, readOnly: true }
+    TradingAccountInput:
+      type: object
+      required: [name, account_class, account_currency, broker_connection_id]
+      properties:
+        name: { type: string }
+        account_class: { enum: [PERSONAL, PROP_FIRM] }
+        account_currency: { type: string, minLength: 3, maxLength: 3 }
+        nominal_starting_balance: { $ref: '#/components/schemas/Money' }
+        broker_connection_id: { type: string, format: uuid }
+        prop_program_id: { type: string, format: uuid }
+        prop_ruleset_id: { type: string, format: uuid }
+        guardrail_profile_id: { type: string, format: uuid }
+    TradingAccount:
+      allOf:
+        - $ref: '#/components/schemas/TradingAccountInput'
+        - type: object
+          required: [id, execution_mode, status, version]
+          properties:
+            id: { type: string, format: uuid }
+            execution_mode: { const: MANUAL }
+            status: { enum: [ACTIVE, DEGRADED, DISCONNECTED, DISABLED] }
+            version: { type: integer }
+    Money:
+      type: object
+      required: [amount, currency]
+      properties:
+        amount: { type: string, pattern: '^-?[0-9]+(\.[0-9]+)?$' }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+    AccountSnapshot:
+      type: object
+      required: [id, account_id, starting_balance, balance, equity, floating_pnl,
+        realized_daily_pnl, current_drawdown, daily_drawdown, source_time, freshness]
+      properties:
+        id: { type: string, format: uuid }
+        account_id: { type: string, format: uuid }
+        starting_balance: { $ref: '#/components/schemas/Money' }
+        balance: { $ref: '#/components/schemas/Money' }
+        equity: { $ref: '#/components/schemas/Money' }
+        floating_pnl: { $ref: '#/components/schemas/Money' }
+        realized_daily_pnl: { $ref: '#/components/schemas/Money' }
+        current_drawdown: { $ref: '#/components/schemas/Money' }
+        daily_drawdown: { $ref: '#/components/schemas/Money' }
+        source_time: { type: string, format: date-time }
+        freshness: { enum: [VALID, SUSPECT, STALE, INVALID] }
+    EffectiveConstraint:
+      type: object
+      required: [type, effective_value, controlling_source, severity]
+      properties:
+        type: { type: string }
+        effective_value: { type: object, additionalProperties: true }
+        controlling_source: { type: string }
+        severity: { enum: [INFO, WARNING, SOFT_BLOCK, HARD_BLOCK] }
+        contributors:
+          type: array
+          items: { type: string }
+    RiskEvaluationRequest:
+      type: object
+      required: [account_id, candidate, context_version]
+      properties:
+        account_id: { type: string, format: uuid }
+        context_version: { type: string }
+        candidate: { $ref: '#/components/schemas/TradeConstruction' }
+    RiskCapacityResult:
+      type: object
+      required: [id, status, existing_reserved_risk, candidate_risk,
+        projected_portfolio_risk, remaining_daily_capacity, remaining_total_capacity,
+        additional_trade_capacity, limiting_constraints, expires_at]
+      properties:
+        id: { type: string, format: uuid }
+        status: { enum: [PASS, REDUCE_SIZE, HARD_BLOCK] }
+        compliant_size: { type: string }
+        existing_reserved_risk: { $ref: '#/components/schemas/Money' }
+        candidate_risk: { $ref: '#/components/schemas/Money' }
+        projected_portfolio_risk: { $ref: '#/components/schemas/Money' }
+        remaining_daily_capacity: { $ref: '#/components/schemas/Money' }
+        remaining_total_capacity: { $ref: '#/components/schemas/Money' }
+        additional_trade_capacity: { type: integer, minimum: 0 }
+        limiting_constraints:
+          type: array
+          items: { $ref: '#/components/schemas/EffectiveConstraint' }
+        expires_at: { type: string, format: date-time }
+    ResearchRun:
+      type: object
+      required: [id, account_id, status, version]
+      properties:
+        id: { type: string, format: uuid }
+        account_id: { type: string, format: uuid }
+        status: { enum: [QUEUED, RESEARCHING, MARKETS_PENDING_APPROVAL, MARKETS_APPROVED,
+          DEGRADED, NO_TRADE, FAILED, EXPIRED] }
+        candidates:
+          type: array
+          items:
+            type: object
+            required: [instrument_id, market_category, rank, evidence_refs]
+            properties:
+              instrument_id: { type: string, format: uuid }
+              market_category: { enum: [FOREX, METAL, CRYPTO] }
+              rank: { type: integer, minimum: 1 }
+              evidence_refs: { type: array, items: { type: string } }
+        version: { type: integer }
+    Hil1Decision:
+      type: object
+      required: [action]
+      properties:
+        action: { enum: [APPROVE, REPLACE, RERUN_RESEARCH] }
+        replacements:
+          type: array
+          items:
+            type: object
+            required: [market_category, instrument_id]
+            properties:
+              market_category: { enum: [FOREX, METAL, CRYPTO] }
+              instrument_id: { type: string, format: uuid }
+    StrategyDraftInput:
+      type: object
+      required: [origin_type, name]
+      properties:
+        origin_type: { enum: [AI_GENERATED, AI_ASSISTED, HUMAN_CREATED, IMPORTED] }
+        name: { type: string }
+        description: { type: string }
+        family_id: { type: string, format: uuid }
+        natural_language_idea: { type: string }
+        base_strategy_version_id: { type: string, format: uuid }
+        imported_definition: { type: object, additionalProperties: true }
+    RuleChange:
+      type: object
+      required: [rule_path, value]
+      properties:
+        rule_path: { type: string }
+        value: {}
+    StrategyDraft:
+      type: object
+      required: [id, origin_type, name, status, revision, completeness]
+      properties:
+        id: { type: string, format: uuid }
+        origin_type: { enum: [AI_GENERATED, AI_ASSISTED, HUMAN_CREATED, IMPORTED] }
+        name: { type: string }
+        status: { enum: [DRAFT, SPECIFIED] }
+        revision: { type: integer, minimum: 1 }
+        completeness:
+          type: object
+          required: [eligible_for_specification, required_missing, ambiguities, inconsistencies]
+          properties:
+            eligible_for_specification: { type: boolean }
+            score: { type: number, minimum: 0, maximum: 100 }
+            required_missing: { type: array, items: { type: string } }
+            ambiguities: { type: array, items: { type: string } }
+            inconsistencies: { type: array, items: { type: string } }
+        accepted_rules:
+          type: array
+          items:
+            allOf:
+              - $ref: '#/components/schemas/RuleChange'
+              - type: object
+                properties:
+                  provenance: { enum: [USER, AI_GENERATED, AI_ACCEPTED, AI_EDITED, IMPORTED] }
+    SuggestionDecision:
+      type: object
+      required: [action]
+      properties:
+        action: { enum: [ACCEPT, EDIT, REJECT] }
+        edited_value: {}
+    SimilarityAssessment:
+      type: object
+      required: [id, draft_revision, classification, candidates, allowed_actions]
+      properties:
+        id: { type: string, format: uuid }
+        draft_revision: { type: integer }
+        classification: { enum: [EXACT_DUPLICATE, NEAR_DUPLICATE, VARIANT, NEW_VERSION, NEW_STRATEGY] }
+        candidates: { type: array, items: { type: object, additionalProperties: true } }
+        allowed_actions:
+          type: array
+          items: { enum: [USE_EXISTING, COMPARE, CREATE_VARIANT, CREATE_VERSION, CREATE_NEW] }
+    StrategySubmissionResult:
+      type: object
+      required: [outcome]
+      properties:
+        outcome: { enum: [EXISTING_REUSED, VERSION_CREATED, VARIANT_CREATED, STRATEGY_CREATED] }
+        strategy_id: { type: string, format: uuid }
+        strategy_version_id: { type: string, format: uuid }
+    KnowledgeSourceInput:
+      type: object
+      required: [type, name, scope]
+      properties:
+        type: { enum: [STRATEGY_RESEARCH, PROP_FIRM_DOCUMENT, TRADE_JOURNAL_NOTE,
+          MARKET_RESEARCH, GENERAL_RESEARCH_NOTE] }
+        name: { type: string }
+        scope: { type: object, additionalProperties: true }
+        enabled: { type: boolean, default: true }
+    KnowledgeSource:
+      allOf:
+        - $ref: '#/components/schemas/KnowledgeSourceInput'
+        - type: object
+          required: [id, status, active_generation]
+          properties:
+            id: { type: string, format: uuid }
+            status: { enum: [REGISTERED, INGESTING, INDEXED, DEGRADED, FAILED, DISABLED, DELETED] }
+            active_generation: { type: integer, minimum: 0 }
+            last_indexed_at: { type: string, format: date-time }
+    KnowledgeSearchRequest:
+      type: object
+      required: [query, source_types]
+      properties:
+        query: { type: string, minLength: 1, maxLength: 4000 }
+        source_types: { type: array, items: { type: string } }
+        account_id: { type: string, format: uuid }
+        filters: { type: object, additionalProperties: true }
+        limit: { type: integer, minimum: 1, maximum: 50, default: 10 }
+    KnowledgeSearchResult:
+      type: object
+      required: [retrieval_audit_id, status, results]
+      properties:
+        retrieval_audit_id: { type: string, format: uuid }
+        status: { enum: [SUCCESS, DEGRADED] }
+        results:
+          type: array
+          items:
+            type: object
+            required: [source_id, document_id, segment_id, excerpt, provenance, score]
+            properties:
+              source_id: { type: string, format: uuid }
+              document_id: { type: string, format: uuid }
+              segment_id: { type: string }
+              excerpt: { type: string }
+              provenance: { type: object, additionalProperties: true }
+              score: { type: number }
+    TradeConstruction:
+      type: object
+      required: [instrument_id, direction, entry, stop_loss, targets, requested_size]
+      properties:
+        instrument_id: { type: string, format: uuid }
+        direction: { enum: [BUY, SELL] }
+        entry: { type: string }
+        entry_zone: { type: object, additionalProperties: true }
+        stop_loss: { type: string }
+        targets: { type: array, minItems: 1, items: { type: string } }
+        requested_size: { type: string }
+        invalidation: { type: object, additionalProperties: true }
+    TradeProposal:
+      type: object
+      required: [id, account_id, state, construction, strategy_version_id,
+        market_fingerprint_id, account_snapshot, risk_result, policy_status,
+        guardrail_status, critic_status, expires_at, version]
+      properties:
+        id: { type: string, format: uuid }
+        account_id: { type: string, format: uuid }
+        state: { enum: [TRADE_PENDING_APPROVAL, AWAITING_MANUAL_ENTRY, WAITING,
+          REJECTED, EXPIRED, REVALIDATION_REQUIRED] }
+        construction: { $ref: '#/components/schemas/TradeConstruction' }
+        strategy_version_id: { type: string, format: uuid }
+        market_fingerprint_id: { type: string, format: uuid }
+        evidence_refs: { type: array, items: { type: string } }
+        account_snapshot: { $ref: '#/components/schemas/AccountSnapshot' }
+        risk_result: { $ref: '#/components/schemas/RiskCapacityResult' }
+        policy_status: { enum: [PASS, WARNING] }
+        guardrail_status: { enum: [PASS, WARNING] }
+        critic_status: { enum: [PASS] }
+        expires_at: { type: string, format: date-time }
+        version: { type: integer }
+    Hil2Decision:
+      type: object
+      required: [action]
+      properties:
+        action: { enum: [TAKE, WAIT, REJECT] }
+        rationale: { type: string, maxLength: 2000 }
+    Hil3Decision:
+      type: object
+      required: [action]
+      properties:
+        action: { enum: [APPROVE, WAIT, REJECT] }
+        rationale: { type: string, maxLength: 2000 }
+    ApprovalDecision:
+      type: object
+      required: [id, approval_type, action, resolved_at, resulting_subject_version]
+      properties:
+        id: { type: string, format: uuid }
+        approval_type: { enum: [MARKET_SELECTION, TRADE_ENTRY, TRADE_MANAGEMENT] }
+        action: { type: string }
+        resolved_at: { type: string, format: date-time }
+        resulting_subject_version: { type: integer }
+    Reconciliation:
+      type: object
+      required: [id, proposal_id, broker_position_id, status, version]
+      properties:
+        id: { type: string, format: uuid }
+        proposal_id: { type: string, format: uuid }
+        broker_position_id: { type: string }
+        status: { enum: [CANDIDATE, AUTO_MATCHED, USER_CONFIRMATION_REQUIRED,
+          CONFIRMED, REJECTED, SUPERSEDED] }
+        actual_values: { type: object, additionalProperties: true }
+        version: { type: integer }
+    JournalEvent:
+      type: object
+      required: [id, trade_id, event_type, occurred_at, evidence_refs]
+      properties:
+        id: { type: string, format: uuid }
+        trade_id: { type: string, format: uuid }
+        event_type: { type: string }
+        occurred_at: { type: string, format: date-time }
+        evidence_refs: { type: array, items: { type: string } }
+        payload: { type: object, additionalProperties: true }
+    Job:
+      type: object
+      required: [id, type, status]
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string }
+        status: { enum: [QUEUED, RUNNING, RETRY_SCHEDULED, SUCCEEDED, FAILED, CANCELLED] }

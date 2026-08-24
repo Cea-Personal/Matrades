@@ -1,0 +1,1 @@
+"""Matrades application composition roots."""

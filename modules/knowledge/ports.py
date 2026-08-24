@@ -1,0 +1,13 @@
+from typing import Protocol
+
+
+class EmbeddingProvider(Protocol):
+    async def embed(self, texts: list[str]) -> list[list[float]]: ...
+
+
+class SemanticIndex(Protocol):
+    async def upsert(self, owner_id: str, items: list[tuple[str, list[float]]]) -> None: ...
+    async def search(
+        self, owner_id: str, vector: list[float], limit: int
+    ) -> list[tuple[str, float]]: ...
+    async def delete(self, owner_id: str, ids: list[str]) -> None: ...

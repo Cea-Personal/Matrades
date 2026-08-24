@@ -1,0 +1,91 @@
+name: matrades
+
+services:
+  postgres:
+    image: timescale/timescaledb-ha:pg17
+    environment:
+      POSTGRES_USER: matrades
+      POSTGRES_PASSWORD: matrades
+      POSTGRES_DB: matrades
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U matrades"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes: ["postgres-data:/home/postgres/pgdata/data"]
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes: ["redis-data:/data"]
+
+  api:
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+    env_file:
+      - path: ../../.env
+        required: false
+    environment:
+      MATRADES_DATABASE_URL: postgresql+asyncpg://matrades:matrades@postgres:5432/matrades
+      MATRADES_REDIS_URL: redis://redis:6379/0
+    ports: ["8000:8000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: apps/worker/Dockerfile
+    env_file:
+      - path: ../../.env
+        required: false
+    environment:
+      MATRADES_DATABASE_URL: postgresql+asyncpg://matrades:matrades@postgres:5432/matrades
+      MATRADES_REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  agent-worker:
+    build:
+      context: ../..
+      dockerfile: apps/agent_worker/Dockerfile
+    env_file:
+      - path: ../../.env
+        required: false
+    environment:
+      MATRADES_DATABASE_URL: postgresql+asyncpg://matrades:matrades@postgres:5432/matrades
+      MATRADES_REDIS_URL: redis://redis:6379/0
+      MATRADES_CODEX_ENABLED: "true"
+      MATRADES_LITELLM_ENABLED: "false"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  web:
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports: ["3000:3000"]
+    depends_on: [api]
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    profiles: ["litellm"]
+    command: ["--port", "4000"]
+    ports: ["4000:4000"]
+
+volumes:
+  postgres-data:
+  redis-data:

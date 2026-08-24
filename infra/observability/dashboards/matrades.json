@@ -1,0 +1,16 @@
+{
+  "title": "Matrades Operations",
+  "schemaVersion": 39,
+  "tags": ["matrades", "safety"],
+  "panels": [
+    {"type": "stat", "title": "API health", "targets": [{"expr": "up{service=\"api\"}"}]},
+    {"type": "stat", "title": "Background worker", "targets": [{"expr": "up{service=\"worker\"}"}]},
+    {"type": "stat", "title": "Codex agent worker", "targets": [{"expr": "up{service=\"agent-worker\"}"}]},
+    {"type": "stat", "title": "Optional LiteLLM", "targets": [{"expr": "up{service=\"litellm\"}"}]},
+    {"type": "timeseries", "title": "Risk decision latency", "targets": [{"expr": "histogram_quantile(0.95, rate(matrades_risk_seconds_bucket[5m]))"}]},
+    {"type": "table", "title": "Provider and bridge freshness", "targets": [{"expr": "matrades_component_fresh"}]},
+    {"type": "stat", "title": "PostgreSQL", "targets": [{"expr": "pg_up"}]},
+    {"type": "stat", "title": "Redis", "targets": [{"expr": "redis_up"}]},
+    {"type": "stat", "title": "Web", "targets": [{"expr": "up{service=\"web\"}"}]}
+  ]
+}

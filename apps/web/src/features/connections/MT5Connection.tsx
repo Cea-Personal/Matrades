@@ -1,0 +1,1 @@
+export function MT5Connection({healthy,fresh,version}:{healthy:boolean;fresh:boolean;version:string}){return <article className="card"><h2>MT5 read-only bridge</h2><p className={healthy&&fresh?"good":"bad"}>{healthy&&fresh?"Connected":"Stale / unavailable"}</p><p className="muted">Version {version} · Account, positions and history only · No order writes</p></article>}

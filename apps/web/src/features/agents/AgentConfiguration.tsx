@@ -1,0 +1,22 @@
+"use client";
+
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+
+import { api } from "@/lib/api";
+import type { ModelProfile } from "@/features/agents/ModelProfiles";
+
+type Agent={logical_id:string;required:boolean;runtime:"CODEX_APP_SERVER"|"LITELLM_GATEWAY";profile_id:string|null;system_prompt_override:string|null;user_prompt_override:string|null;permission_set_version:string};
+
+export function AgentConfiguration(){
+  const client=useQueryClient();
+  const agents=useQuery<Agent[]>({queryKey:["agents","registry"],queryFn:()=>api("/agents/registry")});
+  const profiles=useQuery<ModelProfile[]>({queryKey:["agents","profiles"],queryFn:()=>api("/agents/profiles")});
+  const [selected,setSelected]=useState<Agent|null>(null);
+  const [result,setResult]=useState<unknown>(null);
+  const [error,setError]=useState("");
+  const save=useMutation({mutationFn:(agent:Agent)=>api(`/agents/${agent.logical_id}`,{method:"PUT",body:JSON.stringify(agent)}),onSuccess:async()=>{await client.invalidateQueries({queryKey:["agents","registry"]});setSelected(null);},onError:(e:Error)=>setError(e.message)});
+  const test=useMutation({mutationFn:(id:string)=>api(`/agents/${id}/test`,{method:"POST",body:JSON.stringify({input:{purpose:"configuration_test",requested_at:new Date().toISOString()}})}),onSuccess:setResult,onError:(e:Error)=>setError(e.message)});
+  const choose=(agent:Agent)=>setSelected({...agent});
+  return <section className="section-stack"><article className="card"><h2>Logical agent registry</h2>{agents.isPending?<p>Loading…</p>:<div className="table-wrap"><table><thead><tr><th>Agent</th><th>Runtime</th><th>Model profile</th><th>Tools</th><th></th></tr></thead><tbody>{agents.data?.map(agent=><tr key={agent.logical_id}><td><strong>{agent.logical_id}</strong>{agent.required&&<small> protected</small>}</td><td>{agent.runtime}</td><td>{profiles.data?.find(profile=>profile.id===agent.profile_id)?.name??"Platform Codex default"}</td><td>{agent.permission_set_version}</td><td><button className="btn compact" onClick={()=>choose(agent)}>Configure</button> <button className="btn compact" disabled={test.isPending} onClick={()=>test.mutate(agent.logical_id)}>Test</button></td></tr>)}</tbody></table></div>}</article>{selected&&<form className="card form-stack" onSubmit={e=>{e.preventDefault();setError("");save.mutate(selected);}}><h2>Configure {selected.logical_id}</h2><label>Model profile<select value={selected.profile_id??""} onChange={e=>{const profile=profiles.data?.find(item=>item.id===e.target.value);setSelected({...selected,profile_id:profile?.id??null,runtime:profile?.runtime??"CODEX_APP_SERVER"});}}><option value="">Platform Codex default</option>{profiles.data?.map(profile=><option key={profile.id} value={profile.id}>{profile.name} · {profile.runtime}</option>)}</select></label><label>System prompt override<textarea value={selected.system_prompt_override??""} onChange={e=>setSelected({...selected,system_prompt_override:e.target.value||null})}/></label><label>User prompt override<textarea value={selected.user_prompt_override??""} onChange={e=>setSelected({...selected,user_prompt_override:e.target.value||null})}/></label><p className="muted">System and user chains resolve independently. Profile changes cannot alter the permission set.</p><div className="actions"><button className="btn primary" disabled={save.isPending}>Activate configuration</button><button type="button" className="btn" onClick={()=>setSelected(null)}>Cancel</button></div></form>}{result !== null&&<article className="card"><h2>Bounded execution result</h2><pre>{JSON.stringify(result,null,2)}</pre></article>}{error&&<p className="notice bad">{error}</p>}</section>;
+}
