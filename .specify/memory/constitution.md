@@ -1,20 +1,23 @@
 <!--
 Sync Impact Report
-- Version change: 1.3.0 -> 2.0.0
-- Modified principles: IV. Evidence-Based, Equally Validated Strategies now supports only
-  AI_GENERATED and AI_ASSISTED strategy origins
+- Version change: 2.0.0 -> 2.1.0
+- Modified principles: II. Human Control and Manual Live Execution expands HIL-1 to the
+  asset-class/instrument-type research matrix; III. Account-Aware Risk and Prop-Firm Compliance
+  adds contract-aware risk inputs; V. Authoritative Data and Bounded Knowledge Retrieval and
+  IX. Adapter Boundaries and Broker Reconciliation clarify instrument-type authority and adapters
 - Added sections: none
-- Removed sections: HUMAN_CREATED and IMPORTED strategy-origin obligations
+- Removed sections: none
 - Source lineage: TraderX 1.0.0; Matrades 1.0.0, 1.1.0, 1.2.0, and 1.3.0
 - Follow-up TODOs: none
 -->
 # Matrades Constitution
 
 Matrades is an AI-assisted, multi-agent market-research, strategy-development,
-risk-management, and trading decision-support platform for Forex, metals, and
-cryptocurrency. It automates research, analysis, strategy discovery and assistance,
-validation, opportunity detection, risk assessment, monitoring, journaling, knowledge
-retrieval, and performance analysis while preserving human control of live trading.
+risk-management, and trading decision-support platform for Forex, metals, cryptocurrency,
+and stocks across spot, CFD, and futures instruments. It automates research, analysis,
+strategy discovery and assistance, validation, opportunity detection, risk assessment,
+monitoring, journaling, knowledge retrieval, and performance analysis while preserving
+human control of live trading.
 
 The terms MUST, MUST NOT, SHOULD, SHOULD NOT, and MAY are normative. MUST and MUST NOT
 define non-negotiable requirements. A deviation from SHOULD or SHOULD NOT requires an
@@ -46,9 +49,11 @@ prevents persuasive model output from superseding enforceable facts.
 
 Matrades MUST implement three explicit human-in-the-loop gates:
 
-- HIL-1 controls the active market universe. The normal recommendation is one Forex,
-  one metal, and one cryptocurrency instrument; the user can APPROVE, REPLACE, or
-  RERUN RESEARCH.
+- HIL-1 controls the active market universe. Each daily research cycle MUST normally present
+  one ranked candidate for every supported combination of asset class (Forex, metals,
+  cryptocurrency, and stocks) and instrument type (spot, CFD, and futures); the user can
+  APPROVE, REPLACE, or RERUN RESEARCH. A candidate's type MUST remain explicit throughout
+  research, approval, reconciliation, and monitoring.
 - HIL-2 controls acceptance of a trade idea. The user can TAKE, WAIT, or REJECT only
   after analysis, strategy eligibility, policy, equity, guardrail, portfolio-risk, and
   critic checks pass.
@@ -80,6 +85,11 @@ be reviewed, edited where needed, verified, and explicitly activated before beco
 authoritative. Internal guardrails operate independently; the strictest applicable
 external or internal limit MUST govern.
 
+For spot, CFD, and futures instruments, the Risk Engine MUST use authoritative instrument
+metadata such as contract size, tick or point value, margin, financing or funding, expiry or
+roll terms, venue, and currency conversion when applicable. Missing or stale contract metadata
+MUST prevent a new actionable proposal when worst-case risk cannot be established.
+
 ### IV. Evidence-Based, Equally Validated Strategies
 
 Matrades MUST support exactly `AI_GENERATED` and `AI_ASSISTED` strategy origins and
@@ -103,11 +113,11 @@ compatible with the current instrument, regime, account policy, and strategy hea
 ### V. Authoritative Data and Bounded Knowledge Retrieval
 
 Structured systems MUST remain authoritative for prices, candles, market timestamps,
-account state, equity, positions, orders, Stop Loss and Take Profit, drawdown, policy,
-guardrails, strategy status, risk, and performance metrics. Sources MUST retain
-provenance and freshness metadata. Stale, contradictory, missing, or unhealthy critical
-data MUST be surfaced and MUST block dependent trading actions when safety cannot be
-established.
+asset class, instrument type, contract or venue terms, account state, equity, positions,
+orders, Stop Loss and Take Profit, drawdown, policy, guardrails, strategy status, risk,
+and performance metrics. Sources MUST retain provenance and freshness metadata. Stale,
+contradictory, missing, or unhealthy critical data MUST be surfaced and MUST block dependent
+trading actions when safety cannot be established.
 
 Retrieval-augmented generation MAY provide context from source documents, research,
 journals, and historical notes. Retrieved text MUST NOT calculate final risk, establish
@@ -166,7 +176,9 @@ Broker, exchange, market-data, calendar, model, and notification integrations MU
 replaceable adapters or registries. Core agents and business rules MUST depend on common
 contracts rather than provider-specific APIs. Broker connections MUST default to
 read-only. Matrades MUST support a health-reporting MT5 Bridge, including MT5 under Wine
-on macOS, without making MT5 a permanent architectural dependency.
+on macOS, without making MT5 a permanent architectural dependency. Instrument adapters MUST
+distinguish spot ownership, CFD derivative exposure, and futures contract exposure and MUST
+publish the contract and venue metadata required by deterministic risk and reconciliation.
 
 Approval MUST NOT imply execution. Following HIL-2 TAKE, a proposal enters an
 awaiting-manual-entry state. Once a broker or bridge detects a position, Matrades MUST
@@ -192,8 +204,15 @@ suspension, never uncontrolled live rule changes.
 
 ## Product and Operational Constraints
 
-- Matrades' initial market scope is Forex, metals, and cryptocurrency. Instruments MUST
-  be configurable and MUST NOT be permanently hard-coded.
+- Matrades' initial market scope is Forex, metals, cryptocurrency, and stocks across spot, CFD,
+  and futures instruments. Instruments and their provider mappings MUST be configurable and MUST
+  NOT be permanently hard-coded.
+- Each daily research cycle MUST produce one ranked candidate for every supported asset-class and
+  instrument-type combination. The initial matrix is Forex, metals, cryptocurrency, and stocks
+  crossed with spot, CFD, and futures. A combination without authoritative configured data MUST
+  be marked DEGRADED or NOT CONFIGURED and MUST NOT reach actionable HIL-2.
+- Instrument type MUST be explicit and semantically distinct: spot represents cash or underlying
+  ownership, CFD represents derivative exposure, and futures represent contract exposure.
 - A HIL-2 proposal MUST include instrument, direction, entry or entry zone, Stop Loss,
   Take Profit targets, size, risk percentage, maximum expected loss, Risk:Reward,
   strategy identity and version, regime, evidence, invalidation, current equity,
@@ -278,4 +297,4 @@ remediation plan; no exception may permit live trading that violates a hard exte
 rule. The constitution itself MUST be reviewed whenever product authority, execution
 mode, account model, or safety boundary changes.
 
-**Version**: 2.0.0 | **Ratified**: 2026-08-22 | **Last Amended**: 2026-08-25
+**Version**: 2.1.0 | **Ratified**: 2026-08-22 | **Last Amended**: 2026-08-25

@@ -36,10 +36,25 @@ services:
     environment:
       MATRADES_DATABASE_URL: postgresql+asyncpg://matrades:matrades@postgres:5432/matrades
       MATRADES_REDIS_URL: redis://redis:6379/0
+      MATRADES_RESEARCH_ARTIFACT_ROOT: /app/data/research_cycles
     ports: ["8000:8000"]
+    volumes: ["research-artifacts:/app/data/research_cycles"]
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+
+  mt5-bridge:
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+    env_file:
+      - path: ../../.env
+        required: false
+    environment:
+      MATRADES_MT5_BRIDGE_SECRET: ${MATRADES_MT5_BRIDGE_SECRET:-development-mt5-secret}
+    command: ["uvicorn", "bridges.mt5.app:app", "--host", "0.0.0.0", "--port", "8765"]
+    ports: ["8765:8765"]
+    restart: unless-stopped
 
   worker:
     build:
@@ -86,7 +101,6 @@ services:
       MATRADES_DATABASE_URL: postgresql+asyncpg://matrades:matrades@postgres:5432/matrades
       MATRADES_REDIS_URL: redis://redis:6379/0
       MATRADES_CODEX_ENABLED: "true"
-      MATRADES_LITELLM_ENABLED: "false"
       CODEX_HOME: /root/.codex
     volumes:
       - ${HOME}/.codex/auth.json:/root/.codex/auth.json

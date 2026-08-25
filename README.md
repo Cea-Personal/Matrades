@@ -25,7 +25,10 @@ LiteLLM is optional and never a fallback from Codex:
 docker compose -f infra/compose/compose.yaml --profile litellm up litellm
 ```
 
-After connecting it, explicitly create a LiteLLM-bound model profile and assign individual agents. Unassigned agents remain on Codex App Server.
+Open **Agents → Platform runtime controls** to persist the LiteLLM URL and encrypted API key,
+enable it, and test it. Then restart `agent-worker` and explicitly create a `LITELLM_GATEWAY`
+model profile and assign individual agents. Unassigned agents remain on Codex App Server; the
+Agents registry shows the Codex heartbeat and the actual runtime recorded by each test execution.
 
 API docs are at `http://localhost:8000/docs`; the web UI is at `http://localhost:3000`. Use fixture/test credentials only. For troubleshooting, inspect `/api/v1/operations/health`: stale authoritative inputs intentionally cause BLOCK, WAIT, DEGRADED, or NO TRADE.
 
@@ -36,10 +39,14 @@ requires one, then create a named connection for Twelve Data, Coinbase, CoinGeck
 calendar/news HTTPS endpoint, or the MT5 Bridge. **Test** performs a real bounded health probe and
 records capabilities, freshness, and latency; an untested connection is never assumed healthy.
 
-For MT5, run the read-only bridge against a demo account, store its HMAC secret as an MT5 Bridge
-credential, then create a connection with the bridge URL and account reference. Local development
-may use `http://127.0.0.1:8765`; remote bridge URLs must use HTTPS. Matrades checks that the bridge
-advertises no write capability and never exposes an order-write action.
+For MT5, start the included bridge with `docker compose -f infra/compose/compose.yaml up -d
+mt5-bridge`, compile and attach `bridges/mt5/MatradesMT5BridgeEA.mq5` in the logged-in terminal,
+and allow the bridge URL in MT5 WebRequest settings. Store the same HMAC secret as an MT5 Bridge
+credential, then create a connection with `http://host.docker.internal:8765` and the broker account
+reference. Set the Matrades Account ID shown in Configuration → Accounts in the EA. Local
+development may use `http://127.0.0.1:8765`; remote bridge URLs must use HTTPS. Matrades checks
+that the bridge advertises no write capability and never exposes an order-write action. See
+`bridges/mt5/README.md` for Wine/macOS setup.
 
 ## Autonomous research
 
@@ -53,6 +60,16 @@ Crypto discovery uses an active public Coinbase connection. Configure each provi
 on its connection profile and configure the UTC schedule in `.env`.
 If a category provider or required agent is unavailable, the persisted run becomes `DEGRADED`
 and Matrades does not fabricate that category's recommendation.
+
+## Knowledge ingestion
+
+Open **Knowledge** to paste text, upload PDF/DOCX/TXT/Markdown/VTT/SRT documents, or discover
+trading videos. Save a SerpApi credential and a `SERPAPI` connection under **Connections**, then
+use the YouTube knowledge form; SerpApi finds videos and `youtube-transcript-api` retrieves captions.
+Video IDs and content hashes are checked before caption retrieval, so previously indexed videos are
+skipped. Sources are chunked, embedded, stored with provenance in PostgreSQL, and returned through
+owner-scoped lexical/vector hybrid search. Approved generated strategies are indexed automatically
+and also appear in **Extras → Generated code**.
 
 Every successful, degraded, or failed market-research cycle is saved below
 `data/research_cycles/<owner>/market_research/<year>/<month>/<day>/`. Strategy research and

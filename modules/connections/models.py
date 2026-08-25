@@ -18,6 +18,7 @@ class ConnectionProvider(StrEnum):
     CALENDAR = "CALENDAR"
     NEWS = "NEWS"
     FOREX_FACTORY = "FOREX_FACTORY"
+    SERPAPI = "SERPAPI"
     MT5_BRIDGE = "MT5_BRIDGE"
 
 
@@ -29,6 +30,7 @@ PROVIDER_LABELS = {
     ConnectionProvider.CALENDAR: "Calendar",
     ConnectionProvider.NEWS: "News",
     ConnectionProvider.FOREX_FACTORY: "Forex Factory calendar scraper",
+    ConnectionProvider.SERPAPI: "SerpApi YouTube/search discovery",
     ConnectionProvider.MT5_BRIDGE: "MT5 Bridge",
 }
 
@@ -66,6 +68,7 @@ class ConnectionProfile(BaseModel):
         if self.provider in {
             ConnectionProvider.TWELVE_DATA,
             ConnectionProvider.FRED,
+            ConnectionProvider.SERPAPI,
             ConnectionProvider.MT5_BRIDGE,
         } and self.credential_id is None:
             raise ValueError(f"{PROVIDER_LABELS[self.provider]} requires a credential")

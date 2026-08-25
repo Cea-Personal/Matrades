@@ -16,6 +16,8 @@ from apps.worker.app.tasks.strategies import generate_strategy_draft, run_strate
 from modules.connections.models import ConnectionProvider
 from modules.connections.resolution import find_connection, resolve_connection
 from modules.identity.authorization import Actor, Role
+from modules.knowledge.ingestion import build_source_data
+from modules.strategies.compiler import compile_strategy
 from modules.strategies.evidence import resolve_approved_candidate
 from modules.strategies.fingerprints import fingerprint
 from modules.strategies.lifecycle import StrategyState, transition
@@ -86,9 +88,7 @@ async def _resolve_strategy_basis(db: AsyncSession, owner_id: UUID) -> dict[str,
     if not selections:
         raise ValueError("approve a fresh autonomous market research selection first")
     selection = selections[0]
-    research_run = await store.get(
-        "research_run", UUID(str(selection.data["run_id"])), owner_id
-    )
+    research_run = await store.get("research_run", UUID(str(selection.data["run_id"])), owner_id)
     if research_run is None:
         raise ValueError("the approved market research run is unavailable")
     candidate = resolve_approved_candidate(
@@ -161,9 +161,7 @@ async def list_strategy_research_artifacts(
         {
             "run_id": str(item.id),
             "cycle_type": (
-                "strategy_research"
-                if item.kind == "strategy_research_run"
-                else "strategy_backtest"
+                "strategy_research" if item.kind == "strategy_research_run" else "strategy_backtest"
             ),
             "state": item.state,
             "completed_at": item.data.get("completed_at"),
@@ -373,6 +371,7 @@ async def submit(
                 status.HTTP_409_CONFLICT,
                 detail={"message": "exact canonical duplicate", "existing_id": str(existing.id)},
             )
+    compiled = compile_strategy(specification)
     version = await store.create(
         "strategy_version",
         actor.owner_id,
@@ -382,12 +381,47 @@ async def submit(
             "specification": specification.model_dump(mode="json"),
             "fingerprint": identity,
             "artifact_version": "strategy-evaluator-v1",
+            "generated_code": compiled.generated_code,
+            "generated_code_language": "python",
+            "artifact_hash": compiled.artifact_hash,
             "origin": draft.data["origin"],
             "lifecycle_state": StrategyState.SPECIFIED,
         },
         state=StrategyState.SPECIFIED,
         actor_id=actor.actor_id,
         event_type="strategy_version.created",
+    )
+    strategy_content = (
+        f"Strategy: {specification.name}\n"
+        f"Family: {specification.family.value}\n"
+        f"Origin: {specification.origin.value}\n\n"
+        f"Specification:\n{specification.model_dump_json(indent=2)}\n\n"
+        f"Generated evaluator code:\n{compiled.generated_code}"
+    )
+    strategy_source = await store.create(
+        "knowledge_source",
+        actor.owner_id,
+        {
+            **build_source_data(
+                name=f"Generated strategy — {specification.name}",
+                content=strategy_content,
+                media_type="text/plain",
+                category="strategies",
+                tags=["generated-strategy", specification.family.value, specification.origin.value],
+                source_kind="GENERATED_STRATEGY",
+                external_id=str(version.id),
+            ),
+            "linked_strategy_version_id": str(version.id),
+        },
+        state="ACTIVE",
+        actor_id=actor.actor_id,
+        event_type="strategy_knowledge.indexed",
+    )
+    await store.update(
+        version,
+        {**version.data, "knowledge_source_id": str(strategy_source.id)},
+        actor_id=actor.actor_id,
+        event_type="strategy_knowledge.linked",
     )
     await store.update(
         draft,

@@ -16,6 +16,10 @@ prompt-resolution clarifications into one non-repetitive product specification.
 
 - Q: Should LiteLLM require explicit operator selection, or may Matrades automatically fall back to it when the primary Codex runtime is unavailable? → A: Codex is the default for every required agent; LiteLLM is explicit opt-in per agent or model profile, with no automatic cross-runtime fallback.
 
+### Session 2026-08-25
+
+- Q: Should Matrades select one research candidate per asset class, or one per asset-class and instrument-type combination? → A: One candidate for every supported asset-class and instrument-type combination in each daily research cycle. The initial matrix covers Forex, metals, cryptocurrency, and stocks across spot, CFD, and futures, including metals CFD and cryptocurrency CFD. Spot represents cash or underlying ownership, CFD represents a derivative exposure, and futures represent contract exposure.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Make a Safe Trade Decision (Priority: P1)
@@ -47,19 +51,22 @@ risk snapshot while an over-limit proposal is blocked.
 
 ### User Story 2 - Select Markets for the Session (Priority: P1)
 
-As a trader, I want ranked Forex, metal, and cryptocurrency candidates so that I can explicitly
-choose the session's research universe.
+As a trader, I want one ranked candidate for every supported asset-class and instrument-type
+combination so that I can explicitly choose the session's daily research universe across Forex,
+metals, cryptocurrency, and stocks in spot, CFD, and futures markets.
 
 **Why this priority**: Market selection is the first mandatory human gate and bounds all later
 analysis without implying permission to open trades.
 
-**Independent Test**: Run research with healthy sources, review one ranked recommendation per
-market category, replace one instrument, and approve the final selection.
+**Independent Test**: Run daily research with healthy sources, review one ranked recommendation
+for every supported asset-class and instrument-type combination, replace one instrument, and
+approve the final selection.
 
 **Acceptance Scenarios**:
 
-1. **Given** healthy required sources, **When** daily research completes, **Then** Matrades
-   recommends one Forex, one metal, and one cryptocurrency instrument and waits for HIL-1.
+1. **Given** healthy required sources, **When** each daily research cycle completes, **Then**
+   Matrades recommends one instrument for every supported Forex, metals, cryptocurrency, and
+   stocks spot, CFD, and futures combination and waits for HIL-1.
 2. **Given** the recommendations, **When** the user replaces one instrument, **Then** the new
    instrument becomes part of the active universe and the other approved choices remain intact.
 3. **Given** no eligible market has adequate evidence, **When** research completes, **Then**
@@ -253,11 +260,12 @@ work rather than silently changing a live strategy.
 
 ### Scope
 
-Matrades V1 covers AI-assisted research and decision support for Forex, metals, and
-cryptocurrency. It includes secure user access, UI-managed configuration, provider-neutral data
-and broker connections, agent orchestration, market research, strategy creation and validation,
-account-specific deterministic risk and policy enforcement, manual trading workflows, monitoring,
-journaling, performance analysis, notifications, health, and auditability.
+Matrades V1 covers AI-assisted research and decision support for Forex, metals, cryptocurrency,
+and stocks across supported spot, CFD, and futures instruments. It includes secure user access,
+UI-managed configuration, provider-neutral data and broker connections, agent orchestration,
+market research, strategy creation and validation, account-specific deterministic risk and policy
+enforcement, manual trading workflows, monitoring, journaling, performance analysis,
+notifications, health, and auditability.
 
 The default V1 excludes autonomous live trade entry, autonomous discretionary position changes,
 autonomous discretionary exits, high-frequency or market-making execution, latency-sensitive
@@ -270,8 +278,10 @@ that have not completed the required validation lifecycle.
 
 - **FR-001**: Matrades MUST require HIL-1 approval of the active research universe, HIL-2 approval
   of each trade idea, and HIL-3 approval of every discretionary live-position change.
-- **FR-002**: HIL-1 MUST normally present one ranked Forex, one ranked metal, and one ranked
-  cryptocurrency candidate with APPROVE, REPLACE, and RERUN RESEARCH actions.
+- **FR-002**: Each daily HIL-1 cycle MUST normally present one ranked candidate for every supported
+  combination of asset class (Forex, metals, cryptocurrency, and stocks) and instrument type
+  (spot, CFD, and futures), including metals CFD and cryptocurrency CFD, with APPROVE, REPLACE,
+  and RERUN RESEARCH actions.
 - **FR-003**: The number of HIL-1 instruments MUST NOT imply the number of trades permitted.
 - **FR-004**: HIL-2 MUST offer TAKE, WAIT, and REJECT; TAKE MUST move the proposal to awaiting
   manual entry and MUST NOT place an order.
@@ -359,9 +369,11 @@ that have not completed the required validation lifecycle.
 
 - **FR-034**: External market, macro, positioning, calendar, news, broker, and crypto-discovery
   providers MUST be replaceable without changing agent or trading rules.
-- **FR-035**: The initial provider set MUST support Twelve Data for Forex and metals, Coinbase for
-  crypto exchange data, CoinGecko for broad crypto discovery, FRED for macro data, CFTC COT for
-  positioning, configurable calendar and news sources, and broker or MT5 state.
+- **FR-035**: The initial provider set MUST support configured authoritative mappings for each
+  enabled Forex, metals, cryptocurrency, and stocks asset-class and instrument-type combination;
+  it MUST retain Twelve Data for Forex and metals where applicable, Coinbase for crypto exchange
+  data, CoinGecko for broad crypto discovery, FRED for macro data, CFTC COT for positioning,
+  configurable calendar and news sources, and broker or MT5 state.
 - **FR-036**: Coinbase-derived crypto data MUST be normalized before agent use and, where available,
   cover instruments, prices, trades, candles, bid/ask, order-book depth, live updates, and history.
 - **FR-037**: CoinGecko MUST remain a separate broad-discovery and asset-metadata source rather than
@@ -574,8 +586,9 @@ that have not completed the required validation lifecycle.
 - **Risk Capacity Result**: Candidate-specific PASS, REDUCE SIZE, or HARD BLOCK decision with
   limiting constraints, compliant size if any, projected worst-case loss, post-trade exposure,
   additional-trade capacity, and snapshot reference.
-- **Market Instrument**: Provider-neutral tradeable instrument with market category, normalized
-  symbol, provider mappings, trading properties, and availability state.
+- **Market Instrument**: Provider-neutral tradeable instrument with asset class, instrument type
+  (spot, CFD, or futures), normalized symbol, provider mappings, contract or venue properties,
+  and availability state.
 - **Market Snapshot and Fingerprint**: Time-stamped authoritative observations and derived regime,
   structure, liquidity, volatility, event, sentiment, and intermarket state used by a decision.
 - **Agent Definition**: Stable logical role and ID with required capabilities and allowed tools;
@@ -648,8 +661,11 @@ that have not completed the required validation lifecycle.
   outside this feature unless explicit authorized sharing is added later.
 - Live trade entry and discretionary modification remain manual, and broker connections default to
   read-only; broker-side protective orders may execute normally.
-- The default HIL-1 universe is one instrument per supported market category, but configuration or a
-  later specification may broaden the research universe without weakening HIL or risk constraints.
+- The default HIL-1 universe is one instrument per enabled asset-class and instrument-type
+  combination. Spot means cash or underlying ownership, CFD means derivative exposure, and futures
+  mean contract exposure. Each combination is eligible only when its market semantics and
+  authoritative provider or broker mapping are configured; configuration or a later specification
+  may broaden the universe without weakening HIL or risk constraints.
 - Users supply and verify their applicable prop-firm terms. Matrades may assist extraction but does
   not guarantee that unverified source text is complete or legally authoritative.
 - Risk policies define reset boundaries, currencies, conversion rules, drawdown bases, and whether

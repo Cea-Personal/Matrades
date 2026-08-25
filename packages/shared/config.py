@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     research_schedule_enabled: bool = True
     research_schedule_hour_utc: int = Field(default=5, ge=0, le=23)
     research_schedule_minute_utc: int = Field(default=0, ge=0, le=59)
+    forex_factory_schedule_enabled: bool = True
+    forex_factory_schedule_hour_utc: int = Field(default=5, ge=0, le=23)
+    forex_factory_schedule_minute_utc: int = Field(default=0, ge=0, le=59)
     research_agent_timeout_seconds: int = Field(default=90, ge=10, le=300)
     research_artifact_root: Path = Path("data/research_cycles")
     strategy_research_max_market_age_hours: int = Field(default=24, ge=1, le=168)

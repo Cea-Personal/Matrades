@@ -3,27 +3,62 @@
 import { FormEvent, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { api, type Resource } from "@/lib/api";
+import { api, type Resource, withStepUp } from "@/lib/api";
+import { MfaDeleteDialog } from "@/components/MfaDeleteDialog";
 
-type SearchResult = { query_hash: string; degraded: boolean; results: Array<{ source_id: string; segment_id: string; source_name: string; source_version: number; text: string; score: number }> };
+type SearchResult = { retrieval_audit_id: string; citations: Array<{ source_id: string; segment_id: string; source_name: string; source_version: number; text: string; score: number; vector_score?: number }> };
+type Health = { state: string; active_sources: number; indexed_segments: number; capabilities?: string[] };
+type ScrapeResponse = { discovered: number; created: number; skipped: number; failed: Array<{ video_id: string; error: string }> };
 
 export function KnowledgeSources() {
   const client = useQueryClient();
   const sources = useQuery<Resource[]>({ queryKey: ["knowledge", "sources"], queryFn: () => api("/knowledge/sources") });
-  const health = useQuery<{state:string; active_sources:number; indexed_segments:number}>({ queryKey: ["knowledge", "health"], queryFn: () => api("/knowledge/health") });
-  const [source,setSource]=useState({name:"",content:"",category:"general",tags:""});
-  const [query,setQuery]=useState("");
-  const [results,setResults]=useState<SearchResult|null>(null);
-  const [message,setMessage]=useState("");
-  const refresh=()=>client.invalidateQueries({queryKey:["knowledge"]});
-  const create=useMutation({mutationFn:()=>api("/knowledge/sources",{method:"POST",body:JSON.stringify({...source,tags:source.tags.split(",").map(value=>value.trim()).filter(Boolean)})}),onSuccess:async()=>{setSource({name:"",content:"",category:"general",tags:""});setMessage("Source indexed with versioned chunks.");await refresh();},onError:(error:Error)=>setMessage(error.message)});
-  const act=useMutation({mutationFn:({id,action}:{id:string;action:"reprocess"|"disable"|"delete"})=>action==="delete"?api(`/knowledge/sources/${id}`,{method:"DELETE"}):api(`/knowledge/sources/${id}/${action}`,{method:"POST",body:action==="reprocess"?JSON.stringify({name:String(sources.data?.find(item=>item.id===id)?.name??"Source"),content:source.content||"Reprocessed by operator",category:String(sources.data?.find(item=>item.id===id)?.category??"general")}):undefined}),onSuccess:refresh,onError:(error:Error)=>setMessage(error.message)});
-  const search=useMutation({mutationFn:()=>api<SearchResult>("/knowledge/search",{method:"POST",body:JSON.stringify({query,limit:10})}),onSuccess:setResults,onError:(error:Error)=>setMessage(error.message)});
-  const submit=(event:FormEvent)=>{event.preventDefault();setMessage("");create.mutate();};
-  return <section className="section-stack"><header><p className="eyebrow">Context-only retrieval</p><h1>Knowledge sources</h1><p className="muted">Knowledge can explain and cite; it never overrides account, market, policy, risk, broker, or performance authority.</p></header>
-    <div className="grid two"><form className="card form-stack" onSubmit={submit}><h2>Add source</h2><label>Name<input required value={source.name} onChange={e=>setSource({...source,name:e.target.value})}/></label><label>Category<input required value={source.category} onChange={e=>setSource({...source,category:e.target.value})}/></label><label>Tags<input placeholder="playbook, forex" value={source.tags} onChange={e=>setSource({...source,tags:e.target.value})}/></label><label>Content<textarea required rows={8} value={source.content} onChange={e=>setSource({...source,content:e.target.value})}/></label><button className="btn primary" disabled={create.isPending}>Ingest and index</button></form><article className="card"><h2>Index health</h2>{health.isPending?<p>Checking…</p>:<dl className="metric-list"><div><dt>State</dt><dd className={health.data?.state==="HEALTHY"?"good":"warn"}>{health.data?.state}</dd></div><div><dt>Active sources</dt><dd>{health.data?.active_sources}</dd></div><div><dt>Indexed segments</dt><dd>{health.data?.indexed_segments}</dd></div></dl>}</article></div>
-    {message&&<p className="notice">{message}</p>}
-    <article className="card"><h2>Owner-scoped sources</h2>{sources.isPending?<p>Loading…</p>:sources.data?.length?<div className="table-wrap"><table><thead><tr><th>Source</th><th>Category</th><th>Segments</th><th>State</th><th>Actions</th></tr></thead><tbody>{sources.data.map(item=><tr key={item.id}><td><strong>{String(item.name)}</strong><br/><small>v{String(item.generation)} · {String(item.content_hash).slice(0,10)}</small></td><td>{String(item.category)}</td><td>{String(item.segment_count)}</td><td>{item.state}</td><td><div className="actions"><button className="btn compact" disabled={act.isPending} onClick={()=>act.mutate({id:item.id,action:"reprocess"})}>Reprocess</button><button className="btn compact" disabled={act.isPending} onClick={()=>act.mutate({id:item.id,action:"disable"})}>Disable</button><button className="btn compact danger" disabled={act.isPending} onClick={()=>act.mutate({id:item.id,action:"delete"})}>Delete</button></div></td></tr>)}</tbody></table></div>:<p className="empty">No knowledge sources yet.</p>}</article>
-    <form className="card form-stack" onSubmit={e=>{e.preventDefault();search.mutate();}}><h2>Audited hybrid search</h2><div className="actions"><input required placeholder="Search knowledge" value={query} onChange={e=>setQuery(e.target.value)}/><button className="btn primary" disabled={search.isPending}>Search</button></div>{results&&<><p className="muted">Query audit {results.query_hash.slice(0,12)} · {results.degraded?"degraded":"healthy"}</p>{results.results.length?<ol>{results.results.map(item=><li key={item.segment_id}><p>{item.text}</p><small>{item.source_name} · source v{item.source_version} · chunk {item.segment_id} · score {item.score.toFixed(3)}</small></li>)}</ol>:<p className="empty">No matching authorized chunks.</p>}</>}</form>
+  const health = useQuery<Health>({ queryKey: ["knowledge", "health"], queryFn: () => api("/knowledge/health") });
+  const [source, setSource] = useState({ name: "", content: "", category: "general", tags: "" });
+  const [file, setFile] = useState<File | null>(null);
+  const [scrape, setScrape] = useState({ query: "trading strategy", limit: "5" });
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<SearchResult | null>(null);
+  const [message, setMessage] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<Resource | null>(null);
+  const refresh = () => client.invalidateQueries({ queryKey: ["knowledge"] });
+  const create = useMutation({
+    mutationFn: () => api("/knowledge/sources", { method: "POST", body: JSON.stringify({ ...source, tags: source.tags.split(",").map(value => value.trim()).filter(Boolean) }) }),
+    onSuccess: async () => { setSource({ name: "", content: "", category: "general", tags: "" }); setMessage("Source indexed with versioned chunks and vectors."); await refresh(); },
+    onError: (error: Error) => setMessage(error.message),
+  });
+  const upload = useMutation({
+    mutationFn: () => { if (!file) throw new Error("Choose a document or transcript file first"); const body = new FormData(); body.append("file", file); body.append("category", source.category); body.append("tags", source.tags); return api<Resource & { duplicate?: boolean }>("/knowledge/sources/upload", { method: "POST", body }); },
+    onSuccess: async (item: Resource & { duplicate?: boolean }) => { setFile(null); setMessage(item.duplicate ? "That document was already indexed; no duplicate was created." : "Document extracted and indexed."); await refresh(); },
+    onError: (error: Error) => setMessage(error.message),
+  });
+  const scrapeYoutube = useMutation({
+    mutationFn: () => api<ScrapeResponse>("/knowledge/youtube/scrape", { method: "POST", body: JSON.stringify({ query: scrape.query, limit: Number(scrape.limit), languages: ["en"], category: "trading" }) }),
+    onSuccess: async result => { setMessage(`YouTube discovery: ${result.created} indexed, ${result.skipped} already known, ${result.failed.length} unavailable.`); await refresh(); },
+    onError: (error: Error) => setMessage(error.message),
+  });
+  const act = useMutation({
+    mutationFn: ({ id, action }: { id: string; action: "reprocess" | "disable" }) => api(`/knowledge/sources/${id}/${action}`, { method: "POST", body: action === "reprocess" ? JSON.stringify({ name: String(sources.data?.find(item => item.id === id)?.name ?? "Source"), content: source.content || "Reprocessed by operator", category: String(sources.data?.find(item => item.id === id)?.category ?? "general") }) : undefined }),
+    onSuccess: refresh,
+    onError: (error: Error) => setMessage(error.message),
+  });
+  const deleteSource = useMutation({
+    mutationFn: (code: string) => { if (!deleteTarget) throw new Error("Choose a source to remove"); return withStepUp("knowledge.change", code, grant => api(`/knowledge/sources/${deleteTarget.id}`, { method: "DELETE", headers: { "Step-Up-Grant": grant } })); },
+    onSuccess: async () => { setDeleteTarget(null); setMessage("Knowledge source removed; its audit history is retained."); await refresh(); },
+    onError: (error: Error) => setMessage(error.message),
+  });
+  const search = useMutation({ mutationFn: () => api<SearchResult>("/knowledge/search", { method: "POST", body: JSON.stringify({ query, limit: 10 }) }), onSuccess: setResults, onError: (error: Error) => setMessage(error.message) });
+  const submit = (event: FormEvent) => { event.preventDefault(); setMessage(""); create.mutate(); };
+  return <section className="section-stack">
+    <header><p className="eyebrow">Context-only retrieval</p><h1>Knowledge sources</h1><p className="muted">Import documents, transcripts, and approved strategy artifacts. Indexed content remains context-only and is searchable with lexical plus vector scoring.</p></header>
+    <div className="grid two">
+      <form className="card form-stack" onSubmit={submit}><h2>Add text source</h2><label>Name<input required value={source.name} onChange={e => setSource({ ...source, name: e.target.value })} /></label><label>Category<input required value={source.category} onChange={e => setSource({ ...source, category: e.target.value })} /></label><label>Tags<input placeholder="playbook, forex" value={source.tags} onChange={e => setSource({ ...source, tags: e.target.value })} /></label><label>Content<textarea required rows={7} value={source.content} onChange={e => setSource({ ...source, content: e.target.value })} /></label><button className="btn primary" disabled={create.isPending}>Ingest and index</button></form>
+      <div className="section-stack"><form className="card form-stack" onSubmit={e => { e.preventDefault(); upload.mutate(); }}><h2>Upload document or transcript</h2><p className="muted">PDF, DOCX, TXT, Markdown, VTT, and SRT up to 25 MB. Content hashes prevent duplicate ingestion.</p><input required type="file" accept=".pdf,.docx,.txt,.md,.vtt,.srt" onChange={e => setFile(e.target.files?.[0] ?? null)} /><label>Category<input value={source.category} onChange={e => setSource({ ...source, category: e.target.value })} /></label><label>Tags<input value={source.tags} onChange={e => setSource({ ...source, tags: e.target.value })} /></label><button className="btn" disabled={upload.isPending}>Upload and index</button></form><form className="card form-stack" onSubmit={e => { e.preventDefault(); scrapeYoutube.mutate(); }}><h2>YouTube trading knowledge</h2><p className="muted">Uses the configured SerpApi connection for discovery and youtube-transcript-api for captions. Previously indexed video IDs are skipped.</p><label>Search query<input required value={scrape.query} onChange={e => setScrape({ ...scrape, query: e.target.value })} /></label><label>Videos to inspect<input type="number" min="1" max="20" value={scrape.limit} onChange={e => setScrape({ ...scrape, limit: e.target.value })} /></label><button className="btn" disabled={scrapeYoutube.isPending}>Discover and ingest transcripts</button></form></div>
+    </div>
+    {message && <p className="notice">{message}</p>}
+    <article className="card"><h2>Index health</h2>{health.isPending ? <p>Checking…</p> : <dl className="metric-list"><div><dt>State</dt><dd className={health.data?.state === "HEALTHY" ? "good" : "warn"}>{health.data?.state}</dd></div><div><dt>Active sources</dt><dd>{health.data?.active_sources ?? "—"}</dd></div><div><dt>Indexed segments</dt><dd>{health.data?.indexed_segments ?? "—"}</dd></div><div><dt>Capabilities</dt><dd>{health.data?.capabilities?.join(", ") ?? "—"}</dd></div></dl>}</article>
+    <article className="card"><h2>Owner-scoped sources</h2>{sources.isPending ? <p>Loading…</p> : sources.data?.length ? <div className="table-wrap"><table><thead><tr><th>Source</th><th>Type</th><th>Category</th><th>Segments</th><th>State</th><th>Actions</th></tr></thead><tbody>{sources.data.map(item => <tr key={item.id}><td><strong>{String(item.name)}</strong><br /><small>v{String(item.generation)} · {String(item.content_hash).slice(0, 10)}</small></td><td>{String(item.source_kind ?? "DOCUMENT")}</td><td>{String(item.category)}</td><td>{String(item.segment_count)}</td><td>{item.state}</td><td><div className="actions"><button className="btn compact" disabled={act.isPending} onClick={() => act.mutate({ id: item.id, action: "reprocess" })}>Reprocess</button><button className="btn compact" disabled={act.isPending} onClick={() => act.mutate({ id: item.id, action: "disable" })}>Disable</button><button className="btn compact danger" disabled={act.isPending || deleteSource.isPending} onClick={() => setDeleteTarget(item)}>Delete</button></div></td></tr>)}</tbody></table></div> : <p className="empty">No knowledge sources yet.</p>}</article>
+    {deleteTarget ? <MfaDeleteDialog key={deleteTarget.id} targetLabel={String(deleteTarget.name)} scope="knowledge.change" busy={deleteSource.isPending} error={deleteSource.error instanceof Error ? deleteSource.error.message : undefined} onCancel={() => setDeleteTarget(null)} onConfirm={code => deleteSource.mutate(code)} /> : null}
+    <form className="card form-stack" onSubmit={e => { e.preventDefault(); search.mutate(); }}><h2>Audited hybrid search</h2><div className="actions"><input required placeholder="Search knowledge" value={query} onChange={e => setQuery(e.target.value)} /><button className="btn primary" disabled={search.isPending}>Search</button></div>{results && <><p className="muted">Retrieval audit {results.retrieval_audit_id.slice(0, 12)}</p>{results.citations.length ? <ol>{results.citations.map(item => <li key={item.segment_id}><p>{item.text}</p><small>{item.source_name} · source v{item.source_version} · score {item.score.toFixed(3)} · vector {item.vector_score?.toFixed(3) ?? "—"}</small></li>)}</ol> : <p className="empty">No matching authorized chunks.</p>}</>}</form>
   </section>;
 }

@@ -6,8 +6,15 @@ from pathlib import Path
 from time import monotonic
 from urllib.parse import urlparse
 
-ALLOWED_UPLOAD_TYPES = {"application/pdf", "text/plain", "text/markdown"}
-MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+ALLOWED_UPLOAD_TYPES = {
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "text/plain",
+    "text/markdown",
+    "text/vtt",
+    "application/x-subrip",
+}
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 
 
 def validate_csrf(cookie_token: str | None, header_token: str | None) -> None:
@@ -19,7 +26,7 @@ def validate_upload(name: str, content_type: str, size: int) -> None:
     if (
         content_type not in ALLOWED_UPLOAD_TYPES
         or size > MAX_UPLOAD_BYTES
-        or Path(name).suffix.lower() not in {".pdf", ".txt", ".md"}
+        or Path(name).suffix.lower() not in {".pdf", ".docx", ".txt", ".md", ".vtt", ".srt"}
     ):
         raise ValueError("unsafe upload")
 

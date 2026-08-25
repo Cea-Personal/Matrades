@@ -53,12 +53,13 @@ async def probe_connection(
     writes: bool | None = None
     try:
         if profile.provider == ConnectionProvider.TWELVE_DATA:
+            # Validate only the credential/provider boundary here.  The market
+            # research cycle is responsible for selecting an instrument and
+            # requesting its quote/candles; a connection health check must not
+            # invent or require a test pair.
             response = await http.get(
-                "https://api.twelvedata.com/quote",
-                params={
-                    "symbol": profile.configuration.get("test_symbol", "EUR/USD"),
-                    "apikey": credential_secret,
-                },
+                "https://api.twelvedata.com/api_usage",
+                headers={"Authorization": f"apikey {credential_secret}"},
             )
             body = response.json()
             if response.is_error or body.get("status") == "error":
@@ -74,13 +75,13 @@ async def probe_connection(
                     f"Twelve Data {body['code']}: "
                     f"{body.get('message', 'provider rejected request')}"
                 )
-            capabilities = ["forex.read", "metals.read", "candles.read"]
-            fresh = any(
-                body.get(field) not in (None, "")
-                for field in ("close", "bid", "ask", "price")
-            )
+            capabilities = ["provider.authenticated", "forex.read", "metals.read", "candles.read"]
+            # /api_usage is deliberately symbol-free.  A successful response
+            # proves the key is accepted; instrument availability is checked
+            # when research requests the selected market-research pair.
+            fresh = bool(body) and body.get("status", "ok") != "error"
             if not fresh:
-                raise RuntimeError("Twelve Data quote response did not contain a price")
+                raise RuntimeError("Twelve Data usage response did not confirm the credential")
         elif profile.provider == ConnectionProvider.COINBASE:
             response = await http.get("https://api.exchange.coinbase.com/time")
             response.raise_for_status()
@@ -99,6 +100,21 @@ async def probe_connection(
             response.raise_for_status()
             capabilities = ["macro.read"]
             fresh = bool(response.json().get("seriess"))
+        elif profile.provider == ConnectionProvider.SERPAPI:
+            response = await http.get(
+                "https://serpapi.com/search.json",
+                params={
+                    "engine": "google",
+                    "q": "site:youtube.com trading",
+                    "api_key": credential_secret,
+                    "num": 1,
+                },
+            )
+            body = response.json()
+            if response.is_error or body.get("error"):
+                raise RuntimeError("SerpApi rejected the connection test")
+            capabilities = ["search.read", "youtube.discovery", "transcript.read"]
+            fresh = bool(body.get("search_metadata"))
         elif profile.provider == ConnectionProvider.FOREX_FACTORY:
             feed_url = str(profile.configuration.get("feed_url", DEFAULT_FOREX_FACTORY_FEED))
             response = await http.get(feed_url)

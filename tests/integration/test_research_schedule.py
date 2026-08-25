@@ -1,4 +1,8 @@
 from apps.worker.app.celery_app import celery_app
+from apps.worker.app.tasks.forex_factory import (
+    run_forex_factory_scrape,
+    schedule_forex_factory_scrapes,
+)
 from apps.worker.app.tasks.research import run_research_cycle, schedule_research_cycles
 
 
@@ -8,6 +12,13 @@ def test_per_account_research_is_checked_every_minute_and_accepts_no_caller_cand
     assert schedule["task"] == schedule_research_cycles.name
     assert run_research_cycle.name.endswith("run_research_cycle")
     assert "candidates" not in run_research_cycle.run.__annotations__
+
+
+def test_forex_factory_scraper_is_checked_every_minute() -> None:
+    schedule = celery_app.conf.beat_schedule["per-account-forex-factory-scraper"]
+
+    assert schedule["task"] == schedule_forex_factory_scrapes.name
+    assert run_forex_factory_scrape.name.endswith("run_forex_factory_scrape")
 
 
 def test_research_schedule_normalizes_timezone_and_due_time() -> None:

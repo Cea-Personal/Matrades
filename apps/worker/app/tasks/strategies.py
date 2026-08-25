@@ -12,6 +12,7 @@ from apps.worker.app.celery_app import celery_app
 from modules.agents.rpc import RedisAgentGateway
 from modules.backtesting.engine import BacktestConfiguration, PointInTimeBacktester
 from modules.connections.resolution import resolve_connection
+from modules.knowledge.ingestion import build_source_data
 from modules.research.artifacts import ResearchCycleArchive
 from modules.strategies.ai_workflow import StrategyGenerationWorkflow
 from modules.strategies.compiler import compile_strategy
@@ -106,14 +107,12 @@ async def _generate_strategy(run_id: UUID) -> dict:
             item
             for kind in ("prop_ruleset", "guardrail")
             for item in await store.list(kind, owner_id)
-            if item.state == "ACTIVE"
-            and item.data.get("account_id") in {None, str(account_id)}
+            if item.state == "ACTIVE" and item.data.get("account_id") in {None, str(account_id)}
         ]
         strategy_versions = [
             item
             for item in await store.list("strategy_version", owner_id)
-            if candidate.instrument
-            in item.data.get("specification", {}).get("instruments", [])
+            if candidate.instrument in item.data.get("specification", {}).get("instruments", [])
         ][:10]
         backtests = await store.list("strategy_backtest", owner_id)
         trade_proposals = {
@@ -133,19 +132,15 @@ async def _generate_strategy(run_id: UUID) -> dict:
             linked_strategy_ids = {str(item.id), str(item.data.get("strategy_id") or "")}
             live_pnl: list[Decimal] = []
             for active_trade in active_trades:
-                trade_proposal = trade_proposals.get(
-                    str(active_trade.data.get("proposal_id"))
-                )
+                trade_proposal = trade_proposals.get(str(active_trade.data.get("proposal_id")))
                 if (
                     trade_proposal is None
-                    or str(trade_proposal.data.get("strategy_id"))
-                    not in linked_strategy_ids
+                    or str(trade_proposal.data.get("strategy_id")) not in linked_strategy_ids
                 ):
                     continue
                 position = active_trade.data.get("broker_position", {})
                 live_pnl.append(
-                    Decimal(str(position.get("pnl", 0)))
-                    - Decimal(str(position.get("fees", 0)))
+                    Decimal(str(position.get("pnl", 0))) - Decimal(str(position.get("fees", 0)))
                 )
             prior_context.append(
                 {
@@ -168,9 +163,7 @@ async def _generate_strategy(run_id: UUID) -> dict:
                         "trade_count": len(live_pnl),
                         "net_pnl": str(sum(live_pnl, Decimal("0"))),
                         "expectancy": (
-                            str(sum(live_pnl, Decimal("0")) / len(live_pnl))
-                            if live_pnl
-                            else None
+                            str(sum(live_pnl, Decimal("0")) / len(live_pnl)) if live_pnl else None
                         ),
                     },
                 }
@@ -360,9 +353,7 @@ async def _generate_strategy(run_id: UUID) -> dict:
     if screening.selected_hypothesis_id is None:
         raise RuntimeError("no strategy hypothesis passed preliminary holdout screening")
     proposal = next(
-        item
-        for item in hypotheses
-        if item.hypothesis_id == screening.selected_hypothesis_id
+        item for item in hypotheses if item.hypothesis_id == screening.selected_hypothesis_id
     )
     completed_at = datetime.now(UTC)
     details = {
@@ -438,6 +429,54 @@ async def _generate_strategy(run_id: UUID) -> dict:
             state="AWAITING_STRATEGY_APPROVAL",
             event_type="strategy.approval_requested",
         )
+        proposal_content = (
+            f"Strategy proposal: {proposal.specification.name}\n"
+            f"Family: {proposal.specification.family.value}\n"
+            f"Origin: {proposal.specification.origin.value}\n\n"
+            f"Step-by-step breakdown:\n{proposal.breakdown}\n\n"
+            f"Specification:\n{proposal.specification.model_dump_json(indent=2)}\n\n"
+            f"Generated evaluator code:\n{compile_strategy(proposal.specification).generated_code}"
+        )
+        proposal_data = {
+            **build_source_data(
+                name=f"Strategy proposal — {proposal.specification.name}",
+                content=proposal_content,
+                media_type="text/plain",
+                category="strategies",
+                tags=["generated-strategy", "proposal", proposal.specification.family.value],
+                source_date=completed_at.date().isoformat(),
+                source_kind="GENERATED_STRATEGY_PROPOSAL",
+                external_id=str(run_id),
+            ),
+            "linked_strategy_research_run_id": str(run_id),
+            "linked_strategy_draft_id": str(draft.id),
+        }
+        existing_source = next(
+            (
+                item
+                for item in await store.list("knowledge_source", owner_id)
+                if item.data.get("source_kind") == "GENERATED_STRATEGY_PROPOSAL"
+                and item.data.get("external_id") == str(run_id)
+            ),
+            None,
+        )
+        if existing_source is None:
+            await store.create(
+                "knowledge_source",
+                owner_id,
+                proposal_data,
+                state="ACTIVE",
+                actor_id=None,
+                event_type="strategy_proposal_knowledge.indexed",
+            )
+        else:
+            await store.update(
+                existing_source,
+                proposal_data,
+                state="ACTIVE",
+                actor_id=None,
+                event_type="strategy_proposal_knowledge.reindexed",
+            )
     return {**details, "artifact": artifact_data}
 
 
@@ -527,12 +566,15 @@ async def _run_backtest(run_id: UUID) -> dict:
         max_total_loss=Decimal(str(run.data.get("max_total_loss", "1000000"))),
     )
     result = PointInTimeBacktester().run(specification, candles, configuration)
-    artifact_hash = compile_strategy(specification).artifact_hash
+    compiled = compile_strategy(specification)
+    artifact_hash = compiled.artifact_hash
     completed_at = datetime.now(UTC)
     details = {
         **result.model_dump(mode="json"),
         "source": source,
         "artifact_hash": artifact_hash,
+        "generated_code": compiled.generated_code,
+        "generated_code_language": "python",
         "completed_at": completed_at.isoformat(),
     }
     artifact = ResearchCycleArchive(settings.research_artifact_root).save_cycle(

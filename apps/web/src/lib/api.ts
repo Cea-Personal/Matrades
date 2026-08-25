@@ -36,6 +36,20 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (await response.json()) as T;
 }
 
+export async function withStepUp<T>(
+  scope: string,
+  code: string,
+  action: (grant: string) => Promise<T>,
+): Promise<T> {
+  const stepUp = await api<{ grant_id: string }>("/auth/step-up", {
+    method: "POST",
+    headers: { "Step-Up-Grant": "" },
+    body: JSON.stringify({ action_scope: scope, code }),
+  });
+  if (typeof window !== "undefined") window.sessionStorage.setItem("matrades_step_up", stepUp.grant_id);
+  return action(stepUp.grant_id);
+}
+
 export type Resource = {
   id: string;
   owner_id: string;

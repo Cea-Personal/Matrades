@@ -244,7 +244,7 @@ async def _create_scheduled_runs() -> list[str]:
                 {
                     "account_id": str(account.id),
                     "market_categories": [item.value for item in DEFAULT_CATEGORIES],
-                    "scheduled_date": local_date.isoformat(),
+                    "scheduled_date": local_date,
                     "scheduled_at": now.isoformat(),
                     "research_schedule": schedule,
                     "trigger": "SCHEDULED",

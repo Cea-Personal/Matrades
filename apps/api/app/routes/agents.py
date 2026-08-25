@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from time import monotonic
 from typing import Annotated, Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from redis.asyncio import Redis
+from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.app.dependencies import current_actor, get_db, require_roles
@@ -21,8 +25,11 @@ from modules.agents.prompts import PromptSet, resolve_prompts
 from modules.agents.registry import REQUIRED_AGENT_IDS
 from modules.agents.rpc import RedisAgentGateway
 from modules.agents.runtime import AgentRuntimeRouter
+from modules.connections.models import validated_endpoint
+from modules.credentials.vault import EnvelopeCipher
 from modules.identity.authorization import Actor, Role
 from packages.shared.config import get_settings
+from packages.shared.runtime_health import CODEX_APP_SERVER_HEARTBEAT_KEY
 from packages.shared.store import ResourceStore
 
 router = APIRouter(prefix="/agents", tags=["Agents"])
@@ -30,7 +37,41 @@ runtime_router = AgentRuntimeRouter.from_settings()
 
 
 class AgentTestInput(BaseModel):
-    input: dict[str, Any] = {}
+    input: dict[str, Any] = Field(default_factory=dict)
+
+
+class RuntimeSettingsInput(BaseModel):
+    codex_enabled: bool = True
+    litellm_enabled: bool = False
+    litellm_url: str = Field(default="http://localhost:4000", min_length=1)
+    litellm_api_key: str | None = None
+    default_codex_model: str = Field(default="gpt-5.6-terra", min_length=1)
+
+
+def _runtime_cipher() -> EnvelopeCipher:
+    return EnvelopeCipher(get_settings().secret_key.get_secret_value().encode())
+
+
+async def _saved_runtime_settings(store: ResourceStore, owner_id: UUID) -> dict[str, Any]:
+    settings = get_settings()
+    record = next(iter(await store.list("agent_runtime_settings", owner_id)), None)
+    if record is None:
+        return {
+            "codex_enabled": settings.codex_enabled,
+            "litellm_enabled": settings.litellm_enabled,
+            "litellm_url": settings.litellm_url,
+            "default_codex_model": settings.default_codex_model,
+            "litellm_api_key_configured": bool(settings.litellm_api_key),
+            "updated_at": None,
+        }
+    return {
+        "codex_enabled": record.data.get("codex_enabled", settings.codex_enabled),
+        "litellm_enabled": record.data.get("litellm_enabled", settings.litellm_enabled),
+        "litellm_url": record.data.get("litellm_url", settings.litellm_url),
+        "default_codex_model": record.data.get("default_codex_model", settings.default_codex_model),
+        "litellm_api_key_configured": bool(record.data.get("litellm_api_key_envelope")),
+        "updated_at": record.updated_at,
+    }
 
 
 def _default_profile() -> ModelProfile:
@@ -55,8 +96,7 @@ async def _profiles(store: ResourceStore, owner_id: UUID) -> dict[UUID, ModelPro
 
 async def _agents(store: ResourceStore, owner_id: UUID) -> dict[str, AgentDefinition]:
     result = {
-        logical_id: AgentDefinition(logical_id=logical_id)
-        for logical_id in REQUIRED_AGENT_IDS
+        logical_id: AgentDefinition(logical_id=logical_id) for logical_id in REQUIRED_AGENT_IDS
     }
     for item in await store.list("agent_configuration", owner_id):
         agent = AgentDefinition.model_validate(item.data)
@@ -74,22 +114,149 @@ async def list_agents(
 
 
 @router.get("/runtimes")
-async def runtimes(_: Annotated[Actor, Depends(current_actor)]):
-    settings = get_settings()
+async def runtimes(
+    actor: Annotated[Actor, Depends(current_actor)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    saved = await _saved_runtime_settings(ResourceStore(db), actor.owner_id)
     return [
         {
             "type": RuntimeType.CODEX_APP_SERVER,
             "default": True,
-            "enabled": settings.codex_enabled,
+            "enabled": saved["codex_enabled"],
             "transport": "stdio-jsonl",
         },
         {
             "type": RuntimeType.LITELLM_GATEWAY,
             "default": False,
-            "enabled": settings.litellm_enabled,
+            "enabled": saved["litellm_enabled"],
             "explicit_opt_in": True,
+            "url": saved["litellm_url"],
+            "api_key_configured": saved["litellm_api_key_configured"],
         },
     ]
+
+
+@router.get("/runtime-settings")
+async def runtime_settings(
+    actor: Annotated[Actor, Depends(current_actor)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    return {
+        **(await _saved_runtime_settings(ResourceStore(db), actor.owner_id)),
+        "restart_required": True,
+    }
+
+
+@router.put("/runtime-settings")
+async def save_runtime_settings(
+    payload: RuntimeSettingsInput,
+    actor: Annotated[Actor, Depends(require_roles(Role.OWNER, Role.OPERATOR))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    try:
+        url = validated_endpoint(payload.litellm_url, allow_loopback_http=True)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+    store = ResourceStore(db)
+    existing = next(iter(await store.list("agent_runtime_settings", actor.owner_id)), None)
+    data: dict[str, Any] = {
+        "codex_enabled": payload.codex_enabled,
+        "litellm_enabled": payload.litellm_enabled,
+        "litellm_url": url,
+        "default_codex_model": payload.default_codex_model,
+    }
+    if payload.litellm_api_key:
+        data["litellm_api_key_envelope"] = (
+            _runtime_cipher().encrypt(actor.owner_id, payload.litellm_api_key).as_dict()
+        )
+        data["litellm_api_key_suffix"] = payload.litellm_api_key[-4:]
+    elif existing is not None and existing.data.get("litellm_api_key_envelope"):
+        data["litellm_api_key_envelope"] = existing.data["litellm_api_key_envelope"]
+        data["litellm_api_key_suffix"] = existing.data.get("litellm_api_key_suffix")
+    if existing is None:
+        item = await store.create(
+            "agent_runtime_settings",
+            actor.owner_id,
+            data,
+            actor_id=actor.actor_id,
+            event_type="agent_runtime_settings.changed",
+        )
+    else:
+        item = await store.update(
+            existing, data, actor_id=actor.actor_id, event_type="agent_runtime_settings.changed"
+        )
+    return {
+        **(await _saved_runtime_settings(store, actor.owner_id)),
+        "restart_required": True,
+        "saved_at": item.updated_at,
+    }
+
+
+@router.post("/runtime-settings/test")
+async def test_runtime_settings(
+    actor: Annotated[Actor, Depends(require_roles(Role.OWNER, Role.OPERATOR))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    config = await _saved_runtime_settings(ResourceStore(db), actor.owner_id)
+    if not config["litellm_enabled"]:
+        return {"status": "DISABLED", "message": "LiteLLM gateway is disabled"}
+    url = str(config["litellm_url"]).rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            response = await client.get(f"{url}/health")
+        response.raise_for_status()
+    except (httpx.HTTPError, ValueError) as exc:
+        return {"status": "OFFLINE", "message": f"LiteLLM gateway unavailable: {exc}"}
+    return {
+        "status": "HEALTHY",
+        "message": "LiteLLM gateway responded",
+        "checked_at": datetime.now(UTC),
+    }
+
+
+@router.get("/status")
+async def agent_status(
+    actor: Annotated[Actor, Depends(current_actor)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    store = ResourceStore(db)
+    agents = await _agents(store, actor.owner_id)
+    executions = await store.list("agent_execution", actor.owner_id)
+    latest: dict[str, Any] = {}
+    for record in executions:
+        logical_id = str(record.data.get("logical_id"))
+        if logical_id not in latest:
+            latest[logical_id] = record
+    heartbeat = False
+    redis = Redis.from_url(get_settings().redis_url)
+    try:
+        heartbeat = bool(await redis.get(CODEX_APP_SERVER_HEARTBEAT_KEY))
+    except (RedisError, OSError):
+        heartbeat = False
+    finally:
+        await redis.aclose()
+    rows = []
+    for logical_id in REQUIRED_AGENT_IDS:
+        configured = agents[logical_id]
+        execution = latest.get(logical_id)
+        data = execution.data if execution else {}
+        rows.append(
+            {
+                "logical_id": logical_id,
+                "configured_runtime": configured.runtime,
+                "actual_runtime": data.get("actual_runtime"),
+                "last_status": data.get("status"),
+                "last_error": data.get("error"),
+                "last_tested_at": execution.updated_at if execution else None,
+                "evidence": "agent_execution" if execution else "not_tested",
+            }
+        )
+    return {
+        "codex_worker_heartbeat": heartbeat,
+        "runtime_settings": await _saved_runtime_settings(store, actor.owner_id),
+        "agents": rows,
+    }
 
 
 @router.get("/profiles")

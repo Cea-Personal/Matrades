@@ -35,17 +35,22 @@ class AgentRuntimeRouter:
         self.running = False
 
     @classmethod
-    def from_settings(cls) -> AgentRuntimeRouter:
+    def from_settings(cls, overrides: dict[str, Any] | None = None) -> AgentRuntimeRouter:
         settings = get_settings()
+        overrides = overrides or {}
+        codex_enabled = bool(overrides.get("codex_enabled", settings.codex_enabled))
+        litellm_enabled = bool(overrides.get("litellm_enabled", settings.litellm_enabled))
+        litellm_url = str(overrides.get("litellm_url", settings.litellm_url))
+        litellm_api_key = overrides.get("litellm_api_key", settings.litellm_api_key)
         clients: dict[RuntimeType, RuntimeClient] = {}
-        if settings.codex_enabled:
+        if codex_enabled:
             clients[RuntimeType.CODEX_APP_SERVER] = CodexAppServerClient(
                 settings.codex_binary, Path.cwd()
             )
-        if settings.litellm_enabled and settings.litellm_api_key:
-            clients[RuntimeType.LITELLM_GATEWAY] = LiteLLMClient(
-                settings.litellm_url, settings.litellm_api_key.get_secret_value()
-            )
+        if litellm_enabled and litellm_api_key:
+            if hasattr(litellm_api_key, "get_secret_value"):
+                litellm_api_key = litellm_api_key.get_secret_value()
+            clients[RuntimeType.LITELLM_GATEWAY] = LiteLLMClient(litellm_url, str(litellm_api_key))
         return cls(clients)
 
     async def start(self) -> None:

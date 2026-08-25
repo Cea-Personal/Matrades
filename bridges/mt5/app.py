@@ -9,6 +9,8 @@ from uuid import UUID, uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 
+from packages.broker_sdk.schemas import BrokerSnapshot
+
 
 def verify(
     body: bytes,
@@ -33,6 +35,9 @@ def create_app(reader: object | None = None, secret: bytes | None = None) -> Fas
     ).encode()
     seen_nonces: dict[str, float] = {}
     sequences: dict[UUID, int] = {}
+    latest_snapshots: dict[UUID, dict] = {}
+    latest_received: dict[UUID, float] = {}
+    latest_history: dict[UUID, list] = {}
 
     async def authenticate(
         request: Request,
@@ -51,36 +56,93 @@ def create_app(reader: object | None = None, secret: bytes | None = None) -> Fas
 
     @app.get("/health")
     async def health(_: None = Depends(authenticate)) -> dict:
+        now = time.time()
+        fresh = bool(reader) or any(
+            now - observed <= 15 for observed in latest_received.values()
+        )
         return {
-            "status": "healthy",
-            "fresh": True,
+            "status": "healthy" if fresh else "waiting_for_ea",
+            "fresh": fresh,
             "bridge_version": "1.0.0",
             "observed_at": datetime.now(UTC).isoformat(),
             "capabilities": ["accounts.read", "positions.read", "history.read"],
             "writes": False,
         }
 
+    @app.post("/ingest")
+    async def ingest(request: Request, _: None = Depends(authenticate)) -> dict:
+        """Accept a signed, read-only snapshot published by the MT5 EA."""
+        try:
+            payload = BrokerSnapshot.model_validate(await request.json())
+        except Exception as exc:  # noqa: BLE001 - malformed EA payload is a client error
+            raise HTTPException(422, "invalid broker snapshot") from exc
+        previous = latest_snapshots.get(payload.account_id)
+        if previous is not None and payload.sequence <= int(previous["sequence"]):
+            raise HTTPException(409, "out-of-order or replayed broker snapshot")
+        latest_snapshots[payload.account_id] = payload.model_dump(mode="json")
+        latest_received[payload.account_id] = time.time()
+        latest_history[payload.account_id] = []
+        return {
+            "accepted": True,
+            "account_id": str(payload.account_id),
+            "sequence": payload.sequence,
+        }
+
     @app.get("/positions")
-    async def positions(_: None = Depends(authenticate)) -> list:
-        return list(reader.positions()) if reader else []
+    async def positions(
+        account_id: UUID | None = None, _: None = Depends(authenticate)
+    ) -> list:
+        if reader:
+            return list(reader.positions())
+        if account_id and account_id in latest_snapshots:
+            return list(latest_snapshots[account_id]["positions"])
+        return [
+            position
+            for snapshot in latest_snapshots.values()
+            for position in snapshot["positions"]
+        ]
 
     @app.get("/account")
-    async def account(_: None = Depends(authenticate)) -> dict:
-        return dict(reader.account()) if reader else {}
+    async def account(
+        account_id: UUID | None = None, _: None = Depends(authenticate)
+    ) -> dict:
+        if reader:
+            return dict(reader.account())
+        if account_id and account_id in latest_snapshots:
+            snapshot = latest_snapshots[account_id]
+            return {
+                "balance": snapshot["balance"],
+                "equity": snapshot["equity"],
+                "realized_daily_pnl": snapshot["realized_daily_pnl"],
+            }
+        return {}
 
     @app.get("/history")
-    async def history(_: None = Depends(authenticate)) -> list:
-        return list(reader.history()) if reader else []
+    async def history(
+        account_id: UUID | None = None, _: None = Depends(authenticate)
+    ) -> list:
+        if reader:
+            return list(reader.history())
+        return list(latest_history.get(account_id, [])) if account_id else []
 
     @app.get("/snapshot")
     async def snapshot(account_id: UUID, _: None = Depends(authenticate)) -> dict:
-        account = dict(reader.account()) if reader else {}
-        positions_value = list(reader.positions()) if reader else []
-        sequences[account_id] = sequences.get(account_id, 0) + 1
+        if reader:
+            account = dict(reader.account())
+            positions_value = list(reader.positions())
+            sequences[account_id] = sequences.get(account_id, 0) + 1
+            sequence = sequences[account_id]
+        elif account_id in latest_snapshots:
+            return latest_snapshots[account_id]
+        else:
+            account = {}
+            positions_value = []
+            sequences[account_id] = sequences.get(account_id, 0) + 1
+            sequence = sequences[account_id]
         return {
             "message_id": str(uuid4()),
             "account_id": str(account_id),
-            "sequence": sequences[account_id],
+            "sequence": sequence,
             "observed_at": datetime.now(UTC).isoformat(),
             "balance": account.get("balance", 0),
             "equity": account.get("equity", 0),

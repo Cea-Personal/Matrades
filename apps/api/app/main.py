@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -11,6 +12,8 @@ from apps.api.app.errors import install_error_handlers
 from apps.api.app.routes import api_router
 from packages.shared.database import engine
 from packages.shared.persistence import Base
+
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 def database_lifespan(database_engine: AsyncEngine):

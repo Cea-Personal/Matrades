@@ -69,7 +69,10 @@ class CodexAppServerClient:
                     "model": model,
                     "cwd": str(self.cwd),
                     "approvalPolicy": "never",
-                    "sandbox": "readOnly",
+                    # Codex App Server uses kebab-case sandbox policy values.
+                    # Keep this read-only: research agents must not write files
+                    # or perform broker/execution actions.
+                    "sandbox": "read-only",
                     "serviceName": "matrades",
                     "ephemeral": True,
                 },
@@ -88,6 +91,8 @@ class CodexAppServerClient:
                 "input": [{"type": "text", "text": prompt}],
                 "cwd": str(self.cwd),
                 "approvalPolicy": "never",
+                # `turn/start` uses the app-server policy enum spelling, which
+                # differs from the `thread/start` sandbox string above.
                 "sandboxPolicy": {"type": "readOnly", "access": {"type": "fullAccess"}},
                 "model": model,
             }

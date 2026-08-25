@@ -69,3 +69,32 @@ class ResearchCycleArchive:
             manifest_path.write_text(encoded)
         return ResearchArtifactReference(relative.as_posix(), checksum)
 
+    def read_manifest(self, *, owner_id: UUID, relative_path: str) -> dict[str, Any]:
+        """Read one owner-scoped immutable manifest without permitting traversal."""
+        candidate = (self.root / relative_path).resolve()
+        owner_root = (self.root / str(owner_id)).resolve()
+        if owner_root not in candidate.parents or candidate.name != "manifest.json":
+            raise ValueError("unsafe research artifact path")
+        try:
+            payload = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise FileNotFoundError("research artifact manifest unavailable") from exc
+        if payload.get("owner_id") != str(owner_id):
+            raise ValueError("research artifact owner mismatch")
+        return payload
+
+    def list_manifests(self, *, owner_id: UUID) -> list[dict[str, Any]]:
+        """List readable manifests for an owner, newest first."""
+        owner_root = (self.root / str(owner_id)).resolve()
+        if self.root not in owner_root.parents:
+            raise ValueError("unsafe research artifact owner path")
+        if not owner_root.exists():
+            return []
+        manifests: list[dict[str, Any]] = []
+        for path in sorted(owner_root.glob("**/manifest.json"), reverse=True):
+            try:
+                relative = path.relative_to(self.root).as_posix()
+                manifests.append(self.read_manifest(owner_id=owner_id, relative_path=relative))
+            except (FileNotFoundError, OSError, ValueError, json.JSONDecodeError):
+                continue
+        return manifests

@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from adapters.news.forex_factory import DEFAULT_FOREX_FACTORY_FEED, fetch_forex_factory_events
+from adapters.news.forex_factory import DEFAULT_FOREX_FACTORY_FEED
 from apps.api.app.dependencies import current_actor, get_db, require_roles, require_step_up
 from modules.connections.models import (
     PROVIDER_LABELS,
@@ -21,6 +21,8 @@ from modules.connections.resolution import resolve_connection
 from modules.connections.testing import probe_connection, twelve_data_check_due
 from modules.credentials.vault import EnvelopeCipher
 from modules.identity.authorization import Actor, Role
+from modules.research.forex_factory_archive import ForexFactoryArchive
+from modules.research.forex_factory_service import scrape_and_archive_forex_factory
 from modules.research.scheduling import (
     default_schedule,
     next_run_at,
@@ -124,6 +126,14 @@ def _default_research_schedule() -> dict[str, Any]:
     )
 
 
+def _default_forex_factory_schedule() -> dict[str, Any]:
+    settings = get_settings()
+    return default_schedule(
+        enabled=settings.forex_factory_schedule_enabled,
+        run_at=f"{settings.forex_factory_schedule_hour_utc:02d}:{settings.forex_factory_schedule_minute_utc:02d}",
+    )
+
+
 async def _sync_credential_status(
     store: ResourceStore,
     connection: Any,
@@ -169,6 +179,7 @@ async def create_account(
         {
             **payload.model_dump(mode="json"),
             "research_schedule": _default_research_schedule(),
+            "forex_factory_schedule": _default_forex_factory_schedule(),
         },
         actor_id=actor.actor_id,
         event_type="account.created",
@@ -193,6 +204,9 @@ async def update_account(
             **payload.model_dump(mode="json"),
             "research_schedule": record.data.get(
                 "research_schedule", _default_research_schedule()
+            ),
+            "forex_factory_schedule": record.data.get(
+                "forex_factory_schedule", _default_forex_factory_schedule()
             ),
         },
         actor_id=actor.actor_id,
@@ -237,6 +251,52 @@ async def update_account_research_schedule(
         {**record.data, "research_schedule": schedule},
         actor_id=actor.actor_id,
         event_type="account.research_schedule_updated",
+    )
+    upcoming = next_run_at(schedule)
+    return {
+        "account_id": str(updated.id),
+        **schedule,
+        "next_run_at": upcoming.isoformat() if upcoming else None,
+    }
+
+
+@router.get("/accounts/{account_id}/forex-factory-schedule")
+async def get_account_forex_factory_schedule(
+    account_id: UUID,
+    actor: Annotated[Actor, Depends(current_actor)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    record = await ResourceStore(db).get("account", account_id, actor.owner_id)
+    if record is None or record.state == "DELETED":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "account not found")
+    schedule = normalize_schedule(
+        record.data.get("forex_factory_schedule"), fallback=_default_forex_factory_schedule()
+    )
+    upcoming = next_run_at(schedule)
+    return {
+        "account_id": str(record.id),
+        **schedule,
+        "next_run_at": upcoming.isoformat() if upcoming else None,
+    }
+
+
+@router.put("/accounts/{account_id}/forex-factory-schedule")
+async def update_account_forex_factory_schedule(
+    account_id: UUID,
+    payload: ResearchScheduleInput,
+    actor: Annotated[Actor, Depends(require_roles(Role.OWNER, Role.OPERATOR))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    store = ResourceStore(db)
+    record = await store.get("account", account_id, actor.owner_id)
+    if record is None or record.state == "DELETED":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "account not found")
+    schedule = payload.model_dump(mode="json")
+    updated = await store.update(
+        record,
+        {**record.data, "forex_factory_schedule": schedule},
+        actor_id=actor.actor_id,
+        event_type="account.forex_factory_schedule_updated",
     )
     upcoming = next_run_at(schedule)
     return {
@@ -433,6 +493,7 @@ async def connection_providers(_: Annotated[Actor, Depends(current_actor)]):
             in {
                 ConnectionProvider.TWELVE_DATA,
                 ConnectionProvider.FRED,
+                ConnectionProvider.SERPAPI,
                 ConnectionProvider.MT5_BRIDGE,
             },
         }
@@ -509,6 +570,27 @@ async def update_connection(
     return updated.public()
 
 
+@router.delete("/connections/{connection_id}")
+async def delete_connection(
+    connection_id: UUID,
+    actor: Annotated[Actor, Depends(require_step_up("connection.change"))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Remove a configured source without erasing its audit history."""
+    store = ResourceStore(db)
+    item = await store.get("connection", connection_id, actor.owner_id)
+    if item is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "connection not found")
+    updated = await store.update(
+        item,
+        {**item.data, "active": False, "deleted_at": datetime.now(UTC).isoformat()},
+        state="DELETED",
+        actor_id=actor.actor_id,
+        event_type="connection.deleted",
+    )
+    return updated.public()
+
+
 @router.post("/connections/{connection_id}/test")
 async def test_connection(
     connection_id: UUID,
@@ -580,8 +662,13 @@ async def scrape_forex_factory(
         connection.data.get("configuration", {}).get("feed_url", DEFAULT_FOREX_FACTORY_FEED)
     )
     try:
-        events = await fetch_forex_factory_events(feed_url)
-    except (httpx.HTTPError, RuntimeError, ValueError) as exc:
+        archive = ForexFactoryArchive(get_settings().research_artifact_root)
+        reference = await scrape_and_archive_forex_factory(
+            owner_id=actor.owner_id,
+            feed_url=feed_url,
+            archive=archive,
+        )
+    except (OSError, httpx.HTTPError, RuntimeError, ValueError) as exc:
         checked_at = datetime.now(UTC).isoformat()
         await store.update(
             connection,
@@ -599,29 +686,71 @@ async def scrape_forex_factory(
             f"Forex Factory scraper failed: {type(exc).__name__}",
         ) from exc
     fetched_at = datetime.now(UTC).isoformat()
+    health = "HEALTHY" if reference.event_count else "STALE"
     await store.update(
         connection,
         {
             **connection.data,
-            "health": "HEALTHY" if events else "STALE",
-            "last_checked": fetched_at,
-            "last_success": fetched_at if events else connection.data.get("last_success"),
+            "health": health,
+            "last_checked": (
+                fetched_at if not reference.skipped else connection.data.get("last_checked")
+            ),
+            "last_success": (
+                fetched_at if reference.event_count else connection.data.get("last_success")
+            ),
             "capabilities": ["news.read", "calendar.read", "forex_factory.scrape"],
-            "fresh": bool(events),
+            "fresh": bool(reference.event_count),
             "last_error": None,
         },
         actor_id=actor.actor_id,
-        event_type="connection.forex_factory_scraped",
+        event_type=(
+            "connection.forex_factory_scrape_skipped"
+            if reference.skipped
+            else "connection.forex_factory_scraped"
+        ),
     )
     return {
         "connection_id": str(connection.id),
         "provider": ConnectionProvider.FOREX_FACTORY.value,
         "feed_url": feed_url,
         "fetched_at": fetched_at,
-        "count": len(events),
-        "health": "HEALTHY" if events else "STALE",
-        "events": [event.model_dump(mode="json") for event in events],
+        "count": reference.event_count,
+        "health": health,
+        "events": reference.events,
+        "period_key": reference.period_key,
+        "period_start": reference.period_start.isoformat(),
+        "period_end": reference.period_end.isoformat(),
+        "archive_path": reference.relative_path,
+        "skipped": reference.skipped,
+        "message": reference.message,
     }
+
+
+@router.get("/connections/{connection_id}/forex-factory/archive")
+async def list_forex_factory_archive(
+    connection_id: UUID,
+    actor: Annotated[Actor, Depends(current_actor)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    connection = await ResourceStore(db).get("connection", connection_id, actor.owner_id)
+    if connection is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "connection not found")
+    if connection.data.get("provider") != ConnectionProvider.FOREX_FACTORY.value:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "connection is not a Forex Factory scraper",
+        )
+    archive = ForexFactoryArchive(get_settings().research_artifact_root)
+    return [
+        {
+            "period_key": item.period_key,
+            "period_start": item.period_start.isoformat(),
+            "period_end": item.period_end.isoformat(),
+            "archive_path": item.relative_path,
+            "count": item.event_count,
+        }
+        for item in archive.list_periods(actor.owner_id)
+    ]
 
 
 async def _list_rules(kind: str, actor: Actor, db: AsyncSession):

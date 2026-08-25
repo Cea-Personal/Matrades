@@ -18,6 +18,7 @@ def test_visible_connection_catalog_covers_data_sources_and_mt5() -> None:
         ConnectionProvider.CALENDAR,
         ConnectionProvider.NEWS,
         ConnectionProvider.FOREX_FACTORY,
+        ConnectionProvider.SERPAPI,
         ConnectionProvider.MT5_BRIDGE,
     }
 
@@ -51,19 +52,22 @@ async def test_mt5_probe_uses_real_health_response_and_reports_capabilities() ->
     assert "positions.read" in result.capabilities
 
 
-async def test_twelve_data_probe_accepts_quote_response_and_reports_provider_errors() -> None:
+async def test_twelve_data_probe_validates_key_without_requesting_a_symbol() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.params["apikey"] == "right-key"
+        assert request.url.path == "/api_usage"
+        assert "symbol" not in request.url.params
+        assert "apikey" not in request.url.params
+        assert request.headers["Authorization"] == "apikey right-key"
         return httpx.Response(
             200,
-            json={"status": "ok", "symbol": "EUR/USD", "close": "1.0900"},
+            json={"status": "ok", "plan": "basic", "credits_left": 100},
         )
 
     profile = ConnectionProfile(
         name="Twelve Data",
         provider=ConnectionProvider.TWELVE_DATA,
         credential_id=uuid4(),
-        configuration={"test_symbol": "EUR/USD"},
+        configuration={"forex_universe": "EUR/USD,GBP/USD"},
     )
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         result = await probe_connection(profile, "right-key", client=client)

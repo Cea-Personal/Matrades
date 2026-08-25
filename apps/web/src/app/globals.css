@@ -10,9 +10,14 @@ button { cursor: pointer; }
 .nav { display: grid; gap: .45rem; margin-top: 2rem; }
 .nav a { color: var(--muted); padding: .6rem .75rem; border-radius: .5rem; }
 .nav a:hover, .nav a:focus-visible { color: white; background: #172337; }
+.nav-folder { border-top: 1px solid var(--line); display: grid; gap: .2rem; margin-top: .35rem; padding-top: .55rem; }
+.nav-folder-title { color: var(--accent) !important; font-weight: 700; }
+.nav-folder-link { font-size: .84rem; padding-left: 1.25rem !important; }
 .main { padding: 2rem clamp(1rem, 4vw, 4rem); }
 .grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
 .card { background: color-mix(in srgb, var(--panel) 94%, transparent); border: 1px solid var(--line); border-radius: .8rem; padding: 1rem; }
+.modal-backdrop { align-items: center; background: #0009; display: flex; inset: 0; justify-content: center; padding: 1rem; position: fixed; z-index: 30; }
+.modal { box-shadow: 0 1rem 4rem #000b; max-width: 30rem; width: min(100%, 30rem); }
 .muted { color: var(--muted); }
 .value { font-size: 1.65rem; font-weight: 700; }
 .good { color: var(--accent); } .warn { color: #ffc266; } .bad { color: #ff7a87; }
@@ -62,5 +67,16 @@ fieldset { border: 1px solid var(--line); border-radius: .6rem; padding: .8rem; 
 .text-button { background: transparent; border: 0; color: var(--accent); padding: .4rem 0; }
 .session-menu { border-top: 1px solid var(--line); display: grid; gap: .45rem; margin-top: 2rem; overflow-wrap: anywhere; padding-top: 1rem; }
 pre { background: #08101a; border-radius: .5rem; max-width: 100%; overflow: auto; padding: .75rem; white-space: pre-wrap; }
+.extras-layout { align-items: start; display: grid; gap: 1rem; grid-template-columns: minmax(12rem, 16rem) minmax(0, 1fr); }
+.extras-folders { display: grid; gap: .4rem; position: sticky; top: 1rem; }
+.folder-button { align-items: center; background: transparent; border: 1px solid transparent; border-radius: .5rem; color: var(--muted); display: flex; justify-content: space-between; padding: .65rem .7rem; text-align: left; }
+.folder-button:hover, .folder-button.selected { background: #172337; border-color: var(--line); color: white; }
+.folder-button.selected { color: var(--accent); }
+.folder-button small { border: 1px solid var(--line); border-radius: 999px; padding: .1rem .4rem; }
+.extras-items { display: grid; gap: 1rem; }
+.extras-item { min-width: 0; }
+.extras-item details { margin-top: .8rem; }
+.extras-item summary { color: var(--accent); cursor: pointer; }
+@media (max-width: 760px) { .extras-layout { grid-template-columns: 1fr; } .extras-folders { position: static; } }
 @media (max-width: 760px) { .shell { grid-template-columns: 1fr; } .sidebar { border-right: 0; border-bottom: 1px solid var(--line); } .nav { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 760px) { .form-grid, .form-grid.wide { grid-template-columns: 1fr; } .record-list li { grid-template-columns: 1fr; } .main { padding: 1.25rem 1rem; } }
