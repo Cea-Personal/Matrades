@@ -7,6 +7,7 @@ REQUIRED_AGENT_IDS = (
     "forex_research",
     "metals_research",
     "crypto_research",
+    "stocks_research",
     "technical_analyst",
     "fundamental_analyst",
     "sentiment_analyst",
@@ -46,7 +47,7 @@ class AgentRegistry:
 
 def seed() -> AgentRegistry:
     registry = AgentRegistry()
-    assert len(registry.all()) == 15
+    assert len(registry.all()) == 16
     assert all(agent.runtime == RuntimeType.CODEX_APP_SERVER for agent in registry.all())
     return registry
 

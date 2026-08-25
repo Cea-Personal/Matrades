@@ -52,11 +52,15 @@ class EnvelopeCipher:
             urlsafe_b64decode(envelope["wrapped_key"]),
             aad,
         )
-        return AESGCM(data_key).decrypt(
-            urlsafe_b64decode(envelope["nonce"]),
-            urlsafe_b64decode(envelope["ciphertext"]),
-            aad,
-        ).decode()
+        return (
+            AESGCM(data_key)
+            .decrypt(
+                urlsafe_b64decode(envelope["nonce"]),
+                urlsafe_b64decode(envelope["ciphertext"]),
+                aad,
+            )
+            .decode()
+        )
 
 
 class CredentialVault:

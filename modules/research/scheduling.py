@@ -9,9 +9,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 DEFAULT_WEEKDAYS = [0, 1, 2, 3, 4, 5, 6]
 
 
-def default_schedule(
-    *, enabled: bool, run_at: str, timezone: str = "UTC"
-) -> dict[str, Any]:
+def default_schedule(*, enabled: bool, run_at: str, timezone: str = "UTC") -> dict[str, Any]:
     return {
         "enabled": enabled,
         "run_at": run_at,
@@ -35,9 +33,7 @@ def _parse_run_at(value: str) -> tuple[int, int]:
     return parsed.hour, parsed.minute
 
 
-def normalize_schedule(
-    value: dict[str, Any] | None, *, fallback: dict[str, Any]
-) -> dict[str, Any]:
+def normalize_schedule(value: dict[str, Any] | None, *, fallback: dict[str, Any]) -> dict[str, Any]:
     source = {**fallback, **(value or {})}
     enabled = bool(source.get("enabled", fallback["enabled"]))
     run_at = str(source.get("run_at", fallback["run_at"]))
@@ -64,15 +60,13 @@ def is_due(schedule: dict[str, Any], *, now: datetime | None = None) -> bool:
     observed_at = (now or datetime.now(UTC)).astimezone(UTC)
     local_now = observed_at.astimezone(schedule_timezone(str(schedule["timezone"])))
     hour, minute = _parse_run_at(str(schedule["run_at"]))
-    return (
-        local_now.weekday() in schedule["weekdays"]
-        and (local_now.hour, local_now.minute) >= (hour, minute)
+    return local_now.weekday() in schedule["weekdays"] and (local_now.hour, local_now.minute) >= (
+        hour,
+        minute,
     )
 
 
-def next_run_at(
-    schedule: dict[str, Any], *, now: datetime | None = None
-) -> datetime | None:
+def next_run_at(schedule: dict[str, Any], *, now: datetime | None = None) -> datetime | None:
     if not schedule.get("enabled", False):
         return None
     observed_at = (now or datetime.now(UTC)).astimezone(UTC)

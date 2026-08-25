@@ -17,6 +17,7 @@ from modules.agents.models import (
 )
 from modules.agents.permissions import PermissionSet
 from modules.agents.prompts import ResolvedPrompts
+from modules.agents.runtime_context import validate_typed_context
 from packages.shared.config import get_settings
 
 
@@ -79,6 +80,7 @@ class AgentRuntimeRouter:
         payload: dict[str, Any],
         deadline_seconds: float = 30,
     ) -> tuple[AgentExecution, dict[str, Any] | None]:
+        validate_typed_context(agent, payload)
         profile: ModelProfile = profiles[agent.profile_id]
         if profile.runtime != agent.runtime:
             raise ValueError("runtime/profile mismatch")

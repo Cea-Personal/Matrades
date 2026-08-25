@@ -6,7 +6,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
-from packages.shared.domain_types import AwareDateTime, utc_now
+from packages.shared.domain_types import AwareDateTime, ResearchLaneKey, utc_now
 
 
 class RuntimeType(StrEnum):
@@ -41,6 +41,9 @@ class AgentDefinition(BaseModel):
     system_prompt_override: str | None = None
     user_prompt_override: str | None = None
     permission_set_version: str = "v1"
+    required_lanes: tuple[ResearchLaneKey, ...] = ()
+    structured_output_required: bool = True
+    capability_declarations: tuple[str, ...] = ()
 
 
 class AgentExecution(BaseModel):

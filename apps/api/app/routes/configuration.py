@@ -202,9 +202,7 @@ async def update_account(
         record,
         {
             **payload.model_dump(mode="json"),
-            "research_schedule": record.data.get(
-                "research_schedule", _default_research_schedule()
-            ),
+            "research_schedule": record.data.get("research_schedule", _default_research_schedule()),
             "forex_factory_schedule": record.data.get(
                 "forex_factory_schedule", _default_forex_factory_schedule()
             ),
@@ -422,9 +420,10 @@ async def test_credential(
     if linked:
         outcomes: list[str] = []
         for connection in linked:
-            twelve_data_cached = (
-                connection.data.get("provider") == ConnectionProvider.TWELVE_DATA.value
-                and not twelve_data_check_due(connection.data.get("last_checked"))
+            twelve_data_cached = connection.data.get(
+                "provider"
+            ) == ConnectionProvider.TWELVE_DATA.value and not twelve_data_check_due(
+                connection.data.get("last_checked")
             )
             if twelve_data_cached:
                 outcomes.append(str(connection.data.get("health", "STALE")))
@@ -601,9 +600,10 @@ async def test_connection(
     item = await store.get("connection", connection_id, actor.owner_id)
     if item is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "connection not found")
-    twelve_data_cached = (
-        item.data.get("provider") == ConnectionProvider.TWELVE_DATA.value
-        and not twelve_data_check_due(item.data.get("last_checked"))
+    twelve_data_cached = item.data.get(
+        "provider"
+    ) == ConnectionProvider.TWELVE_DATA.value and not twelve_data_check_due(
+        item.data.get("last_checked")
     )
     if twelve_data_cached:
         checked_at = datetime.fromisoformat(str(item.data["last_checked"]).replace("Z", "+00:00"))
@@ -623,9 +623,7 @@ async def test_connection(
         **item.data,
         "health": result.status,
         "last_success": (
-            result.checked_at
-            if result.status == "HEALTHY"
-            else item.data.get("last_success")
+            result.checked_at if result.status == "HEALTHY" else item.data.get("last_success")
         ),
         "last_checked": result.checked_at,
         "latency_ms": result.latency_ms,

@@ -36,6 +36,11 @@ class AccountSnapshot(BaseModel):
     observed_at: AwareDateTime = Field(default_factory=utc_now)
     source: str
     source_version: str
+    cash_balances: dict[str, Decimal] = Field(default_factory=dict)
+    owned_asset_balances: dict[str, Decimal] = Field(default_factory=dict)
+    broker_sequence: int | None = None
+    drawdown_basis: str = "EQUITY"
+    freshness: str = "VALID"
 
     @model_validator(mode="after")
     def consistent_equity(self) -> AccountSnapshot:

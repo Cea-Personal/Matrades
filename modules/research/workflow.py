@@ -6,13 +6,20 @@ from datetime import UTC, datetime
 from typing import Any
 
 from modules.research.features import fingerprint
+from modules.research.matrix import aggregate_status
 from modules.research.models import (
     AgentReview,
     MarketCategory,
     ResearchCandidate,
     ResearchCycleResult,
+    ResearchLaneResult,
+    TypedMarketFingerprint,
+    TypedResearchCandidate,
+    TypedResearchRun,
+    TypedResearchSnapshot,
 )
 from modules.research.ports import ResearchAgentGateway, ResearchDataProvider
+from packages.shared.domain_types import AssetClass, LaneStatus
 
 ANALYST_ROLES = (
     "technical_analyst",
@@ -24,6 +31,12 @@ CATEGORY_ROLES = {
     MarketCategory.FOREX: "forex_research",
     MarketCategory.METAL: "metals_research",
     MarketCategory.CRYPTO: "crypto_research",
+}
+ASSET_CLASS_ROLES = {
+    AssetClass.FOREX: "forex_research",
+    AssetClass.METALS: "metals_research",
+    AssetClass.CRYPTOCURRENCY: "crypto_research",
+    AssetClass.STOCKS: "stocks_research",
 }
 AGENT_OUTPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -157,9 +170,7 @@ class AutonomousResearchWorkflow:
                         min(100.0, candidate.score + adjustments.get(candidate.instrument, 0.0)),
                     )
                     candidate.agent_evidence.extend(analyst_evidence)
-                    candidate.agent_evidence.extend(
-                        evidence
-                    )
+                    candidate.agent_evidence.extend(evidence)
             except Exception as exc:
                 missing.append(category)
                 degraded.append(f"{role}: unavailable ({type(exc).__name__})")
@@ -208,3 +219,115 @@ class AutonomousResearchWorkflow:
             agent_reviews=reviews,
             completed_at=datetime.now(UTC),
         )
+
+    async def run_matrix(self, run: TypedResearchRun) -> TypedResearchRun:
+        """Run each lane independently and always persist one terminal result per lane.
+
+        Providers may implement ``gather_lane``; a missing method is an explicit unconfigured
+        outcome rather than an implicit fallback to another instrument type.
+        """
+        results: list[ResearchLaneResult] = []
+        for lane in run.requested_lanes:
+            try:
+                gather_lane = self.provider.gather_lane
+                snapshots = await gather_lane(lane)
+            except AttributeError:
+                snapshots = []
+                status = LaneStatus.NOT_CONFIGURED
+                results.append(
+                    ResearchLaneResult(
+                        run_id=run.id,
+                        lane=lane,
+                        status=status,
+                        reason_code="PROVIDER_LANE_CAPABILITY_MISSING",
+                        completed_at=datetime.now(UTC),
+                    )
+                )
+                continue
+            except Exception as exc:
+                results.append(
+                    ResearchLaneResult(
+                        run_id=run.id,
+                        lane=lane,
+                        status=LaneStatus.UNAVAILABLE,
+                        reason_code=f"PROVIDER_ERROR:{type(exc).__name__}",
+                        completed_at=datetime.now(UTC),
+                    )
+                )
+                continue
+            typed = [TypedResearchSnapshot.model_validate(item) for item in snapshots]
+            if not typed:
+                results.append(
+                    ResearchLaneResult(
+                        run_id=run.id,
+                        lane=lane,
+                        status=LaneStatus.NO_TRADE,
+                        reason_code="NO_ELIGIBLE_CANDIDATE",
+                        completed_at=datetime.now(UTC),
+                    )
+                )
+                continue
+            role = ASSET_CLASS_ROLES[lane.asset_class]
+            try:
+                response = await self.agents.invoke(
+                    role,
+                    {
+                        "lane": lane.model_dump(mode="json"),
+                        "candidates": [item.model_dump(mode="json") for item in typed],
+                    },
+                    AGENT_OUTPUT_SCHEMA,
+                )
+                if str(response.get("decision", "REASSESS")).upper() != "PASS":
+                    results.append(
+                        ResearchLaneResult(
+                            run_id=run.id,
+                            lane=lane,
+                            status=LaneStatus.NO_TRADE,
+                            reason_code="SPECIALIST_REASSESS",
+                            completed_at=datetime.now(UTC),
+                        )
+                    )
+                    continue
+            except Exception as exc:
+                results.append(
+                    ResearchLaneResult(
+                        run_id=run.id,
+                        lane=lane,
+                        status=LaneStatus.UNAVAILABLE,
+                        reason_code=f"SPECIALIST_ERROR:{type(exc).__name__}",
+                        completed_at=datetime.now(UTC),
+                    )
+                )
+                continue
+            selected = max(typed, key=lambda item: (item.volume, item.listing.symbol))
+            fingerprint = TypedMarketFingerprint(
+                listing_id=selected.listing.id,
+                asset_class=lane.asset_class,
+                instrument_type=lane.instrument_type,
+                observed_at=selected.observed_at,
+                source_cut_id=selected.source_cut_id,
+                regime="UNCLASSIFIED",
+                trend_score=0.0,
+                volatility_score=0.0,
+                liquidity_score=selected.volume,
+                data_quality=1.0,
+            )
+            candidate = TypedResearchCandidate(
+                lane=lane,
+                listing=selected.listing,
+                specification=selected.specification,
+                score=min(100.0, selected.volume),
+                fingerprint=fingerprint,
+                evidence=[f"source_cut={selected.source_cut_id}"],
+            )
+            results.append(
+                ResearchLaneResult(
+                    run_id=run.id,
+                    lane=lane,
+                    status=LaneStatus.READY,
+                    candidate=candidate,
+                    source_cut_refs=[selected.source_cut_id],
+                    completed_at=datetime.now(UTC),
+                )
+            )
+        return run.model_copy(update={"lane_results": results, "state": aggregate_status(results)})

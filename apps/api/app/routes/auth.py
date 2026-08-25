@@ -137,9 +137,7 @@ async def _token_user(
     db: AsyncSession, token: str, kind: str, *, by_id: bool = False
 ) -> tuple[AuthTokenRecord, UserRecord]:
     match = (
-        AuthTokenRecord.id == UUID(token)
-        if by_id
-        else AuthTokenRecord.token_hash == _digest(token)
+        AuthTokenRecord.id == UUID(token) if by_id else AuthTokenRecord.token_hash == _digest(token)
     )
     item = await db.scalar(
         select(AuthTokenRecord).where(
@@ -249,9 +247,7 @@ async def confirm_mfa_enrollment(
     response: Response,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    pending, user = await _token_user(
-        db, str(payload.enrollment_id), "MFA_ENROLLMENT", by_id=True
-    )
+    pending, user = await _token_user(db, str(payload.enrollment_id), "MFA_ENROLLMENT", by_id=True)
     if not user.mfa_secret or not hmac.compare_digest(
         totp(_decrypt(user.mfa_secret, user.id)), payload.code
     ):
@@ -259,9 +255,7 @@ async def confirm_mfa_enrollment(
     pending.used_at = utc_now()
     user.mfa_enabled = True
     await _issue_session(db, user, response)
-    await ResourceStore(db).audit(
-        user.owner_id, user.id, "user.mfa_enrolled", "user", user.id, {}
-    )
+    await ResourceStore(db).audit(user.owner_id, user.id, "user.mfa_enrolled", "user", user.id, {})
     return user.security_state()
 
 

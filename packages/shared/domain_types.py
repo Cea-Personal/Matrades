@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import ROUND_DOWN, Decimal
+from enum import StrEnum
 from typing import Annotated, NewType
 from uuid import UUID, uuid4
 
@@ -44,3 +45,40 @@ class SourceMetadata(BaseModel):
     received_at: AwareDateTime = Field(default_factory=utc_now)
     version: str
     correlation_id: UUID = Field(default_factory=uuid4)
+
+
+class AssetClass(StrEnum):
+    FOREX = "FOREX"
+    METALS = "METALS"
+    CRYPTOCURRENCY = "CRYPTOCURRENCY"
+    STOCKS = "STOCKS"
+
+
+class InstrumentType(StrEnum):
+    SPOT = "SPOT"
+    CFD = "CFD"
+    FUTURES = "FUTURES"
+
+
+class QuantityUnit(StrEnum):
+    UNITS = "UNITS"
+    SHARES = "SHARES"
+    LOTS = "LOTS"
+    CONTRACTS = "CONTRACTS"
+
+
+class LaneStatus(StrEnum):
+    READY = "READY"
+    NO_TRADE = "NO_TRADE"
+    NOT_CONFIGURED = "NOT_CONFIGURED"
+    UNAVAILABLE = "UNAVAILABLE"
+    STALE = "STALE"
+    BLOCKED = "BLOCKED"
+
+
+class ResearchLaneKey(BaseModel):
+    asset_class: AssetClass
+    instrument_type: InstrumentType
+
+    def as_string(self) -> str:
+        return f"{self.asset_class.value}:{self.instrument_type.value}"

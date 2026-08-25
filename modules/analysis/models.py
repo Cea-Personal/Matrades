@@ -5,7 +5,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
-from packages.shared.domain_types import AwareDateTime, utc_now
+from packages.shared.domain_types import AssetClass, AwareDateTime, InstrumentType, utc_now
 
 
 class ResearchState(StrEnum):
@@ -39,6 +39,11 @@ class RankedMarket(BaseModel):
     score: float
     evidence: list[str]
     fresh: bool
+    asset_class: AssetClass | None = None
+    instrument_type: InstrumentType | None = None
+    venue_instrument_id: UUID | None = None
+    specification_version_id: UUID | None = None
+    source_cut_id: str | None = None
 
 
 class ResearchRun(BaseModel):
@@ -48,6 +53,8 @@ class ResearchRun(BaseModel):
     candidates: list[RankedMarket] = []
     created_at: AwareDateTime = Field(default_factory=utc_now)
     source_versions: dict[str, str] = {}
+    matrix_version: int | None = None
+    lane_results: list[dict[str, object]] = []
 
 
 class MarketSelection(BaseModel):

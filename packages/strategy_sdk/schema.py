@@ -5,6 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from packages.shared.domain_types import AssetClass, InstrumentType, QuantityUnit
 from packages.strategy_sdk.taxonomy import Horizon, StrategyFamily, StrategyOrigin
 
 
@@ -39,6 +40,12 @@ class StrategySpecification(BaseModel):
     accepted_suggestion_ids: list[str] = []
     data_version: str | None = None
     evaluator_version: str = "strategy-evaluator-v1"
+    asset_class: AssetClass | None = None
+    instrument_type: InstrumentType | None = None
+    quantity_unit: QuantityUnit | None = None
+    venue_instrument_id: str | None = None
+    specification_version_id: str | None = None
+    futures_contract_id: str | None = None
 
     @model_validator(mode="after")
     def bounds(self):
@@ -46,4 +53,9 @@ class StrategySpecification(BaseModel):
             raise ValueError("risk per trade exceeds 100 percent")
         if self.take_profit and len(self.take_profit) > 5:
             raise ValueError("at most five take-profit rules are supported")
+        if self.instrument_type is not None:
+            if not self.venue_instrument_id or not self.specification_version_id:
+                raise ValueError("typed strategy requires listing and specification references")
+            if self.instrument_type is InstrumentType.FUTURES and not self.futures_contract_id:
+                raise ValueError("futures strategy requires a dated contract reference")
         return self

@@ -17,11 +17,12 @@ from modules.agents.rpc import RedisAgentGateway
 from modules.connections.models import ConnectionProvider
 from modules.connections.resolution import find_connection
 from modules.research.artifacts import ResearchCycleArchive
-from modules.research.models import MarketCategory
+from modules.research.models import MarketCategory, TypedResearchRun
 from modules.research.scheduling import default_schedule, is_due, normalize_schedule
 from modules.research.workflow import AutonomousResearchWorkflow
 from packages.shared.config import settings
 from packages.shared.database import unit_of_work
+from packages.shared.domain_types import ResearchLaneKey
 from packages.shared.store import ResourceRecord, ResourceStore
 
 DEFAULT_CATEGORIES = [
@@ -32,6 +33,8 @@ DEFAULT_CATEGORIES = [
 
 
 async def _execute_research_cycle(run_id: UUID) -> dict:
+    typed_lanes: list[ResearchLaneKey] | None = None
+    typed_matrix_version = 1
     async with unit_of_work() as session:
         record = await session.get(ResourceRecord, run_id)
         if record is None or record.kind != "research_run":
@@ -48,6 +51,9 @@ async def _execute_research_cycle(run_id: UUID) -> dict:
                 "market_categories", [item.value for item in DEFAULT_CATEGORIES]
             )
         ]
+        if record.data.get("lanes"):
+            typed_lanes = [ResearchLaneKey.model_validate(item) for item in record.data["lanes"]]
+            typed_matrix_version = int(record.data.get("matrix_version", 1))
         owner_id = record.owner_id
         twelve = await find_connection(session, owner_id, ConnectionProvider.TWELVE_DATA)
         coinbase = await find_connection(session, owner_id, ConnectionProvider.COINBASE)
@@ -77,7 +83,45 @@ async def _execute_research_cycle(run_id: UUID) -> dict:
         timeout_seconds=settings.research_agent_timeout_seconds,
     )
     try:
-        result = await AutonomousResearchWorkflow(provider, agents).run(categories)
+        workflow = AutonomousResearchWorkflow(provider, agents)
+        if typed_lanes:
+            typed_run = TypedResearchRun(
+                owner_id=owner_id,
+                account_id=UUID(str(record.data["account_id"])),
+                matrix_version=typed_matrix_version,
+                requested_lanes=typed_lanes,
+                created_at=datetime.now(UTC),
+            )
+            typed_result = await workflow.run_matrix(typed_run)
+            serialized = typed_result.model_dump(mode="json")
+            serialized["lane_results"] = [
+                item.model_dump(mode="json") for item in typed_result.lane_results
+            ]
+            serialized["status"] = typed_result.state
+            artifact = ResearchCycleArchive(settings.research_artifact_root).save_cycle(
+                owner_id=owner_id,
+                cycle_type="market_research",
+                cycle_id=run_id,
+                occurred_at=typed_result.created_at,
+                details=serialized,
+            )
+            serialized["artifact"] = {
+                "relative_path": artifact.relative_path,
+                "checksum": artifact.checksum,
+                "manifest_name": artifact.manifest_name,
+            }
+            async with unit_of_work() as typed_session:
+                typed_record = await typed_session.get(ResourceRecord, run_id)
+                if typed_record is None:
+                    raise RuntimeError("research run disappeared")
+                await ResourceStore(typed_session).update(
+                    typed_record,
+                    {**typed_record.data, **serialized},
+                    state=typed_result.state,
+                    event_type=f"research.{typed_result.state.lower()}",
+                )
+            return serialized
+        result = await workflow.run(categories)
     finally:
         await provider.close()
         await agents.close()

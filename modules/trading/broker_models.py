@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, Field
 
 from packages.broker_sdk.schemas import BrokerPosition
+from packages.shared.domain_types import AssetClass, InstrumentType, QuantityUnit
 
 
 class ReconciliationState(StrEnum):
@@ -35,6 +36,10 @@ class Reconciliation(BaseModel):
     state: ReconciliationState
     candidate_position_ids: list[str] = []
     selected_position_id: str | None = None
+    venue_instrument_id: UUID | None = None
+    futures_contract_id: UUID | None = None
+    specification_version_id: UUID | None = None
+    instrument_type: InstrumentType | None = None
 
 
 class ActiveTrade(BaseModel):
@@ -43,6 +48,9 @@ class ActiveTrade(BaseModel):
     owner_id: UUID
     broker_position: BrokerPosition
     state: TradeState = TradeState.ACTIVE
+    asset_class: AssetClass | None = None
+    instrument_type: InstrumentType | None = None
+    quantity_unit: QuantityUnit | None = None
 
 
 class ManagementRecommendation(BaseModel):

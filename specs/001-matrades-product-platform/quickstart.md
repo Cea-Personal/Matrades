@@ -13,6 +13,9 @@ proves the constitutional paths end to end without containing application implem
 - Node.js 24 LTS with npm
 - Test/sandbox credentials for configured providers; no live broker write permission
 - MT5 demo account and bridge only for broker validation scenarios
+- Provider/broker fixtures with verified canonical mappings and effective instrument specifications
+  for Forex, metals, cryptocurrency, and stocks across spot, CFD, and futures
+- Dated futures-chain/roll fixtures, stock corporate actions, and CFD financing fixtures
 
 Copy the future `.env.example` to a local ignored environment file. Use test credentials and a
 development vault key; never commit secrets.
@@ -38,8 +41,8 @@ Expected result:
   LiteLLM is absent unless its optional profile was explicitly started.
 - TimescaleDB and pgvector extension checks pass or the configured compatible adapter reports why
   an external substitute is active.
-- Required agent seed validation reports exactly 15 protected logical IDs, including
-  `strategy_assistant`.
+- Required agent seed validation reports exactly 16 protected logical IDs, including
+  `stocks_research` and `strategy_assistant`.
 - No provider or broker credential value appears in command output.
 
 ## Validate Contracts and Architecture
@@ -52,6 +55,8 @@ npm run test:contracts --workspace apps/web
 Expected result:
 
 - OpenAPI, event, adapter, and agent schemas validate.
+- An expand/dual-read/new-write migration fixture preserves old category-only evidence as
+  `LEGACY_UNTYPED`, rejects guessed wrapper types, and requires typed references on every new write.
 - Domain dependency tests reject agent/provider access to broker writes, policy writes, guardrail
   writes, raw credentials, or canonical strategy mutation.
 - System and user prompt inheritance are independent.
@@ -96,6 +101,11 @@ Required cases:
 - a static trade slot remains but portfolio capacity is zero;
 - two concurrent proposals cannot reserve the same remaining capacity;
 - stale/wrong-account snapshots and stale FX rates block.
+- spot sizing uses owned units/shares and cash availability;
+- CFD sizing uses the broker's effective lot/contract terms and financing;
+- futures sizing uses whole dated contracts and pinned tick value/multiplier;
+- missing/stale critical specification data blocks, and margin is never reported as maximum loss;
+- equivalent underlying exposure aggregates across spot, CFD, and futures wrappers.
 
 Expected result: every result contains the complete pre-trade equity snapshot, limiting sources,
 projected post-trade state, and candidate-specific additional capacity. Tightening a limit or adding
@@ -114,7 +124,7 @@ uv run pytest tests/integration/agents tests/e2e/test_agent_configuration.py -q
 
 Expected result:
 
-- All 15 required agents resolve to `CODEX_APP_SERVER` before an explicit alternative is assigned.
+- All 16 required agents resolve to `CODEX_APP_SERVER` before an explicit alternative is assigned.
 - The first technical-analysis run resolves agent system prompt + orchestrator user prompt.
 - A later run uses the compatible Codex fallback and records selected/actual runtime, configured/
   actual models, and the reason.
@@ -126,7 +136,9 @@ Expected result:
 
 ## Scenario 4: Daily Research and HIL-1
 
-Use recorded Twelve Data, Coinbase, CoinGecko, macro, positioning, and calendar fixtures.
+Use recorded broker/MT5, Twelve Data, Coinbase, CoinGecko, futures-chain, corporate-action, macro,
+positioning, and calendar fixtures. Configure the account's full four-asset-class by three-
+instrument-type research matrix.
 
 ```bash
 uv run pytest tests/replay/research tests/e2e/test_hil1_market_selection.py -q
@@ -134,10 +146,19 @@ uv run pytest tests/replay/research tests/e2e/test_hil1_market_selection.py -q
 
 Expected result:
 
-- One Forex, metal, and crypto candidate is ranked from normalized evidence within the SC-012 target.
-- REPLACE changes only the chosen category and creates a new selection version.
+- Each of the 12 `(asset_class, instrument_type)` lanes reaches exactly one terminal state within the
+  SC-012 target; READY lanes contain one candidate and non-ready lanes contain an explicit reason.
+- The four asset-class specialists rank spot, CFD, and futures lanes independently, including
+  `stocks_research` for stocks.
+- Every READY result pins an exact venue listing or dated futures contract, instrument-specification
+  version, provider binding, source cut, and evidence set.
+- REPLACE changes only the chosen lane and creates a new selection version.
 - RERUN RESEARCH creates a new run rather than overwriting prior evidence.
 - Stale Coinbase data blocks affected crypto action; stale knowledge only degrades contextual research.
+- Missing capability/binding/mapping produces `NOT_CONFIGURED` or `BLOCKED`; a provider outage or
+  stale source produces `UNAVAILABLE` or `STALE`; none may fall back to another instrument type.
+- Shared provider observations are reused across account schedules without exceeding quota, while
+  account-specific eligibility and broker tradability remain independently evaluated.
 
 ## Scenario 5: Strategy Lab to Promotion
 
@@ -157,6 +178,9 @@ Expected result:
 - All origins use the same compiler, point-in-time backtest, out-of-sample, walk-forward, stress/
   Monte Carlo, account-policy simulation, paper, and promotion stages.
 - Backtest, paper, and live fixture evaluation produce equivalent signals for the same artifact.
+- Each validation run pins the exact listing/dated contract, specification, calendar/FX cut, cost
+  model, corporate actions, financing, and futures roll rule applicable to its instrument profile.
+- Continuous futures data may support analysis but never represents an executable contract.
 
 ## Scenario 6: HIL-2, Manual Entry, and Reconciliation
 
@@ -174,7 +198,10 @@ Expected result:
 - WAIT/REJECT release candidate risk. TAKE preserves the reservation and enters
   `AWAITING_MANUAL_ENTRY` without a broker write.
 - A unique broker position auto-reconciles; an ambiguous one requests user confirmation.
-- Actual broker entry, size, protections, fees, and P&L supersede proposed values.
+- Reconciliation requires the same instrument type and exact broker listing/dated contract; a
+  same-underlying spot, CFD, or futures position cannot match a proposal for another wrapper.
+- Actual broker entry, quantity unit, size, protections, margin, financing, fees, and P&L supersede
+  proposed values.
 
 ## Scenario 7: Monitoring and HIL-3
 
@@ -229,6 +256,9 @@ Do not proceed to live-connected validation if any of these occurs:
 
 - risk/policy/critic unavailable or a hard-block candidate reaches HIL-2;
 - current account, market, calendar, or broker data violates its required freshness policy;
+- a candidate lacks a verified venue mapping, dated futures contract, critical specification version,
+  or provider capability/binding, or a continuous futures series appears as executable;
+- a research lane is relabeled or substituted with another instrument type;
 - raw secrets appear in UI responses, logs, prompts, events, fixtures, or reports;
 - any required agent defaults to LiteLLM, or any execution changes runtime without an explicitly
   activated per-agent or model-profile selection;

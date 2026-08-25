@@ -36,9 +36,7 @@ async def event_stream(owner_id: UUID, db: AsyncSession) -> AsyncIterator[str]:
             if item.id in seen:
                 continue
             seen.add(item.id)
-            yield (
-                f"event: domain\ndata: {json.dumps(item.public(), default=str)}\n\n"
-            )
+            yield (f"event: domain\ndata: {json.dumps(item.public(), default=str)}\n\n")
         yield f"event: heartbeat\ndata: {json.dumps({'authoritative': False})}\n\n"
         await asyncio.sleep(5)
 

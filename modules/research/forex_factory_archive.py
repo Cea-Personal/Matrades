@@ -111,8 +111,7 @@ class ForexFactoryArchive:
                     payload=payload,
                     skipped=True,
                     message=(
-                        f"Data already exists for period {payload['period_key']}; "
-                        "scraper skipped."
+                        f"Data already exists for period {payload['period_key']}; scraper skipped."
                     ),
                 )
         return None
@@ -127,9 +126,7 @@ class ForexFactoryArchive:
     ) -> ForexFactoryArchiveReference:
         if scraped_at.tzinfo is None or scraped_at.utcoffset() is None:
             raise ValueError("scraped_at must be timezone-aware")
-        period_start, period_end = period_bounds(
-            events, observed_at=scraped_at, feed_url=feed_url
-        )
+        period_start, period_end = period_bounds(events, observed_at=scraped_at, feed_url=feed_url)
         key = period_key(period_start, period_end)
         directory = self._owner_root(owner_id)
         path = (directory / f"{key}.json").resolve()

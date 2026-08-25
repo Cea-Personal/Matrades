@@ -8,7 +8,12 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from modules.connections.models import ConnectionProfile, ConnectionProvider
+from modules.connections.models import (
+    ConnectionProfile,
+    ConnectionProvider,
+    MarketDataCapability,
+    ProviderBinding,
+)
 from modules.credentials.vault import EnvelopeCipher
 from packages.shared.config import get_settings
 from packages.shared.store import ResourceRecord
@@ -19,6 +24,45 @@ class ResolvedConnection:
     id: UUID
     profile: ConnectionProfile
     secret: str | None
+
+
+@dataclass(frozen=True)
+class ResolvedBinding:
+    binding: ProviderBinding
+    connection: ResolvedConnection
+
+
+def choose_binding(
+    bindings: list[ProviderBinding],
+    *,
+    lane: str,
+    capability: MarketDataCapability,
+) -> ProviderBinding:
+    """Choose only a verified binding for the same lane and capability."""
+    candidates = [
+        item
+        for item in bindings
+        if item.lane.as_string() == lane
+        and item.capability is capability
+        and item.verification_status == "VERIFIED"
+    ]
+    if not candidates:
+        raise LookupError(f"no verified binding for {lane}/{capability.value}")
+    return sorted(candidates, key=lambda item: (item.priority, str(item.id)))[0]
+
+
+def require_healthy_binding(
+    bindings: list[ProviderBinding],
+    *,
+    lane: str,
+    capability: MarketDataCapability,
+    connection_health: dict[UUID, str],
+) -> ProviderBinding:
+    binding = choose_binding(bindings, lane=lane, capability=capability)
+    state = connection_health.get(binding.connection_id)
+    if state not in {"HEALTHY", "STALE"}:
+        raise LookupError(f"connection for {lane}/{capability.value} is not healthy")
+    return binding
 
 
 def _cipher() -> EnvelopeCipher:

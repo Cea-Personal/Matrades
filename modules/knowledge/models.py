@@ -5,7 +5,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
-from packages.shared.domain_types import AwareDateTime, utc_now
+from packages.shared.domain_types import AssetClass, AwareDateTime, InstrumentType, utc_now
 
 
 class SourceState(StrEnum):
@@ -22,6 +22,11 @@ class KnowledgeSource(BaseModel):
     state: SourceState = SourceState.ACTIVE
     tags: set[str] = set()
     version: int = 1
+    asset_class: AssetClass | None = None
+    instrument_type: InstrumentType | None = None
+    venue_instrument_id: UUID | None = None
+    specification_version_id: UUID | None = None
+    source_cut_refs: tuple[str, ...] = ()
 
 
 class KnowledgeDocument(BaseModel):
@@ -32,6 +37,7 @@ class KnowledgeDocument(BaseModel):
     content_hash: str
     version: int = 1
     created_at: AwareDateTime = Field(default_factory=utc_now)
+    source_cut_refs: tuple[str, ...] = ()
 
 
 class KnowledgeSegment(BaseModel):
@@ -41,6 +47,7 @@ class KnowledgeSegment(BaseModel):
     text: str
     ordinal: int
     embedding: list[float] | None = None
+    metadata: dict[str, str] = {}
 
 
 class RetrievalHit(BaseModel):

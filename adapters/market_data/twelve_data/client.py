@@ -6,13 +6,41 @@ from uuid import UUID
 
 import httpx
 
+from adapters.base import AdapterCapability
 from modules.market_data.models import MarketObservation
 
 
 class TwelveDataClient:
+    CAPABILITIES = frozenset(
+        {
+            AdapterCapability.DISCOVERY,
+            AdapterCapability.QUOTE,
+            AdapterCapability.CANDLES,
+            AdapterCapability.CONTRACT_DETAILS,
+        }
+    )
+
     def __init__(self, api_key: str, client: httpx.AsyncClient | None = None) -> None:
         self.api_key = api_key
         self.client = client or httpx.AsyncClient(base_url="https://api.twelvedata.com", timeout=10)
+
+    def capabilities(self) -> set[str]:
+        return {item.value for item in self.CAPABILITIES}
+
+    async def discover_instruments(self, query: str) -> list[dict]:
+        response = await self.client.get(
+            "/symbol_search", params={"symbol": query, "apikey": self.api_key}
+        )
+        response.raise_for_status()
+        return list(response.json().get("data") or [])
+
+    async def instrument_details(self, symbol: str) -> dict:
+        response = await self.client.get(
+            "/symbol_search", params={"symbol": symbol, "apikey": self.api_key}
+        )
+        response.raise_for_status()
+        values = response.json().get("data") or []
+        return next((item for item in values if item.get("symbol") == symbol), {})
 
     async def quote(self, instrument_id: UUID, symbol: str) -> MarketObservation:
         response = await self.client.get(

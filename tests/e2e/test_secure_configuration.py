@@ -73,8 +73,7 @@ def test_mt5_ea_and_bridge_service_are_shipped():
         for value in ("WebRequest", "/ingest", "InpBridgeSecret", "InpMatradesAccountId")
     )
     assert all(
-        value in compose
-        for value in ("mt5-bridge", "8765:8765", "MATRADES_MT5_BRIDGE_SECRET")
+        value in compose for value in ("mt5-bridge", "8765:8765", "MATRADES_MT5_BRIDGE_SECRET")
     )
     assert all(
         value in readme

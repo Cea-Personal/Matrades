@@ -49,6 +49,11 @@ def build_source_data(
     source_kind: str = "DOCUMENT",
     source_url: str | None = None,
     external_id: str | None = None,
+    asset_class: str | None = None,
+    instrument_type: str | None = None,
+    venue_instrument_id: str | None = None,
+    specification_version_id: str | None = None,
+    source_cut_refs: list[str] | None = None,
 ) -> dict:
     if not content.strip():
         raise ValueError("knowledge source content cannot be empty")
@@ -77,6 +82,11 @@ def build_source_data(
         "source_kind": source_kind,
         "source_url": source_url,
         "external_id": external_id,
+        "asset_class": asset_class,
+        "instrument_type": instrument_type,
+        "venue_instrument_id": venue_instrument_id,
+        "specification_version_id": specification_version_id,
+        "source_cut_refs": sorted(set(source_cut_refs or [])),
         "document_id": str(document_id),
         "content_hash": hashlib.sha256(content.encode()).hexdigest(),
         "generation": version,

@@ -37,6 +37,11 @@ class SourceInput(BaseModel):
     source_kind: str = "DOCUMENT"
     source_url: str | None = None
     external_id: str | None = None
+    asset_class: str | None = None
+    instrument_type: str | None = None
+    venue_instrument_id: str | None = None
+    specification_version_id: str | None = None
+    source_cut_refs: list[str] = Field(default_factory=list)
 
 
 class SearchInput(BaseModel):
@@ -46,6 +51,9 @@ class SearchInput(BaseModel):
     source_date_from: str | None = None
     source_date_to: str | None = None
     limit: int = Field(default=5, ge=1, le=20)
+    asset_class: str | None = None
+    instrument_type: str | None = None
+    venue_instrument_id: str | None = None
 
 
 class YouTubeScrapeInput(BaseModel):
@@ -67,6 +75,11 @@ def _document_data(payload: SourceInput, version: int = 1) -> dict:
         source_kind=payload.source_kind,
         source_url=payload.source_url,
         external_id=payload.external_id,
+        asset_class=payload.asset_class,
+        instrument_type=payload.instrument_type,
+        venue_instrument_id=payload.venue_instrument_id,
+        specification_version_id=payload.specification_version_id,
+        source_cut_refs=payload.source_cut_refs,
     )
 
 
@@ -271,6 +284,18 @@ async def search(
         if source.state != "ACTIVE":
             continue
         if payload.category and source.data.get("category") != payload.category:
+            continue
+        if payload.asset_class and source.data.get("asset_class") != payload.asset_class:
+            continue
+        if (
+            payload.instrument_type
+            and source.data.get("instrument_type") != payload.instrument_type
+        ):
+            continue
+        if (
+            payload.venue_instrument_id
+            and source.data.get("venue_instrument_id") != payload.venue_instrument_id
+        ):
             continue
         source_tags = set(source.data.get("tags", []))
         if payload.tags and not set(payload.tags).issubset(source_tags):

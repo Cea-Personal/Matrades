@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
 from packages.shared.domain_types import utc_now
-from packages.shared.persistence import Base
+from packages.shared.persistence import Base, validate_executable_reference
 
 
 class ResourceRecord(Base):
@@ -100,6 +100,7 @@ class ResourceStore:
         actor_id: UUID | None = None,
         event_type: str | None = None,
     ) -> ResourceRecord:
+        validate_executable_reference(data)
         record = ResourceRecord(
             id=record_id or uuid4(),
             owner_id=owner_id,
@@ -153,6 +154,7 @@ class ResourceStore:
         if expected_version is not None and record.version != expected_version:
             raise ValueError("resource version conflict")
         if data is not None:
+            validate_executable_reference(data)
             record.data = jsonable_encoder(data)
         if state is not None:
             record.state = state

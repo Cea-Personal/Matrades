@@ -109,9 +109,7 @@ class CodexAppServerClient:
                     stderr = ""
                     if self.process.stderr:
                         stderr = (await self.process.stderr.read()).decode(errors="replace")
-                    raise RuntimeError(
-                        f"Codex app-server exited before turn completion: {stderr}"
-                    )
+                    raise RuntimeError(f"Codex app-server exited before turn completion: {stderr}")
                 message = json.loads(raw)
                 method = message.get("method")
                 params_value = message.get("params", {})

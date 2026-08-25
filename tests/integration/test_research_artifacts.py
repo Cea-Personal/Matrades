@@ -33,4 +33,3 @@ def test_market_and_strategy_cycles_get_timestamped_immutable_folders(tmp_path) 
     assert manifest["occurred_at"] == observed_at.isoformat()
     assert manifest["checksum"] == market.checksum
     assert market.relative_path != strategy.relative_path
-

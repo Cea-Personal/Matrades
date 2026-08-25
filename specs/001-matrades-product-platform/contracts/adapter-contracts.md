@@ -13,7 +13,8 @@ times, health/freshness, provenance, correlation ID, and structured error detail
 - Mutating adapter calls require an idempotency key; V1 BrokerAdapter exposes no mutating calls.
 - Streams detect duplicates, gaps, out-of-order messages, schema changes, and stale heartbeats.
 - Recovery uses bounded exponential backoff with jitter and exposes DEGRADED/STALE/OFFLINE state.
-- Provider symbols map to immutable internal instrument IDs before persistence or agent use.
+- Provider symbols map to immutable internal instrument, exact venue-listing, instrument-type, and
+  effective specification-version IDs before persistence or agent use.
 - Raw provider payloads may be retained as protected evidence, but normalized contracts are canonical
   for application consumers.
 
@@ -47,21 +48,36 @@ Codex-to-LiteLLM or LiteLLM-to-Codex fallback.
 
 ```text
 health(connection)
-list_instruments(connection)
-get_quote(instrument, as_of)
-get_trades(instrument, interval)
-get_candles(instrument, timeframe, interval)
-get_order_book(instrument, depth, as_of)
-subscribe(instruments, channels, resume_token)
+capabilities(connection)
+discover_instruments(connection, asset_class, instrument_type, as_of)
+get_instrument_details(connection, venue_instrument, as_of)
+get_quote(venue_instrument, as_of)
+get_trades(venue_instrument, interval)
+get_candles(venue_instrument, timeframe, interval)
+get_order_book(venue_instrument, depth, as_of)
+get_futures_chain(connection, underlying, as_of)
+get_open_interest(venue_instrument, interval)
+get_funding_or_financing(venue_instrument, interval)
+get_corporate_actions(underlying, interval)
+subscribe(venue_instruments, channels, resume_token)
 ```
 
-Normalized stream records carry instrument/venue IDs, source event ID/sequence, source/received time,
-normalization version and quality. One shared connection manager serves consumers. Coinbase is the V1
-crypto exchange adapter; Twelve Data covers Forex/metals; CoinGecko is discovery/metadata and cannot
-substitute for an exchange-level current quote.
+Normalized records carry underlying, canonical instrument, exact venue listing or dated futures
+contract, asset class, instrument type, effective instrument-specification version, source event/
+sequence, source/received time, normalization version and quality. Continuous futures series are
+marked analytical and never returned as executable listings. One shared connection manager and
+immutable source cut serve consumers across account research schedules.
+
+Provider selection is capability based: account → research lane → required capability → explicit
+provider binding → healthy connection → verified canonical mapping. The broker/MT5 listing and terms
+are authoritative for an executable CFD; a spot or futures venue may provide reference evidence but
+cannot silently replace the CFD quote or terms. Coinbase, Twelve Data, CoinGecko, a futures-chain
+provider, and future adapters expose only the capabilities they actually support.
 
 Contract tests cover reconnect, backoff, rate limits, dedupe, reorder window, gap detection/backfill,
-instrument mapping, decimal precision, order-book sequence, staleness, and provider substitution.
+instrument mapping, contract/specification versioning, decimal precision, order-book sequence,
+staleness, futures expiry/roll, corporate actions, financing, shared-cut reuse, quota enforcement,
+and prohibition of cross-instrument-type substitution.
 
 ## Macro, Positioning, Calendar, and News Adapters
 
@@ -87,7 +103,9 @@ get_account(account_connection)
 get_positions(account_connection)
 get_orders(account_connection)
 get_history(account_connection, interval)
-get_symbol_info(account_connection, instrument)
+list_instruments(account_connection, asset_class, instrument_type)
+get_quote(account_connection, venue_instrument, as_of)
+get_symbol_info(account_connection, venue_instrument, as_of)
 subscribe_events(account_connection, resume_token)
 ```
 
@@ -97,8 +115,10 @@ TP_CHANGED, PROTECTION_EXECUTED, and ACCOUNT_CHANGED. Actual reconciled values s
 values. No method opens, changes, or closes a position in V1.
 
 The MT5 bridge adapter authenticates the bridge, verifies heartbeat, deduplicates/resumes events,
-normalizes broker symbols and times, and marks state stale on disconnect. Remote deployments use
-mTLS; loopback-only deployments use a rotating scoped token.
+normalizes broker symbols and times, and publishes effective-dated symbol properties including
+contract size, tick size/value, volume bounds/step, currencies, margin mode, swap/financing, and
+expiry when supplied by the broker. Missing critical properties block construction or sizing for
+that listing. Remote deployments use mTLS; loopback-only deployments use a rotating scoped token.
 
 ## EmbeddingProvider and SemanticIndex
 

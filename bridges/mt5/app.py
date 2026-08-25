@@ -9,7 +9,7 @@ from uuid import UUID, uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 
-from packages.broker_sdk.schemas import BrokerSnapshot
+from packages.broker_sdk.schemas import BrokerInstrument, BrokerSnapshot
 
 
 def verify(
@@ -30,9 +30,9 @@ def verify(
 
 def create_app(reader: object | None = None, secret: bytes | None = None) -> FastAPI:
     app = FastAPI(title="Matrades read-only MT5 bridge")
-    bridge_secret = secret or os.environ.get(
-        "MATRADES_MT5_BRIDGE_SECRET", "development-mt5-secret"
-    ).encode()
+    bridge_secret = (
+        secret or os.environ.get("MATRADES_MT5_BRIDGE_SECRET", "development-mt5-secret").encode()
+    )
     seen_nonces: dict[str, float] = {}
     sequences: dict[UUID, int] = {}
     latest_snapshots: dict[UUID, dict] = {}
@@ -57,9 +57,7 @@ def create_app(reader: object | None = None, secret: bytes | None = None) -> Fas
     @app.get("/health")
     async def health(_: None = Depends(authenticate)) -> dict:
         now = time.time()
-        fresh = bool(reader) or any(
-            now - observed <= 15 for observed in latest_received.values()
-        )
+        fresh = bool(reader) or any(now - observed <= 15 for observed in latest_received.values())
         return {
             "status": "healthy" if fresh else "waiting_for_ea",
             "fresh": fresh,
@@ -89,23 +87,17 @@ def create_app(reader: object | None = None, secret: bytes | None = None) -> Fas
         }
 
     @app.get("/positions")
-    async def positions(
-        account_id: UUID | None = None, _: None = Depends(authenticate)
-    ) -> list:
+    async def positions(account_id: UUID | None = None, _: None = Depends(authenticate)) -> list:
         if reader:
             return list(reader.positions())
         if account_id and account_id in latest_snapshots:
             return list(latest_snapshots[account_id]["positions"])
         return [
-            position
-            for snapshot in latest_snapshots.values()
-            for position in snapshot["positions"]
+            position for snapshot in latest_snapshots.values() for position in snapshot["positions"]
         ]
 
     @app.get("/account")
-    async def account(
-        account_id: UUID | None = None, _: None = Depends(authenticate)
-    ) -> dict:
+    async def account(account_id: UUID | None = None, _: None = Depends(authenticate)) -> dict:
         if reader:
             return dict(reader.account())
         if account_id and account_id in latest_snapshots:
@@ -118,9 +110,7 @@ def create_app(reader: object | None = None, secret: bytes | None = None) -> Fas
         return {}
 
     @app.get("/history")
-    async def history(
-        account_id: UUID | None = None, _: None = Depends(authenticate)
-    ) -> list:
+    async def history(account_id: UUID | None = None, _: None = Depends(authenticate)) -> list:
         if reader:
             return list(reader.history())
         return list(latest_history.get(account_id, [])) if account_id else []
@@ -150,6 +140,35 @@ def create_app(reader: object | None = None, secret: bytes | None = None) -> Fas
             "positions": positions_value,
             "signature": "response-over-authenticated-channel",
         }
+
+    @app.get("/instruments")
+    async def instruments(
+        account_id: UUID | None = None, _: None = Depends(authenticate)
+    ) -> list[dict]:
+        if not reader or not hasattr(reader, "symbols"):
+            return []
+        values = []
+        for item in reader.symbols():
+            symbol = getattr(item, "name", str(item))
+            info = reader.symbol(symbol)
+            if isinstance(info, dict):
+                values.append(info)
+            else:
+                values.append({"symbol": symbol, "raw": str(info)})
+        return values
+
+    @app.get("/symbol-details")
+    async def symbol_details(
+        account_id: UUID, symbol: str, _: None = Depends(authenticate)
+    ) -> dict:
+        if not reader or not hasattr(reader, "symbol"):
+            raise HTTPException(503, "MT5 reader is not connected")
+        info = reader.symbol(symbol)
+        if isinstance(info, BrokerInstrument):
+            return info.model_dump(mode="json")
+        if isinstance(info, dict):
+            return info
+        return {"symbol": symbol, "raw": str(info), "account_id": str(account_id)}
 
     @app.get("/events")
     async def events(

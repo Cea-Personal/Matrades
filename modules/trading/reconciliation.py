@@ -20,6 +20,15 @@ def reconcile(
         and item.direction.value == proposal.direction.value
         and abs(item.entry_price - proposal.entry) <= price_tolerance
         and abs(item.volume - proposal.approved_size) <= size_tolerance
+        and (
+            proposal.instrument_type is None
+            or (
+                item.instrument_type == proposal.instrument_type
+                and item.venue_instrument_id == proposal.venue_instrument_id
+                and item.specification_version_id == proposal.specification_version_id
+                and item.futures_contract_id == proposal.futures_contract_id
+            )
+        )
     ]
     state = (
         ReconciliationState.MATCHED
@@ -33,4 +42,8 @@ def reconcile(
         state=state,
         candidate_position_ids=[item.position_id for item in matches],
         selected_position_id=matches[0].position_id if len(matches) == 1 else None,
+        venue_instrument_id=proposal.venue_instrument_id,
+        futures_contract_id=proposal.futures_contract_id,
+        specification_version_id=proposal.specification_version_id,
+        instrument_type=proposal.instrument_type,
     )

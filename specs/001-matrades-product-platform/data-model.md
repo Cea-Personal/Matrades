@@ -1,6 +1,6 @@
 # Data Model: Matrades Product Platform
 
-**Date**: 2026-08-23
+**Date**: 2026-08-25
 **Source**: [spec.md](./spec.md)
 **Related contracts**: [contracts/](./contracts/)
 
@@ -109,7 +109,7 @@ assignment before activation.
 
 Seeded fixed roles are:
 
-`orchestrator`, `forex_research`, `metals_research`, `crypto_research`, `technical_analyst`,
+`orchestrator`, `forex_research`, `metals_research`, `crypto_research`, `stocks_research`, `technical_analyst`,
 `fundamental_analyst`, `sentiment_analyst`, `regime_analyst`, `strategy_selector`,
 `strategy_researcher`, `strategy_assistant`, `critic`, `trade_monitor`, `journal`, and `performance`.
 
@@ -157,11 +157,67 @@ runtime differs from its selected runtime.
 
 ## Instruments, Market Data, and Research
 
-### Instrument, VenueInstrument, and InstrumentAlias
+### UnderlyingAsset, Instrument, VenueInstrument, and InstrumentAlias
 
-`Instrument` is the immutable internal identity with canonical symbol, market category, base/quote
-assets, price/quantity precision, contract metadata, and active status. `VenueInstrument` maps one
-provider/venue symbol and trading properties to it. `InstrumentAlias` maps accepted research/UI names.
+`UnderlyingAsset` is the stable economic identity for a currency, metal, cryptoasset, company
+equity, index, or other reference asset. It stores canonical name/code, classification, issuer where
+applicable, and active/delisted state. Shared-underlying exposure links every wrapper back to this
+identity.
+
+`Instrument` is a provider-neutral market expression with immutable `asset_class` (`FOREX`,
+`METALS`, `CRYPTOCURRENCY`, `STOCKS`), `instrument_type` (`SPOT`, `CFD`, `FUTURES`), underlying/base
+and quote/settlement assets, canonical/root symbol, ownership or derivative semantics, and lifecycle
+status. Spot, CFD, and futures expressions over the same underlying always have different IDs.
+
+`VenueInstrument` maps an exact provider, broker, issuer, or exchange listing to one Instrument. It
+stores venue/account scope where applicable, provider symbol, tradable/researchable capabilities,
+mapping verification/version, and status. Broker-issued CFDs remain distinct by issuer; provider
+symbols and `InstrumentAlias` values are never canonical IDs.
+
+### InstrumentSpecificationVersion
+
+Immutable effective-dated terms used by research, risk, reconciliation, and replay:
+
+| Field group | Required contents |
+|---|---|
+| identity | venue instrument, version, effective interval, digest |
+| units | quantity unit, contract multiplier/size, price precision, tick/point size and value |
+| limits | minimum/maximum/increment, minimum notional, trading mode |
+| currencies | quote, settlement, margin, and P&L currency |
+| sessions | calendar, timezone, sessions, holidays |
+| margin/costs | margin method/rates, commission/spread basis, financing/funding or swap terms |
+| lifecycle | listing, close-only, suspension, expiry, notice, settlement, roll eligibility |
+| provenance | source connection, source/received time, freshness, normalization version |
+
+Type-specific validation requires custody/ownership and settlement for spot; issuer, reference
+underlying, lot definition, leverage, long/short financing, triple-swap day, and cash-adjustment
+policy for CFDs; and exchange, root, contract month, first-notice, last-trade, expiry, delivery or
+cash settlement, multiplier, tick value, and margin for futures.
+
+### FuturesSeries, FuturesContract, ContinuousFuture, and RollRule
+
+`FuturesSeries` identifies a venue/root. `FuturesContract` identifies one dated executable contract
+and stores listing/notice/last-trade/expiry/settlement fields and roll lineage. `ContinuousFuture`
+stores a synthetic analytical series and adjustment method; it cannot be tradable or referenced by
+HIL-2. A versioned `RollRule` defines safety buffers, liquidity/open-interest thresholds, and
+selection method. A `FuturesChainSnapshot` preserves all eligible/excluded contracts, source cutoff,
+and deterministically selected contract.
+
+### CorporateAction and FinancingObservation
+
+`CorporateAction` preserves point-in-time splits, dividends, rights, mergers, symbol changes,
+spinoffs, suspensions, and delistings with source/version and effective/ex dates. Raw/as-traded data
+remains separate from explicitly adjusted analytical series. `FinancingObservation` stores
+effective-dated CFD financing, swap, funding, borrow, and cash-adjustment terms with provenance.
+
+### ResearchLane, ResearchMatrixVersion, and ProviderBinding
+
+`ResearchLane` is the unique `(asset_class, instrument_type)` key; the initial matrix has 12 lanes.
+An immutable account-scoped `ResearchMatrixVersion` records required/enabled lanes, schedule version,
+and policy. `ProviderBinding` maps a lane and capability to a prioritized connection and exact
+provider/venue mapping, with authority purpose (`DISCOVERY`, `REFERENCE`, `EXECUTABLE_QUOTE`,
+`HISTORY`, `CONTRACT_TERMS`, or `BROKER_RECONCILIATION`), verification, freshness policy, and
+effective interval. Fallback never crosses instrument type or changes legal/execution semantics.
 
 ### MarketObservation
 
@@ -170,7 +226,9 @@ Common envelope for `Quote`, `TradePrint`, `Candle`, `OrderBookSnapshot`, `Order
 
 | Field | Type | Rules |
 |---|---|---|
-| instrument_id / venue_id | ID | Canonical and source identity |
+| instrument_id / venue_instrument_id | ID | Canonical expression and exact source listing |
+| asset_class / instrument_type | enum | Explicit research-lane identity |
+| specification_version_id | ID? | Required when observation semantics depend on contract terms |
 | source_time / received_at / normalized_at | instant | Preserve all clocks |
 | sequence / source_event_id | text? | Dedupe and gap checks |
 | value payload | typed object | Observation-specific schema |
@@ -189,16 +247,30 @@ freshness, and parser/normalization version.
 
 ### MarketFingerprint
 
-Immutable, instrument/time-bound decision snapshot containing technical, structure, liquidity,
+Immutable, lane/listing/time-bound decision snapshot containing asset class, instrument type, exact
+venue instrument or futures contract, specification version, technical, structure, liquidity,
 volatility, macro, sentiment, intermarket, event, session and risk-state references; structured
 classification and quality; evidence set; computation/agent versions; and code release.
 
-### ResearchRun and MarketSelection
+### ResearchRun, ResearchLaneResult, ResearchCandidate, and MarketSelection
 
-`ResearchRun` stores owner/account, requested market categories, source cut-off, job/workflow state,
-ranked candidates with factors, evidence, degradation, and agent executions. `MarketSelection` stores
-the run, one selected instrument per category, HIL-1 approval linkage, effective/expiry times, and
-replacement lineage.
+`ResearchRun` stores owner/account, matrix version, the 12 requested lane keys, shared source-cut
+references, job/workflow state, aggregate status/counts, archive manifest/checksum, and version.
+`ResearchLaneResult` stores run/lane, terminal state (`READY`, `NO_TRADE`, `NOT_CONFIGURED`,
+`UNAVAILABLE`, `STALE`, or `BLOCKED`), specialist execution, exclusions, candidate, evidence,
+freshness, error/capability/binding references, and completion time. Exactly one result exists per
+requested lane.
+
+`ResearchCandidate` references an immutable candidate ID, lane, exact venue instrument and dated
+contract where applicable, specification version, rank/factors, fingerprint, evidence and source
+cut. `MarketSelection` owns `MarketSelectionEntry` records keyed by lane, each linking the chosen
+candidate, HIL-1 decision, effective/expiry times, and replacement lineage. A replacement must stay
+within the same lane; unresolved lanes cannot progress to HIL-2.
+
+Pre-matrix category-only records retain their original payload and receive `LEGACY_UNTYPED` migration
+metadata. They remain auditable and readable, but no migration invents an instrument type, venue
+listing, dated contract, or specification version. A legacy selection becomes reusable only through
+an explicit verified mapping that creates a new typed selection version.
 
 ## Accounts, Policy, and Risk
 
@@ -213,8 +285,10 @@ snapshot reference. A prop account requires an active verified compatible rulese
 Immutable consistent broker cut containing account and connection IDs, broker sequence/cutoff,
 starting balance, current balance/equity, floating and realized daily P&L, used/free margin, high-water
 values, daily and total drawdown, open position/order references, source/received times, freshness,
-currency, FX-rate references, and digest. It cannot combine position and equity observations from
-incompatible cuts.
+currency, cash balances, owned-asset balances, FX-rate references, and digest. It cannot combine
+position, balance, and equity observations from incompatible cuts. Spot inventory is valued as owned
+underlying; CFD and futures exposure remains derivative exposure and is never converted into spot
+inventory.
 
 ### PropFirm, PropProgram, PropRuleset, and PropRule
 
@@ -250,19 +324,25 @@ scope, method, lookback, threshold/cap, fallback group, source data cutoff, and 
 
 ### RiskEvaluationContext and RiskCapacityResult
 
-The context is immutable and references the candidate, account snapshot, active ruleset, guardrails,
-open positions, active reservations, FX rates, instrument/broker terms, exposure model, market
-snapshot, and freshness observations.
+The context is immutable and references the candidate, exact venue instrument or futures contract,
+instrument-specification version, account snapshot, active ruleset, guardrails, open positions,
+active reservations, FX rates, instrument/broker terms, exposure model, market snapshot, and
+freshness observations.
 
-The result stores `PASS`, `REDUCE_SIZE`, or `HARD_BLOCK`; requested and compliant size; risk amount
-and percentage; maximum loss; daily/total/portfolio capacity before and after; reserved risk;
-projected direct/category/correlated exposure; open count/ceiling; candidate-specific additional
-capacity; every limiting constraint; calculation version; and expiry/revalidation trigger.
+The result stores `PASS`, `REDUCE_SIZE`, or `HARD_BLOCK`; requested and compliant size; quantity unit;
+notional exposure; initial/maintenance margin where applicable; risk amount and percentage; maximum
+loss; daily/total/portfolio capacity before and after; reserved risk; projected direct/category/
+correlated exposure; open count/ceiling; candidate-specific additional capacity; every limiting
+constraint; calculation version; and expiry/revalidation trigger.
 
 Validation invariants:
 
 - A missing/stale/mismatched context or unbounded Stop Loss produces `HARD_BLOCK`.
 - A compliant size rounds down to broker increments and never below a valid minimum.
+- Sizing dispatches by instrument type: spot uses owned quantity and price, CFD uses lots and broker
+  contract size, and futures uses whole contracts plus tick value/multiplier from the pinned contract.
+- Margin is recorded as a funding constraint and is never treated as maximum loss.
+- Exposure aggregates economically equivalent underlying risk across spot, CFD, and futures wrappers.
 - Tightening a hard limit or adding loss/exposure cannot increase permitted size or capacity.
 - Unrealized profit contributes only when the active policy explicitly defines it.
 - A hard-block result cannot create an actionable approval.
@@ -311,9 +391,13 @@ by backtest, paper, and live setup detection.
 
 ### BacktestRun, ValidationRun, PaperTradingRun, and PromotionDecision
 
-`BacktestRun` references point-in-time data cutoff/version, artifact, instrument profile, cost model,
-parameters, code, random seed, outputs, metrics, and integrity checks. `ValidationRun` contains ordered
-stage results for out-of-sample, walk-forward, stress/Monte Carlo, and account-policy simulation.
+`BacktestRun` references point-in-time data cutoff/version, artifact, exact venue listing or dated
+futures contract, pinned specification/calendar/FX versions, corporate-action set, financing/funding
+series, futures chain and roll rule when applicable, cost model, parameters, code, random seed,
+outputs, metrics, and integrity checks. A continuous futures series is analytical input only and
+cannot stand in for an executable dated contract. `ValidationRun` contains ordered stage results for
+out-of-sample, walk-forward, stress/Monte Carlo, lifecycle/roll and corporate-action stress, and
+account-policy simulation.
 `PaperTradingRun` stores forward signals/executions, account simulation and minimum evidence.
 `PromotionDecision` records criteria, evidence, user/system approver, decision, and audit linkage.
 
@@ -372,8 +456,10 @@ Allowed actions are type-specific:
 
 ### BrokerPosition and BrokerEvent
 
-`BrokerPosition` is the latest projection of provider position ID, account, instrument, direction,
-actual entry/size, Stop Loss/Take Profit, fees, P&L, broker version/timestamps, and freshness.
+`BrokerPosition` is the latest projection of provider position ID, account, canonical instrument,
+exact venue listing or dated futures contract, asset class, instrument type, pinned specification,
+direction, actual entry/size and quantity unit, Stop Loss/Take Profit, margin, financing/funding,
+fees, P&L, broker version/timestamps, and freshness.
 `BrokerEvent` is immutable and deduplicated by provider event/sequence; types include position opened,
 changed/closed, protection changed/executed, and account changed.
 
@@ -405,10 +491,13 @@ User
 ├── AgentConfigurationVersions ── Prompt/Tool/Model versions ── AgentExecutions
 ├── TradingAccounts
 │   ├── AccountSnapshots
+│   ├── ResearchMatrixVersions ── ProviderBindings
 │   ├── active PropRuleset + GuardrailProfile
 │   ├── PositionRiskReservations + ExposureSnapshots
 │   └── RiskEvaluationContexts ── RiskCapacityResults
-├── ResearchRuns ── MarketSelections ── HIL-1 Approvals
+├── UnderlyingAssets ── Instruments ── VenueInstruments ── SpecificationVersions
+│   └── FuturesSeries ── DatedContracts/ChainSnapshots/RollRules
+├── ResearchRuns ── 12 ResearchLaneResults ── MarketSelections ── HIL-1 Approvals
 ├── Strategies ── StrategyVersions
 │   ├── Drafts ── RuleRevisions/Suggestions/ChangeSets
 │   ├── Fingerprints/SimilarityAssessments
@@ -457,11 +546,30 @@ Stages cannot be skipped. A material change creates a new DRAFT linked to an imm
 ### Research and market selection
 
 ```text
-QUEUED -> RESEARCHING -> MARKETS_PENDING_APPROVAL
+QUEUED -> RESEARCHING -> each requested lane reaches
+  READY | NO_TRADE | NOT_CONFIGURED | UNAVAILABLE | STALE | BLOCKED
+all lanes terminal -> MARKETS_PENDING_APPROVAL
 MARKETS_PENDING_APPROVAL --APPROVE/REPLACE--> MARKETS_APPROVED
 MARKETS_PENDING_APPROVAL --RERUN_RESEARCH--> RESEARCHING (new run/version)
-any active state -> DEGRADED | NO_TRADE | EXPIRED
+any approved selection -> EXPIRED when its listing, contract, specification, or source cut expires
 ```
+
+A replacement remains in its original `(asset_class, instrument_type)` lane. A missing provider
+binding, mapping, authoritative contract specification, or dated futures contract produces an
+explicit non-ready result and cannot silently fall back to another instrument type.
+
+### Instrument mapping and lifecycle
+
+```text
+UNMAPPED -> MAPPED -> VERIFIED -> ACTIVE
+ACTIVE -> STALE | SUPERSEDED | DELISTED
+
+FUTURES_LISTED -> ACTIVE -> FIRST_NOTICE_APPROACHING | LAST_TRADE_APPROACHING
+-> ROLL_REQUIRED -> EXPIRED | SETTLED
+```
+
+Corporate actions, broker-term changes, contract rolls, mapping changes, and specification-version
+changes invalidate affected recommendations and force deterministic revalidation.
 
 ### Proposal and trade
 

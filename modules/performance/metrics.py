@@ -21,3 +21,8 @@ def aggregate(
         }
         for key, items in grouped.items()
     }
+
+
+def wrapper_metrics(records: list[PerformanceRecord]) -> dict[str, dict[str, Decimal | int]]:
+    """Compare spot, CFD, and futures results without mixing cost semantics."""
+    return aggregate(records, "instrument_type") if records else {}

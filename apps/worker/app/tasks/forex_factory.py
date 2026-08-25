@@ -93,14 +93,10 @@ async def _execute_forex_factory_scrape(run_id: UUID) -> dict[str, object]:
                 **connection.data,
                 "health": "HEALTHY" if reference.event_count else "STALE",
                 "last_checked": (
-                    checked_at
-                    if not reference.skipped
-                    else connection.data.get("last_checked")
+                    checked_at if not reference.skipped else connection.data.get("last_checked")
                 ),
                 "last_success": (
-                    checked_at
-                    if reference.event_count
-                    else connection.data.get("last_success")
+                    checked_at if reference.event_count else connection.data.get("last_success")
                 ),
                 "capabilities": ["news.read", "calendar.read", "forex_factory.scrape"],
                 "fresh": bool(reference.event_count),

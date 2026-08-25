@@ -87,9 +87,7 @@ class PointInTimeBacktester:
             candle = candles[index]
             window = [item.close for item in candles[max(0, index - 4) : index + 1]]
             mean = sum(window, Decimal("0")) / Decimal(len(window))
-            ranges = [
-                item.high - item.low for item in candles[max(0, index - 4) : index + 1]
-            ]
+            ranges = [item.high - item.low for item in candles[max(0, index - 4) : index + 1]]
             features = {
                 "open": candle.open,
                 "high": candle.high,

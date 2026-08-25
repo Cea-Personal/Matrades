@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
+from modules.market_data.models import CorporateAction, FuturesContract
+
 
 @dataclass(frozen=True)
 class TradeResult:
@@ -63,4 +65,21 @@ def metrics(trades: list[TradeResult]) -> dict[str, Decimal]:
         "mfe": sum((t.mfe for t in trades), Decimal("0")) / len(trades),
         "max_win_streak": Decimal(max_win_streak),
         "max_loss_streak": Decimal(max_loss_streak),
+    }
+
+
+def lifecycle_adjustment(action: CorporateAction, quantity: Decimal) -> Decimal:
+    if action.action_type in {"DIVIDEND", "CASH_ADJUSTMENT"}:
+        return quantity * (action.cash_amount or Decimal("0"))
+    return Decimal("0")
+
+
+def roll_reference(previous: FuturesContract, next_contract: FuturesContract) -> dict[str, str]:
+    if previous.series_id != next_contract.series_id:
+        raise ValueError("futures roll must remain within one series")
+    return {
+        "from_contract_id": str(previous.id),
+        "to_contract_id": str(next_contract.id),
+        "from_code": previous.contract_code,
+        "to_code": next_contract.contract_code,
     }

@@ -170,8 +170,7 @@ async def decide_selection(
         )
 
     selected = {
-        str(item["category"]): str(item["instrument"])
-        for item in run.data.get("candidates", [])
+        str(item["category"]): str(item["instrument"]) for item in run.data.get("candidates", [])
     }
     if action == "REPLACE":
         if payload.category is None or not payload.instrument:

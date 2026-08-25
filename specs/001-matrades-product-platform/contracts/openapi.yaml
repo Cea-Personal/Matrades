@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Matrades Application API
-  version: 1.0.0
+  version: 1.1.0
   description: >-
     Contract for authenticated configuration, research, strategy, risk, approval,
     reconciliation, monitoring, journal, and performance workflows. Broker execution
@@ -420,6 +420,98 @@ paths:
                 type: array
                 items: { $ref: '#/components/schemas/EffectiveConstraint' }
         default: { $ref: '#/components/responses/Error' }
+  /accounts/{account_id}/research-matrix:
+    get:
+      tags: [Research]
+      operationId: getAccountResearchMatrix
+      parameters:
+        - $ref: '#/components/parameters/AccountId'
+      responses:
+        '200':
+          description: Active versioned asset-class and instrument-type research matrix
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ResearchMatrix' }
+        default: { $ref: '#/components/responses/Error' }
+    put:
+      tags: [Research]
+      operationId: replaceAccountResearchMatrix
+      parameters:
+        - $ref: '#/components/parameters/AccountId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResearchMatrixInput' }
+      responses:
+        '200':
+          description: New immutable research-matrix version activated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ResearchMatrix' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        default: { $ref: '#/components/responses/Error' }
+  /accounts/{account_id}/provider-bindings:
+    get:
+      tags: [Configuration]
+      operationId: listAccountProviderBindings
+      parameters:
+        - $ref: '#/components/parameters/AccountId'
+      responses:
+        '200':
+          description: Effective capability bindings for the account's research lanes
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ProviderBinding' }
+        default: { $ref: '#/components/responses/Error' }
+    post:
+      tags: [Configuration]
+      operationId: createAccountProviderBinding
+      parameters:
+        - $ref: '#/components/parameters/AccountId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProviderBindingInput' }
+      responses:
+        '201':
+          description: Immutable provider-binding version created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProviderBinding' }
+        default: { $ref: '#/components/responses/Error' }
+  /instruments:
+    get:
+      tags: [Research]
+      operationId: listInstruments
+      parameters:
+        - name: asset_class
+          in: query
+          schema: { $ref: '#/components/schemas/AssetClass' }
+        - name: instrument_type
+          in: query
+          schema: { $ref: '#/components/schemas/InstrumentType' }
+        - name: connection_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: capability
+          in: query
+          schema: { $ref: '#/components/schemas/MarketDataCapability' }
+      responses:
+        '200':
+          description: Canonical instruments and exact provider or broker listings
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/InstrumentDescriptor' }
+        default: { $ref: '#/components/responses/Error' }
   /prop-rulesets:
     post:
       tags: [Accounts]
@@ -519,14 +611,16 @@ paths:
           application/json:
             schema:
               type: object
-              required: [account_id, market_categories]
+              required: [account_id]
               properties:
                 account_id: { type: string, format: uuid }
-                market_categories:
+                lanes:
                   type: array
-                  minItems: 3
+                  description: Omit to run every enabled lane in the account's active matrix
+                  minItems: 1
+                  maxItems: 12
                   uniqueItems: true
-                  items: { enum: [FOREX, METAL, CRYPTO] }
+                  items: { $ref: '#/components/schemas/ResearchLaneKey' }
       responses:
         '202':
           description: Research run queued
@@ -1231,24 +1325,152 @@ components:
           type: array
           items: { $ref: '#/components/schemas/EffectiveConstraint' }
         expires_at: { type: string, format: date-time }
+    AssetClass:
+      type: string
+      enum: [FOREX, METALS, CRYPTOCURRENCY, STOCKS]
+    InstrumentType:
+      type: string
+      enum: [SPOT, CFD, FUTURES]
+    MarketDataCapability:
+      type: string
+      enum: [INSTRUMENT_DIRECTORY, DISCOVERY, QUOTE, TRADES, CANDLES, ORDER_BOOK,
+        CONTRACT_DETAILS, FUTURES_CHAIN, OPEN_INTEREST, FUNDING, CORPORATE_ACTIONS,
+        BROKER_TRADABILITY, ACCOUNT_BALANCES]
+    ProviderAuthorityPurpose:
+      type: string
+      enum: [DISCOVERY, REFERENCE, EXECUTABLE_QUOTE, HISTORY, CONTRACT_TERMS,
+        BROKER_RECONCILIATION]
+    ResearchLaneKey:
+      type: object
+      required: [asset_class, instrument_type]
+      properties:
+        asset_class: { $ref: '#/components/schemas/AssetClass' }
+        instrument_type: { $ref: '#/components/schemas/InstrumentType' }
+    ResearchMatrixInput:
+      type: object
+      required: [lanes, schedule]
+      properties:
+        lanes:
+          type: array
+          minItems: 1
+          maxItems: 12
+          uniqueItems: true
+          items:
+            allOf:
+              - $ref: '#/components/schemas/ResearchLaneKey'
+              - type: object
+                required: [enabled]
+                properties:
+                  enabled: { type: boolean }
+        schedule: { type: object, additionalProperties: true }
+    ResearchMatrix:
+      allOf:
+        - $ref: '#/components/schemas/ResearchMatrixInput'
+        - type: object
+          required: [id, account_id, version, effective_from]
+          properties:
+            id: { type: string, format: uuid }
+            account_id: { type: string, format: uuid }
+            version: { type: integer, minimum: 1 }
+            effective_from: { type: string, format: date-time }
+    ProviderBindingInput:
+      type: object
+      required: [lane, capability, authority_purpose, connection_id, priority,
+        freshness_policy]
+      properties:
+        lane: { $ref: '#/components/schemas/ResearchLaneKey' }
+        capability: { $ref: '#/components/schemas/MarketDataCapability' }
+        authority_purpose: { $ref: '#/components/schemas/ProviderAuthorityPurpose' }
+        connection_id: { type: string, format: uuid }
+        priority: { type: integer, minimum: 1 }
+        provider_venue: { type: string }
+        freshness_policy: { type: object, additionalProperties: true }
+        effective_from: { type: string, format: date-time }
+    ProviderBinding:
+      allOf:
+        - $ref: '#/components/schemas/ProviderBindingInput'
+        - type: object
+          required: [id, account_id, version, verification_status]
+          properties:
+            id: { type: string, format: uuid }
+            account_id: { type: string, format: uuid }
+            version: { type: integer, minimum: 1 }
+            verification_status: { enum: [UNVERIFIED, VERIFIED, STALE, INVALID] }
+    InstrumentSpecification:
+      type: object
+      required: [id, version, effective_from, price_currency, quantity_unit, tick_size,
+        quantity_minimum, quantity_step, provenance, freshness]
+      properties:
+        id: { type: string, format: uuid }
+        version: { type: integer, minimum: 1 }
+        effective_from: { type: string, format: date-time }
+        effective_to: { type: [string, 'null'], format: date-time }
+        price_currency: { type: string }
+        settlement_currency: { type: string }
+        quantity_unit: { enum: [UNITS, SHARES, LOTS, CONTRACTS] }
+        contract_multiplier: { type: string }
+        tick_size: { type: string }
+        tick_value: { type: string }
+        quantity_minimum: { type: string }
+        quantity_maximum: { type: string }
+        quantity_step: { type: string }
+        margin_terms: { type: object, additionalProperties: true }
+        financing_terms: { type: object, additionalProperties: true }
+        expiry: { type: [string, 'null'], format: date-time }
+        first_notice: { type: [string, 'null'], format: date-time }
+        last_trade: { type: [string, 'null'], format: date-time }
+        provenance: { type: object, additionalProperties: true }
+        freshness: { enum: [VALID, SUSPECT, STALE, INVALID] }
+    InstrumentDescriptor:
+      type: object
+      required: [instrument_id, venue_instrument_id, venue, symbol, asset_class,
+        instrument_type, specification]
+      properties:
+        instrument_id: { type: string, format: uuid }
+        venue_instrument_id: { type: string, format: uuid }
+        venue: { type: string }
+        symbol: { type: string }
+        asset_class: { $ref: '#/components/schemas/AssetClass' }
+        instrument_type: { $ref: '#/components/schemas/InstrumentType' }
+        futures_contract_id: { type: [string, 'null'], format: uuid }
+        continuous_series: { type: boolean, default: false }
+        executable: { type: boolean, default: true }
+        specification: { $ref: '#/components/schemas/InstrumentSpecification' }
+    ResearchCandidate:
+      type: object
+      required: [candidate_id, lane, instrument, rank, evidence_refs]
+      properties:
+        candidate_id: { type: string, format: uuid }
+        lane: { $ref: '#/components/schemas/ResearchLaneKey' }
+        instrument: { $ref: '#/components/schemas/InstrumentDescriptor' }
+        rank: { type: integer, minimum: 1 }
+        evidence_refs: { type: array, items: { type: string } }
+    ResearchLaneResult:
+      type: object
+      required: [lane, status, completed_at]
+      properties:
+        lane: { $ref: '#/components/schemas/ResearchLaneKey' }
+        status: { enum: [READY, NO_TRADE, NOT_CONFIGURED, UNAVAILABLE, STALE, BLOCKED] }
+        candidate: { $ref: '#/components/schemas/ResearchCandidate' }
+        exclusions: { type: array, items: { type: object, additionalProperties: true } }
+        binding_id: { type: string, format: uuid }
+        source_cut_refs: { type: array, items: { type: string } }
+        reason_code: { type: string }
+        completed_at: { type: string, format: date-time }
     ResearchRun:
       type: object
-      required: [id, account_id, status, version]
+      required: [id, account_id, matrix_version, status, lane_results, version]
       properties:
         id: { type: string, format: uuid }
         account_id: { type: string, format: uuid }
+        matrix_version: { type: integer, minimum: 1 }
         status: { enum: [QUEUED, RESEARCHING, MARKETS_PENDING_APPROVAL, MARKETS_APPROVED,
           DEGRADED, NO_TRADE, FAILED, EXPIRED] }
-        candidates:
+        lane_results:
           type: array
-          items:
-            type: object
-            required: [instrument_id, market_category, rank, evidence_refs]
-            properties:
-              instrument_id: { type: string, format: uuid }
-              market_category: { enum: [FOREX, METAL, CRYPTO] }
-              rank: { type: integer, minimum: 1 }
-              evidence_refs: { type: array, items: { type: string } }
+          minItems: 1
+          maxItems: 12
+          items: { $ref: '#/components/schemas/ResearchLaneResult' }
         version: { type: integer }
     Hil1Decision:
       type: object
@@ -1259,10 +1481,10 @@ components:
           type: array
           items:
             type: object
-            required: [market_category, instrument_id]
+            required: [lane, candidate_id]
             properties:
-              market_category: { enum: [FOREX, METAL, CRYPTO] }
-              instrument_id: { type: string, format: uuid }
+              lane: { $ref: '#/components/schemas/ResearchLaneKey' }
+              candidate_id: { type: string, format: uuid }
     StrategyDraftInput:
       type: object
       required: [origin_type]
@@ -1280,11 +1502,13 @@ components:
         market_selection_id: { type: string, format: uuid }
         market_research_run_id: { type: string, format: uuid }
         account_id: { type: string, format: uuid }
-        instrument: { type: string }
-        category: { enum: [FOREX, METAL, CRYPTO] }
+        candidate_id: { type: string, format: uuid }
+        instrument: { $ref: '#/components/schemas/InstrumentDescriptor' }
+        lane: { $ref: '#/components/schemas/ResearchLaneKey' }
         market_observed_at: { type: string, format: date-time }
         historical_connection_id: { type: string, format: uuid }
-        historical_provider: { enum: [TWELVE_DATA, COINBASE] }
+        historical_provider: { type: string }
+        source_cut_refs: { type: array, items: { type: string } }
     RuleChange:
       type: object
       required: [rule_path, value]
@@ -1389,15 +1613,22 @@ components:
               score: { type: number }
     TradeConstruction:
       type: object
-      required: [instrument_id, direction, entry, stop_loss, targets, requested_size]
+      required: [instrument_id, venue_instrument_id, specification_version_id, asset_class,
+        instrument_type, direction, entry, stop_loss, targets, requested_size, quantity_unit]
       properties:
         instrument_id: { type: string, format: uuid }
+        venue_instrument_id: { type: string, format: uuid }
+        specification_version_id: { type: string, format: uuid }
+        futures_contract_id: { type: [string, 'null'], format: uuid }
+        asset_class: { $ref: '#/components/schemas/AssetClass' }
+        instrument_type: { $ref: '#/components/schemas/InstrumentType' }
         direction: { enum: [BUY, SELL] }
         entry: { type: string }
         entry_zone: { type: object, additionalProperties: true }
         stop_loss: { type: string }
         targets: { type: array, minItems: 1, items: { type: string } }
         requested_size: { type: string }
+        quantity_unit: { enum: [UNITS, SHARES, LOTS, CONTRACTS] }
         invalidation: { type: object, additionalProperties: true }
     TradeProposal:
       type: object

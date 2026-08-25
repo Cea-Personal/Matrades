@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from uuid import NAMESPACE_URL, uuid5
 
 from adapters.market_data.coinbase.client import CoinbaseClient
 from adapters.market_data.twelve_data.client import TwelveDataClient
 from modules.connections.models import ConnectionProvider
-from modules.research.models import MarketCategory, ResearchSnapshot
+from modules.market_data.models import InstrumentSpecificationVersion, VenueInstrument
+from modules.research.models import MarketCategory, ResearchSnapshot, TypedResearchSnapshot
 from packages.shared.config import Settings
+from packages.shared.domain_types import AssetClass, InstrumentType, QuantityUnit, ResearchLaneKey
 
 
 class ResearchDataUnavailable(RuntimeError):
@@ -53,10 +56,7 @@ class LiveResearchDataProvider:
                 and ConnectionProvider.COINBASE not in self.enabled_providers
             ):
                 raise ResearchDataUnavailable("Coinbase connection is not configured or active")
-            tasks = [
-                self._coinbase_snapshot(symbol)
-                for symbol in _symbols(self.crypto_universe)
-            ]
+            tasks = [self._coinbase_snapshot(symbol) for symbol in _symbols(self.crypto_universe)]
         else:
             if (
                 self.enabled_providers is not None
@@ -66,9 +66,7 @@ class LiveResearchDataProvider:
             if self.twelve_data is None:
                 raise ResearchDataUnavailable("Twelve Data credential is not configured")
             universe = (
-                self.forex_universe
-                if category == MarketCategory.FOREX
-                else self.metals_universe
+                self.forex_universe if category == MarketCategory.FOREX else self.metals_universe
             )
             tasks = [self._twelve_data_snapshot(symbol, category) for symbol in _symbols(universe)]
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -76,6 +74,66 @@ class LiveResearchDataProvider:
         if not snapshots:
             raise ResearchDataUnavailable(f"No fresh {category.value} observations were returned")
         return snapshots
+
+    async def gather_lane(self, lane: ResearchLaneKey) -> list[TypedResearchSnapshot]:
+        """Discover candidates for a configured lane without accepting a symbol as its type."""
+        if lane.instrument_type is not InstrumentType.SPOT:
+            raise ResearchDataUnavailable(
+                f"{lane.instrument_type.value} authority is not configured for "
+                f"{lane.asset_class.value}"
+            )
+        category = {
+            AssetClass.FOREX: MarketCategory.FOREX,
+            AssetClass.METALS: MarketCategory.METAL,
+            AssetClass.CRYPTOCURRENCY: MarketCategory.CRYPTO,
+        }.get(lane.asset_class)
+        if category is None:
+            raise ResearchDataUnavailable("stock instrument directory is not configured")
+        snapshots = await self.gather(category)
+        typed: list[TypedResearchSnapshot] = []
+        for snapshot in snapshots:
+            listing_id = uuid5(
+                NAMESPACE_URL, f"matrades:{snapshot.source}:{snapshot.instrument}:SPOT"
+            )
+            underlying_id = uuid5(NAMESPACE_URL, f"matrades:underlying:{snapshot.instrument}")
+            listing = VenueInstrument(
+                id=listing_id,
+                underlying_id=underlying_id,
+                venue=snapshot.source,
+                provider=snapshot.source,
+                symbol=snapshot.instrument,
+                asset_class=lane.asset_class,
+                instrument_type=lane.instrument_type,
+            )
+            specification = InstrumentSpecificationVersion(
+                venue_instrument_id=listing.id,
+                effective_from=snapshot.observed_at,
+                price_currency="USD",
+                quantity_unit=(
+                    QuantityUnit.UNITS
+                    if lane.asset_class is not AssetClass.STOCKS
+                    else QuantityUnit.SHARES
+                ),
+                provenance={"provider": snapshot.source, "source_cut_id": snapshot.source_version},
+            )
+            typed.append(
+                TypedResearchSnapshot(
+                    listing=listing,
+                    specification=specification,
+                    closes=snapshot.closes,
+                    bid=snapshot.bid,
+                    ask=snapshot.ask,
+                    volume=snapshot.volume,
+                    observed_at=snapshot.observed_at,
+                    source=snapshot.source,
+                    source_version=snapshot.source_version,
+                    source_cut_id=snapshot.source_version,
+                    macro_score=snapshot.macro_score,
+                    sentiment_score=snapshot.sentiment_score,
+                    event_risk=snapshot.event_risk,
+                )
+            )
+        return typed
 
     async def _twelve_data_snapshot(
         self, symbol: str, category: MarketCategory

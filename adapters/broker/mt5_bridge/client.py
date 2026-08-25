@@ -8,7 +8,7 @@ from uuid import UUID
 
 import httpx
 
-from packages.broker_sdk.schemas import BrokerSnapshot
+from packages.broker_sdk.schemas import BrokerInstrument, BrokerSnapshot
 
 
 class Mt5BridgeClient:
@@ -50,3 +50,19 @@ class Mt5BridgeClient:
         response = await self.client.get("/health", headers=self.headers())
         response.raise_for_status()
         return response.json()
+
+    async def instruments(self, account_id: UUID) -> list[BrokerInstrument]:
+        response = await self.client.get(
+            "/instruments", params={"account_id": str(account_id)}, headers=self.headers()
+        )
+        response.raise_for_status()
+        return [BrokerInstrument.model_validate(item) for item in response.json()]
+
+    async def symbol_details(self, account_id: UUID, symbol: str) -> BrokerInstrument:
+        response = await self.client.get(
+            "/symbol-details",
+            params={"account_id": str(account_id), "symbol": symbol},
+            headers=self.headers(),
+        )
+        response.raise_for_status()
+        return BrokerInstrument.model_validate(response.json())

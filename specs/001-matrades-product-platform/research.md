@@ -1,6 +1,6 @@
 # Phase 0 Research: Matrades Product Platform
 
-**Date**: 2026-08-23
+**Date**: 2026-08-25
 **Status**: Complete — no unresolved technical clarifications
 
 This document consolidates the three supplied plans, the product specification, current primary
@@ -145,14 +145,24 @@ Stable permission sets remain outside both runtimes.
 ## 8. Provider and adapter strategy
 
 **Decision**: Use capability contracts for model, market, macro, positioning, calendar, news,
-broker, embedding, blob, and notification providers. V1 bindings are Twelve Data for Forex/metals,
-Coinbase for exchange crypto data, CoinGecko for broader discovery, FRED, CFTC COT, configurable
-calendar/news providers, and the MT5 bridge. One connection manager per configured stream performs
-validation, canonical mapping, deduplication, gap detection/backfill, bounded reordering, rate-limit
-handling, reconnect backoff, and freshness health.
+broker, embedding, blob, and notification providers. Market connections declare asset classes,
+instrument types, venues, history depth, freshness, and supported capabilities such as discovery,
+quotes, candles, contract details, futures chains, open interest, funding, corporate actions, and
+broker tradability. Routing resolves owner/account → research lane → required capability → explicit
+authoritative binding → healthy connection → canonical provider-instrument mapping. V1 retains
+Twelve Data, Coinbase, CoinGecko, FRED, CFTC COT, configurable calendar/news providers, and the MT5
+bridge, but does not infer that any one provider covers every lane.
+
+For CFDs, the account broker's quote and effective-dated contract terms are authoritative; an
+underlying spot or futures feed is reference evidence only. For futures, chain-capable providers may
+support discovery and history, but HIL-1 and later stages reference a concrete dated contract.
+Priority fallback is permitted only among explicitly configured bindings that preserve the same
+asset class, instrument type, venue semantics, and required capability.
 
 **Rationale**: The specification supersedes older plan references to Binance. Central ingestion
 prevents inconsistent agent views and enables source substitution without changing business rules.
+Capability routing prevents a healthy spot source from being silently treated as an executable CFD
+or futures source and makes incomplete matrix coverage visible.
 
 **Alternatives considered**:
 
@@ -160,6 +170,9 @@ prevents inconsistent agent views and enables source substitution without changi
 - Direct agent-provider access: rejected because it bypasses normalization, freshness, and permission
   controls.
 - CoinGecko for live exchange authority: rejected; its role is broad discovery and metadata.
+- One provider per asset class: rejected because capability and legal/execution semantics differ by
+  instrument type and venue.
+- Automatic cross-type substitution: rejected because it changes ownership, cost, margin, and risk.
 
 ## 9. Financial conventions and consistent risk context
 
@@ -327,6 +340,140 @@ stream retention can be tiered for cost. Explicit recovery targets make durabili
   retains minimal compliance/audit tombstones.
 - Backup without restore tests: rejected because an untested backup is not a recovery control.
 
+## 18. Canonical instrument identity and specification authority
+
+**Decision**: Separate `UnderlyingAsset`, typed `Instrument`, exact `VenueInstrument`, and dated
+`FuturesContract` identities. A `ResearchLane` is the stable `(asset_class, instrument_type)` key.
+Effective-dated immutable `InstrumentSpecificationVersion` records preserve quantity unit,
+multiplier, tick size/value, quote/settlement/margin/P&L currencies, minimum/maximum/increment,
+calendar, margin, financing/funding, ownership semantics, expiry/notice/roll fields, source,
+freshness, and normalization version. Provider symbols are aliases, never IDs. Broker-issued CFDs
+remain distinct across issuers even when they reference the same underlying.
+
+**Rationale**: A symbol such as `XAUUSD` may represent spot metal, a broker CFD, or a synthetic
+provider series. A futures root or continuous series is not an executable dated contract. Separate
+identities prevent cross-type price, sizing, reconciliation, and replay errors while preserving
+shared-underlying exposure aggregation.
+
+**Alternatives considered**:
+
+- Symbol plus type as the identity: rejected because venue, issuer, currency, and expiry still
+  collide.
+- Provider symbols as canonical IDs: rejected because they create lock-in and ambiguous aliases.
+- One sparse record with every optional product field: rejected because impossible combinations
+  become difficult to validate.
+
+## 19. Twelve-lane research orchestration and HIL-1
+
+**Decision**: Each scheduled account run creates 12 durable lane results for Forex, metals,
+cryptocurrency, and stocks crossed with spot, CFD, and futures. A lane ends in `READY`, `NO_TRADE`,
+`NOT_CONFIGURED`, `UNAVAILABLE`, `STALE`, or `BLOCKED`; a healthy lane contains at most one top
+candidate. The aggregate becomes `MARKETS_PENDING_APPROVAL` only when required lane policy permits;
+otherwise it is visibly `DEGRADED`, while healthy results remain reviewable and unresolved lanes
+cannot reach HIL-2. HIL-1 replacement keys include both dimensions and cannot switch types silently.
+
+Add protected `stocks_research` as the fourth asset-class specialist, raising the required registry
+to 16. Each asset-class specialist ranks its three types independently; shared technical,
+fundamental, sentiment, regime, and critic roles retain cross-asset contracts.
+
+**Rationale**: Twelve independent terminal records prove coverage and isolate failure without
+fabricating a result or discarding valid evidence. Candidate IDs, not symbols, prevent score and
+approval collisions between wrappers over one underlying.
+
+**Alternatives considered**:
+
+- One result per asset class: rejected because it collapses spot, CFD, and futures.
+- Twelve unrelated workflows: rejected because provider source cuts and common evidence should be
+  reused.
+- Letting the Orchestrator research stocks: rejected because its authority is coordination, not
+  specialist market ranking.
+
+## 20. Instrument-aware valuation, sizing, and aggregate exposure
+
+**Decision**: Dispatch deterministic valuation by instrument type using fixed-precision decimals
+and explicit units. Spot exposure uses native quantity and cash/underlying availability; CFD P&L
+uses broker quantity, contract multiplier, price movement, financing, and cash adjustments; futures
+P&L uses exact contract count, tick movement, and tick value. Notional, required margin, and maximum
+loss remain distinct.
+
+Sizing calculates loss per minimum quantity increment from entry to Stop Loss, adds spread,
+commission, slippage/gap allowance, financing where applicable, and currency conversion, divides the
+permitted risk budget, rounds down, and recalculates risk, margin, portfolio, category, and correlated
+exposure. Missing or stale loss-critical terms hard-block HIL-2. Exposure groups aggregate the same
+underlying across spot, CFD, and futures.
+
+**Rationale**: One share, one coin, one CFD lot, and one futures contract do not represent the same
+quantity or loss. Margin is collateral, not a loss bound, and wrapper diversity is not economic
+diversification.
+
+**Alternatives considered**:
+
+- A universal lot unit: rejected as ambiguous and unsafe.
+- Nearest-increment rounding: rejected because it can exceed the risk budget.
+- Free margin as risk capacity: rejected because it does not bound loss.
+
+## 21. Futures, corporate actions, financing, and deterministic replay
+
+**Decision**: Rank and approve exact executable futures contracts selected from a point-in-time
+chain using configured liquidity, open-interest, first-notice, last-trade, and roll rules.
+Continuous/back-adjusted series may generate analytical signals but are never tradable identities;
+rolls are explicit new decisions and transactions. Persist stock splits, dividends, rights, mergers,
+symbol changes, spinoffs, suspensions, and delistings as point-in-time corporate actions. Persist CFD
+financing and broker cash-adjustment terms as effective-dated observations.
+
+Backtest, paper, and live evaluation pin the executable listing, specification version, universe
+membership, raw data cut, calendar, FX cut, cost/financing/funding model, corporate-action treatment,
+futures chain and roll rule, rounding order, evaluator/code version, and random seed. Stock tests
+retain delisted constituents; CFD profiles cannot pass validation without reliable historical terms.
+
+**Rationale**: Silent rolls, retrospective adjusted fills, omitted financing, and survivorship bias
+make results irreproducible and overstate performance.
+
+**Alternatives considered**:
+
+- Trade a continuous futures symbol: rejected because it is synthetic.
+- Use adjusted stock prices as historical fills: rejected because the adjustment was not executable.
+- Reuse spot validation for CFDs/futures: rejected because costs and lifecycle differ materially.
+
+## 22. Shared source cuts, quotas, and account-specific filtering
+
+**Decision**: Preserve each trading account's schedule, but resolve its lane manifest into shared
+provider source-cut jobs. Deduplicate requests by connection, provider instrument, capability,
+timeframe, and cutoff; then apply account-specific broker tradability, policy, and risk filtering.
+Use per-connection token buckets, endpoint cost weights, batching, `Retry-After`, bounded retries,
+and circuit breakers. Health probes remain separate from research symbol calls.
+
+**Rationale**: Running the same provider fetch independently for every account wastes quota and can
+produce inconsistent evidence cuts, while one global final ranking would ignore account-specific
+tradability and policy.
+
+**Alternatives considered**:
+
+- Full provider run per account: rejected because it duplicates calls.
+- One global schedule and ranking: rejected because account schedules and eligibility differ.
+- Cache final candidates only: rejected because account filters and decision evidence must remain
+  reproducible.
+
+## 23. Migration from category-only instrument records
+
+**Decision**: Use an expand/compatibility/contract migration. Preserve existing category-only
+research, selection, proposal, and trade records as immutable `LEGACY_UNTYPED` evidence. Add typed
+lane, venue-listing, specification-version, and dated-contract references without guessing values;
+backfill only mappings proven by historical broker/provider evidence. Dual-read during the migration,
+require typed references for all new actionable writes, regenerate clients together, and retire the
+legacy write shape only after every worker and UI consumer supports the new contract.
+
+**Rationale**: A legacy `XAUUSD` or similar symbol cannot prove whether the original semantics were
+spot, a broker-issued CFD, or a provider's analytical series. Guessing would corrupt audit history
+and could cause unsafe reuse, while deleting it would break reconstructability.
+
+**Alternatives considered**:
+
+- Infer type from symbol: rejected because symbols are provider-specific aliases.
+- Rewrite historical records in place: rejected because it destroys the original evidence shape.
+- Big-bang destructive migration: rejected because mixed worker/UI versions and rollback would be
+  unsafe.
+
 ## Primary Sources
 
 - [Python version support](https://devguide.python.org/versions/)
@@ -341,3 +488,7 @@ stream retention can be tiered for cost. Explicit recovery targets make durabili
 - [Codex SDK](https://learn.chatgpt.com/docs/codex-sdk)
 - [Codex App Server](https://learn.chatgpt.com/docs/app-server)
 - [Codex cloud environments](https://learn.chatgpt.com/docs/environments/cloud-environment)
+- [Twelve Data API documentation](https://twelvedata.com/docs/introduction/quickstart)
+- [Coinbase Advanced Trade product contract](https://docs.cdp.coinbase.com/api-reference/advanced-trade-api/rest-api/products/get-product)
+- [MQL5 symbol and contract properties](https://www.mql5.com/en/docs/constants/environment_state/marketinfoconstants)
+- [IBKR contract definitions](https://interactivebrokers.github.io/tws-api/basic_contracts.html)

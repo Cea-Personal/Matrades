@@ -4,10 +4,21 @@ from modules.trading.broker_models import ActiveTrade
 
 
 def monitoring_facts(
-    trade: ActiveTrade, current_price: Decimal, policy_valid: bool, bridge_fresh: bool
+    trade: ActiveTrade,
+    current_price: Decimal,
+    policy_valid: bool,
+    bridge_fresh: bool,
+    lifecycle_events: list[str] | None = None,
 ) -> dict[str, object]:
     if not bridge_fresh:
         return {"actionable": False, "reason": "broker state stale"}
+    lifecycle_events = lifecycle_events or []
+    if lifecycle_events:
+        return {
+            "actionable": False,
+            "reason": "typed instrument lifecycle requires revalidation",
+            "revalidation_events": lifecycle_events,
+        }
     position = trade.broker_position
     invalidated = (
         position.direction == "BUY"

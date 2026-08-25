@@ -20,7 +20,7 @@ Every logical-agent invocation accepts a versioned envelope:
 | `user_prompt_version_id` | yes | Independently resolved prompt version |
 | `tool_permission_set_version_id` | yes | Immutable allowed-tool authority |
 | `owner_id` / `account_id` | scoped | Authorization and data-isolation scope |
-| `context_refs` | yes | Immutable structured snapshot/evidence references |
+| `context_refs` | yes | Immutable structured snapshot/evidence references, including lane, exact listing or dated contract, and specification version when market-scoped |
 | `requested_at` / `deadline_at` | yes | UTC timing and timeout boundary |
 | `correlation_id` / `causation_id` | yes | Audit chain |
 
@@ -62,9 +62,10 @@ critical workflows block or degrade according to role policy.
 | Agent ID | Core responsibility | Typical inputs | Output boundary |
 |---|---|---|---|
 | `orchestrator` | Coordinate bounded agent steps | Workflow state and contracts | Next requested step; never a hard financial decision |
-| `forex_research` | Rank Forex candidates | Normalized research snapshots | Ranked evidence and exclusions |
-| `metals_research` | Rank metals candidates | Normalized research snapshots | Ranked evidence and exclusions |
-| `crypto_research` | Rank crypto candidates | Coinbase/CoinGecko normalized context | Ranked evidence and exclusions |
+| `forex_research` | Rank Forex candidates by instrument type | Normalized spot/CFD/futures lane snapshots | One candidate or explicit terminal failure per enabled Forex lane |
+| `metals_research` | Rank metals candidates by instrument type | Normalized spot/CFD/futures lane snapshots | One candidate or explicit terminal failure per enabled metals lane |
+| `crypto_research` | Rank crypto candidates by instrument type | Normalized spot/CFD/futures lane snapshots | One candidate or explicit terminal failure per enabled crypto lane |
+| `stocks_research` | Rank stock candidates by instrument type | Normalized spot/CFD/futures lane snapshots | One candidate or explicit terminal failure per enabled stocks lane |
 | `technical_analyst` | Interpret technical evidence | Deterministic indicator/structure results | Structured interpretation |
 | `fundamental_analyst` | Interpret macro/events/news | Structured macro/event evidence | Bias, conflicts, event risks |
 | `sentiment_analyst` | Interpret positioning/sentiment | Structured observations | Bias, crowding, conflicts |
@@ -79,6 +80,13 @@ critical workflows block or degrade according to role policy.
 
 Required definitions cannot be deleted. Registry evolution requires an approved constitution or
 product-specification change.
+
+Research specialists receive candidates already classified by canonical `(asset_class,
+instrument_type)`, exact venue listing or dated futures contract, provider binding, source cut, and
+instrument-specification version. They rank each enabled lane independently and cannot relabel a
+candidate, substitute another instrument type, invent a listing, or treat a continuous futures
+series as executable. The orchestrator may aggregate the 12 terminal lane results but cannot turn a
+non-ready lane into a recommendation.
 
 ## Runtime, Model, and Prompt Resolution
 
@@ -140,7 +148,11 @@ structured facts. Risk and Policy engines are not agents and never consume seman
 
 ## Contract Tests
 
-- Validate all 15 IDs, required capabilities, and protected status.
+- Validate all 16 IDs, required capabilities, and protected status.
+- Validate that each of the four asset-class specialists returns one terminal result for each of its
+  three instrument-type lanes and cannot cross-substitute lanes.
+- Reject missing/stale venue mappings, specification versions, dated futures contracts, or source
+  cuts; prove continuous futures series are analytical only.
 - Verify every required agent resolves to `CODEX_APP_SERVER` when no explicit override exists.
 - Verify LiteLLM runs only after an explicit agent/profile assignment and never by automatic fallback.
 - Exercise every system/user prompt inheritance combination independently.

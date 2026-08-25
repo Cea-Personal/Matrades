@@ -6,16 +6,37 @@ from modules.policy.effective_limits import strictest_applicable
 from modules.policy.models import ConstraintKind
 from modules.risk.drawdown import daily_loss, total_drawdown
 from modules.risk.exposure import aggregate_exposure
+from modules.risk.financial_math import notional_exposure, type_aware_loss_per_unit
 from modules.risk.models import CandidateTrade, RiskContext, RiskDecision, RiskResult, RiskSnapshot
 from modules.risk.position_sizing import compliant_size
 from modules.risk.reserved_risk import reserved_risk
 from modules.risk.trade_capacity import additional_trade_capacity
+from packages.shared.domain_types import InstrumentType
 
 
 class RiskEngine:
     """Deterministic authority. More restrictive applicable capacity always wins."""
 
     def evaluate(self, context: RiskContext, candidate: CandidateTrade) -> RiskResult:
+        typed_error = self._validate_typed_candidate(candidate)
+        if typed_error is not None:
+            return self._missing_authority(context, candidate, [typed_error])
+        if candidate.instrument_type is not None:
+            authority_error = self._validate_specification_authority(context, candidate)
+            if authority_error is not None:
+                return self._missing_authority(context, candidate, [authority_error])
+            candidate = candidate.model_copy(
+                update={
+                    "risk_per_unit": type_aware_loss_per_unit(
+                        instrument_type=candidate.instrument_type,
+                        entry=candidate.entry_price,
+                        stop=candidate.stop_loss,
+                        contract_multiplier=candidate.contract_multiplier,
+                        tick_size=candidate.tick_size,
+                        tick_value=candidate.tick_value,
+                    )
+                }
+            )
         limits = strictest_applicable(context.constraints)
         required = {
             ConstraintKind.MAX_TOTAL_DRAWDOWN,
@@ -52,7 +73,9 @@ class RiskEngine:
                 str(exc),
             )
         remaining_portfolio = max(Decimal("0"), allowed_portfolio - existing)
-        requested_risk = candidate.requested_size * candidate.risk_per_unit
+        requested_risk = (
+            candidate.requested_size * candidate.risk_per_unit + candidate.financing_cost
+        )
         capacities = [remaining_dd, remaining_daily, remaining_portfolio]
         exposures = aggregate_exposure(context.positions, candidate, requested_risk)
         correlation_remaining: list[Decimal] = []
@@ -66,7 +89,11 @@ class RiskEngine:
         size = compliant_size(
             candidate.requested_size, candidate.risk_per_unit, capacities, candidate.size_increment
         )
-        approved_risk = size * candidate.risk_per_unit
+        if candidate.financing_cost > min(capacities):
+            size = Decimal("0")
+        approved_risk = size * candidate.risk_per_unit + (
+            candidate.financing_cost if size > 0 else Decimal("0")
+        )
         capacity = additional_trade_capacity(
             static_max=context.static_max_concurrent_trades,
             open_trades=len(context.positions),
@@ -107,8 +134,8 @@ class RiskEngine:
             daily_loss_remaining=remaining_daily,
             existing_open_risk=existing,
             existing_correlated_exposure=aggregate_exposure(context.positions),
-            candidate_trade_risk=size * candidate.risk_per_unit,
-            portfolio_risk_after_trade=existing + size * candidate.risk_per_unit,
+            candidate_trade_risk=approved_risk,
+            portfolio_risk_after_trade=existing + approved_risk,
             remaining_total_loss_capacity=remaining_dd,
             remaining_portfolio_risk_capacity=remaining_portfolio,
             open_trades=len(context.positions),
@@ -120,6 +147,24 @@ class RiskEngine:
             constraint_versions=sorted(
                 f"{item.source}:{item.source_version}" for item in limits.values()
             ),
+            asset_class=candidate.asset_class,
+            instrument_type=candidate.instrument_type,
+            venue_instrument_id=candidate.venue_instrument_id,
+            futures_contract_id=candidate.futures_contract_id,
+            specification_version_id=candidate.specification_version_id,
+            quantity_unit=candidate.quantity_unit,
+            notional_exposure=(
+                notional_exposure(
+                    instrument_type=candidate.instrument_type or InstrumentType.SPOT,
+                    price=candidate.entry_price,
+                    quantity=size,
+                    contract_multiplier=candidate.contract_multiplier,
+                )
+                if size > 0
+                else Decimal("0")
+            ),
+            margin_required=candidate.margin_required,
+            financing_cost=candidate.financing_cost,
         )
         return RiskResult(
             decision=decision,
@@ -182,12 +227,8 @@ class RiskEngine:
     def _missing_authority(
         self, context: RiskContext, candidate: CandidateTrade, missing: list[str]
     ) -> RiskResult:
-        drawdown = total_drawdown(
-            context.account.starting_balance, context.account.current_equity
-        )
-        used_daily = daily_loss(
-            context.account.realized_daily_pnl, context.account.floating_pnl
-        )
+        drawdown = total_drawdown(context.account.starting_balance, context.account.current_equity)
+        used_daily = daily_loss(context.account.realized_daily_pnl, context.account.floating_pnl)
         return self._blocked(
             context,
             candidate,
@@ -199,6 +240,44 @@ class RiskEngine:
             Decimal("0"),
             f"required risk authority unavailable: {', '.join(missing)}",
         ).model_copy(update={"limiting_constraints": missing})
+
+    @staticmethod
+    def _validate_typed_candidate(candidate: CandidateTrade) -> str | None:
+        if candidate.instrument_type is None:
+            return None
+        if candidate.venue_instrument_id is None:
+            return "missing_venue_instrument_id"
+        if candidate.specification_version_id is None:
+            return "missing_specification_version_id"
+        if candidate.quantity_unit is None:
+            return "missing_quantity_unit"
+        if candidate.instrument_type is InstrumentType.FUTURES:
+            if candidate.futures_contract_id is None:
+                return "missing_dated_futures_contract_id"
+            if candidate.tick_size is None or candidate.tick_value is None:
+                return "missing_futures_tick_terms"
+        return None
+
+    @staticmethod
+    def _validate_specification_authority(
+        context: RiskContext, candidate: CandidateTrade
+    ) -> str | None:
+        if candidate.specification_version_id is None:
+            return "missing_specification_version_id"
+        specification = context.instrument_specifications.get(
+            str(candidate.specification_version_id)
+        )
+        if specification is None:
+            return "missing_effective_specification"
+        if str(specification.get("freshness", "")) != "VALID":
+            return "stale_instrument_specification"
+        if (
+            context.current_source_cut_id
+            and specification.get("source_cut_id")
+            and specification.get("source_cut_id") != context.current_source_cut_id
+        ):
+            return "specification_source_cut_mismatch"
+        return None
 
     @staticmethod
     def _limit_from_source(context: RiskContext, source_fragment: str) -> Decimal | None:

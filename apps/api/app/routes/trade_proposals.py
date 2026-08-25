@@ -153,9 +153,7 @@ async def hil2_decision(
     }[payload.action]
     reservation_id = record.data.get("reservation_id")
     if reservation_id:
-        reservation = await store.get(
-            "risk_reservation", UUID(reservation_id), actor.owner_id
-        )
+        reservation = await store.get("risk_reservation", UUID(reservation_id), actor.owner_id)
         if reservation:
             reservation_state = "CONFIRMED" if payload.action == Hil2Action.TAKE else "RELEASED"
             await store.update(

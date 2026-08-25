@@ -32,6 +32,9 @@ type AccountSchedule = {
   next_run_at: string | null;
 };
 type ResearchArtifact = { run_id: string; cycle_type: string; state: string; completed_at: string; relative_path: string; checksum: string };
+type MatrixLane = { asset_class: string; instrument_type: string; enabled: boolean };
+type Matrix = { account_id: string; version: number; lanes: MatrixLane[]; schedule: AccountSchedule };
+type TypedLaneResult = { lane: { asset_class: string; instrument_type: string }; status: string; reason_code?: string; candidate?: { listing: { symbol: string; venue: string }; score: number; evidence: string[] } };
 
 const categories = ["FOREX", "METAL", "CRYPTO"];
 
@@ -50,6 +53,8 @@ export function MarketSelection() {
   const [scheduleDraft, setScheduleDraft] = useState<AccountSchedule | null>(null);
   const [message, setMessage] = useState("");
   const selectedAccountId = accountId || accounts.data?.[0]?.id || "";
+  const matrix = useQuery<Matrix>({ queryKey: ["research", "matrix", selectedAccountId], queryFn: () => api(`/accounts/${selectedAccountId}/research-matrix`), enabled: Boolean(selectedAccountId) });
+  const typedRuns = useQuery<Resource[]>({ queryKey: ["research", "typed-runs", selectedAccountId], queryFn: () => api(`/research-runs?account_id=${selectedAccountId}`), enabled: Boolean(selectedAccountId), refetchInterval: 10000 });
   const accountSchedule = useQuery<AccountSchedule>({
     queryKey: ["configuration", "account", selectedAccountId, "research-schedule"],
     queryFn: () => api(`/configuration/accounts/${selectedAccountId}/research-schedule`),
@@ -58,6 +63,8 @@ export function MarketSelection() {
   const editableSchedule = scheduleDraft?.account_id === selectedAccountId ? scheduleDraft : accountSchedule.data;
 
   const latest = runs.data?.find(item => String(item.account_id) === selectedAccountId);
+  const typedLatest = typedRuns.data?.find(item => String(item.account_id) === selectedAccountId);
+  const typedResults = (typedLatest?.lane_results as TypedLaneResult[] | undefined) ?? [];
   const candidates = (latest?.candidates as Candidate[] | undefined) ?? [];
   const refresh = async () => { await queryClient.invalidateQueries({ queryKey: ["research"] }); };
   const run = useMutation({
@@ -66,6 +73,11 @@ export function MarketSelection() {
       body: JSON.stringify({ account_id: selectedAccountId, market_categories: categories }),
     }),
     onSuccess: async () => { setMessage("Autonomous research queued. Discovery and agent review run in the background."); await refresh(); },
+    onError: (error: Error) => setMessage(error.message),
+  });
+  const runTyped = useMutation({
+    mutationFn: () => api<Resource>("/research-runs", { method: "POST", body: JSON.stringify({ account_id: selectedAccountId }) }),
+    onSuccess: async () => { setMessage("Typed 4×3 research matrix queued. Every enabled lane will end in a safe terminal state."); await queryClient.invalidateQueries({ queryKey: ["research", "typed-runs"] }); },
     onError: (error: Error) => setMessage(error.message),
   });
   const decide = useMutation({
@@ -113,6 +125,15 @@ export function MarketSelection() {
         <button className="btn" disabled={saveSchedule.isPending || (editableSchedule.enabled && editableSchedule.weekdays.length === 0)} onClick={() => saveSchedule.mutate()}>{saveSchedule.isPending ? "Saving…" : "Save account schedule"}</button>
       </> : <p className="empty">Select an account to configure its research schedule.</p>}
       <div className="actions"><button className="btn primary" disabled={!selectedAccountId || run.isPending} onClick={() => { setMessage(""); run.mutate(); }}>{run.isPending ? "Queuing…" : "Run research now"}</button><span className="muted">Universe: {categories.join(" · ")}</span></div>
+    </article>
+
+    <article className="card form-stack">
+      <div><h2>Typed research matrix · 4 × 3</h2><p className="muted">One candidate or explicit safe status for every asset-class and instrument-type lane. Continuous futures are analytical only; executable candidates must be dated contracts.</p></div>
+      <div className="grid two">{(matrix.data?.lanes ?? []).map(lane => {
+        const result = typedResults.find(item => item.lane.asset_class === lane.asset_class && item.lane.instrument_type === lane.instrument_type);
+        return <article className="card" key={`${lane.asset_class}:${lane.instrument_type}`}><strong>{lane.asset_class} · {lane.instrument_type}</strong><p className={result?.status === "READY" ? "good" : "muted"}>{result?.status ?? "NOT_CONFIGURED"}</p>{result?.candidate ? <><p>{result.candidate.listing.symbol} · {result.candidate.listing.venue}</p><small>Score {result.candidate.score.toFixed(2)}</small></> : <small>{result?.reason_code ?? "No completed lane result yet"}</small>}</article>;
+      })}</div>
+      <div className="actions"><button className="btn primary" disabled={!selectedAccountId || runTyped.isPending} onClick={() => runTyped.mutate()}>{runTyped.isPending ? "Queuing…" : "Run typed matrix now"}</button><span className="muted">Matrix version {matrix.data?.version ?? 1} · {matrix.data?.lanes.filter(item => item.enabled).length ?? 0} enabled lanes</span></div>
     </article>
 
     {message && <p className="notice">{message}</p>}

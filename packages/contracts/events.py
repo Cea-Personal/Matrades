@@ -8,6 +8,32 @@ from pydantic import BaseModel, ConfigDict, Field
 from packages.shared.domain_types import AwareDateTime, utc_now
 
 
+class InstrumentMappingPayload(BaseModel):
+    asset_class: str
+    instrument_type: str
+    venue_instrument_id: UUID
+    provider: str
+    symbol: str
+    verified: bool = False
+
+
+class SpecificationPayload(BaseModel):
+    venue_instrument_id: UUID
+    specification_version_id: UUID
+    version: int
+    effective_from: AwareDateTime
+    freshness: str
+    provenance: dict[str, str]
+
+
+class LaneLifecyclePayload(BaseModel):
+    account_id: UUID
+    asset_class: str
+    instrument_type: str
+    status: str
+    source_cut_refs: tuple[str, ...] = ()
+
+
 class EventEnvelope(BaseModel):
     model_config = ConfigDict(frozen=True)
     event_id: UUID = Field(default_factory=uuid4)

@@ -1,4 +1,4 @@
-.PHONY: bootstrap dev migrate seed test test-contracts lint typecheck build
+.PHONY: bootstrap dev migrate seed test test-contracts lint typecheck build contracts contracts-check
 
 bootstrap:
 	uv sync --all-extras --dev
@@ -21,6 +21,12 @@ test-contracts:
 	uv run pytest tests/contract
 	npm run test:contracts
 
+contracts:
+	uv run python scripts/generate_contracts.py
+
+contracts-check:
+	uv run python scripts/generate_contracts.py --check
+
 lint:
 	uv run ruff check .
 	npm run lint
@@ -31,4 +37,3 @@ typecheck:
 
 build:
 	npm run build
-

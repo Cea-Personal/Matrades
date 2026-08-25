@@ -13,6 +13,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 from modules.backtesting.engine import BacktestCandle
 from modules.research.models import MarketFingerprint, ResearchCandidate
+from packages.shared.domain_types import AssetClass, InstrumentType, QuantityUnit
 
 
 class ApprovedCandidate(BaseModel):
@@ -24,6 +25,11 @@ class ApprovedCandidate(BaseModel):
     score: float
     fingerprint: MarketFingerprint
     evidence: list[str] = Field(default_factory=list)
+    asset_class: AssetClass | None = None
+    instrument_type: InstrumentType | None = None
+    venue_instrument_id: str | None = None
+    specification_version_id: str | None = None
+    quantity_unit: QuantityUnit | None = None
 
 
 class EvidenceReference(BaseModel):
@@ -52,6 +58,12 @@ class StrategyEvidencePack(BaseModel):
     prior_strategy_context: list[dict[str, Any]] = Field(default_factory=list)
     knowledge_context: list[dict[str, Any]] = Field(default_factory=list)
     references: list[EvidenceReference]
+    asset_class: AssetClass | None = None
+    instrument_type: InstrumentType | None = None
+    venue_instrument_id: str | None = None
+    futures_contract_id: str | None = None
+    specification_version_id: str | None = None
+    source_cut_refs: list[str] = Field(default_factory=list)
 
 
 def resolve_approved_candidate(
@@ -139,8 +151,7 @@ def historical_summary(candles: list[BacktestCandle]) -> dict[str, str | int]:
         "mean_bar_return": str(mean),
         "return_variance": str(variance),
         "average_range": str(
-            sum((item.high - item.low for item in candles), Decimal("0"))
-            / Decimal(len(candles))
+            sum((item.high - item.low for item in candles), Decimal("0")) / Decimal(len(candles))
         ),
     }
 

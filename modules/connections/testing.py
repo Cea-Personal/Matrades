@@ -65,9 +65,7 @@ async def probe_connection(
             if response.is_error or body.get("status") == "error":
                 code = body.get("code") or response.status_code
                 message = str(
-                    body.get("message")
-                    or body.get("status")
-                    or "provider rejected request"
+                    body.get("message") or body.get("status") or "provider rejected request"
                 )
                 raise RuntimeError(f"Twelve Data {code}: {message}")
             if body.get("code") is not None and int(body["code"]) >= 400:
@@ -127,9 +125,7 @@ async def probe_connection(
             response = await http.get(f"{base_url}/health")
             response.raise_for_status()
             capabilities = [
-                "calendar.read"
-                if profile.provider == ConnectionProvider.CALENDAR
-                else "news.read"
+                "calendar.read" if profile.provider == ConnectionProvider.CALENDAR else "news.read"
             ]
             fresh = True
         else:

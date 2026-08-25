@@ -108,19 +108,11 @@ async def authoritative_risk_context(
                     )
                 )
     max_concurrent = min(
-        (
-            int(item.value)
-            for item in constraints
-            if item.kind.value == "MAX_CONCURRENT_TRADES"
-        ),
+        (int(item.value) for item in constraints if item.kind.value == "MAX_CONCURRENT_TRADES"),
         default=3,
     )
     correlated_limit = min(
-        (
-            item.value
-            for item in constraints
-            if item.kind.value == "MAX_CORRELATED_RISK"
-        ),
+        (item.value for item in constraints if item.kind.value == "MAX_CORRELATED_RISK"),
         default=None,
     )
     positions = [

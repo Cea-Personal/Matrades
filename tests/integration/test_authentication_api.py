@@ -141,10 +141,13 @@ def test_signup_verification_mfa_login_and_owner_scoped_api(tmp_path) -> None:
             json={"email": email, "password": "correct-horse-battery"},
         )
         assert reused.status_code == 202
-        assert client.post(
-            "/api/v1/auth/mfa/challenges",
-            json={"challenge_id": reused.json()["challenge_id"], "code": recovery_code},
-        ).status_code == 401
+        assert (
+            client.post(
+                "/api/v1/auth/mfa/challenges",
+                json={"challenge_id": reused.json()["challenge_id"], "code": recovery_code},
+            ).status_code
+            == 401
+        )
 
         recovery = client.post("/api/v1/auth/password-recovery", json={"email": email})
         assert recovery.status_code == 202
@@ -156,19 +159,25 @@ def test_signup_verification_mfa_login_and_owner_scoped_api(tmp_path) -> None:
             },
         )
         assert complete.status_code == 200
-        assert client.post(
-            "/api/v1/auth/sessions",
-            json={"email": email, "password": "correct-horse-battery"},
-        ).status_code == 401
+        assert (
+            client.post(
+                "/api/v1/auth/sessions",
+                json={"email": email, "password": "correct-horse-battery"},
+            ).status_code
+            == 401
+        )
         final_login = client.post(
             "/api/v1/auth/sessions",
             json={"email": email, "password": "new-correct-horse-battery"},
         )
         assert final_login.status_code == 202
-        assert client.post(
-            "/api/v1/auth/mfa/challenges",
-            json={
-                "challenge_id": final_login.json()["challenge_id"],
-                "code": totp(authenticator_secret),
-            },
-        ).status_code == 200
+        assert (
+            client.post(
+                "/api/v1/auth/mfa/challenges",
+                json={
+                    "challenge_id": final_login.json()["challenge_id"],
+                    "code": totp(authenticator_secret),
+                },
+            ).status_code
+            == 200
+        )

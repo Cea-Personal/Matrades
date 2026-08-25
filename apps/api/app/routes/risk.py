@@ -20,6 +20,7 @@ class RiskRequest(RiskContext):
 
 
 @router.post("/evaluate", response_model=RiskResult)
+@router.post("/evaluations", response_model=RiskResult, include_in_schema=True)
 async def evaluate(
     request: RiskRequest,
     actor: Annotated[Actor, Depends(current_actor)],
@@ -50,4 +51,3 @@ async def snapshot(
 ) -> dict:
     validate_snapshot(context.account, context.account.account_id)
     return context.account.model_dump(mode="json")
-

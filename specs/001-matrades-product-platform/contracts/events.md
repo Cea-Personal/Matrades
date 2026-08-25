@@ -46,6 +46,9 @@ Rules:
 - `session.created`, `session.revoked`, `step_up.verified`
 - `credential.created`, `credential.replaced`, `credential.tested`, `credential.disabled`
 - `connection.health_changed`
+- `instrument_mapping.verified`, `instrument_mapping.stale`, `instrument_specification.activated`
+- `futures_chain.recorded`, `futures_contract.roll_required`, `futures_contract.expired`
+- `corporate_action.recorded`, `financing_terms.changed`
 - `model.changed`, `model_profile.changed`
 - `agent_configuration.activated`, `agent_runtime.selection_changed`, `prompt_version.activated`,
   `agent.test_completed`
@@ -58,14 +61,22 @@ only explicit configuration activation can change an agent from the Codex defaul
 ## Research and HIL-1 Events
 
 - `research.queued`, `research.started`, `research.degraded`, `research.completed`, `research.failed`
+- `research_lane.started`, `research_lane.ready`, `research_lane.no_trade`,
+  `research_lane.not_configured`, `research_lane.unavailable`, `research_lane.stale`,
+  `research_lane.blocked`
 - `market_selection.approval_requested`
 - `market_selection.approved`
 - `market_selection.replaced`
 - `market_selection.rerun_requested`
 - `market_selection.expired`
 
-The payload identifies research run/version, ranked candidates/evidence references and exact action.
-REPLACE creates a new selection version; RERUN creates a new research run.
+Every lane payload identifies `(asset_class, instrument_type)`, the matrix/run version, provider
+binding and source-cut references, terminal state, and—when ready—the immutable candidate, exact
+venue listing or dated futures contract, and specification version. `research.completed` summarizes
+all 12 terminal lane results and cannot imply that a non-ready lane produced a recommendation.
+REPLACE stays within the original lane and creates a new selection version; RERUN creates a new
+research run. Mapping/specification changes, futures expiry/roll, corporate actions, and financing-
+term changes expire affected selections and proposals rather than silently rewriting them.
 
 ## Strategy Events
 
@@ -135,3 +146,6 @@ financial truth solely from the event stream.
 - Cross-owner/account events are never delivered or consumed outside scope.
 - Payload validation rejects secrets, raw prompt credentials, and unsupported schema versions.
 - Approval, risk-reservation and broker-event replay remains idempotent.
+- A 12-lane research run emits exactly one terminal lane fact per requested lane; duplicate terminal
+  delivery is idempotent and cross-instrument-type replacement is rejected.
+- Continuous futures identifiers are rejected from executable selection and proposal events.

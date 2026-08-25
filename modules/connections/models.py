@@ -5,9 +5,11 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any
 from urllib.parse import urlparse
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from packages.shared.domain_types import ResearchLaneKey
 
 
 class ConnectionProvider(StrEnum):
@@ -65,12 +67,16 @@ class ConnectionProfile(BaseModel):
 
     @model_validator(mode="after")
     def provider_requirements(self) -> ConnectionProfile:
-        if self.provider in {
-            ConnectionProvider.TWELVE_DATA,
-            ConnectionProvider.FRED,
-            ConnectionProvider.SERPAPI,
-            ConnectionProvider.MT5_BRIDGE,
-        } and self.credential_id is None:
+        if (
+            self.provider
+            in {
+                ConnectionProvider.TWELVE_DATA,
+                ConnectionProvider.FRED,
+                ConnectionProvider.SERPAPI,
+                ConnectionProvider.MT5_BRIDGE,
+            }
+            and self.credential_id is None
+        ):
             raise ValueError(f"{PROVIDER_LABELS[self.provider]} requires a credential")
         if self.provider == ConnectionProvider.MT5_BRIDGE:
             bridge_url = str(self.configuration.get("bridge_url", ""))
@@ -100,3 +106,61 @@ class ConnectionProbe(BaseModel):
     fresh: bool = False
     writes: bool | None = None
     safe_message: str | None = None
+
+
+class MarketDataCapability(StrEnum):
+    INSTRUMENT_DIRECTORY = "INSTRUMENT_DIRECTORY"
+    DISCOVERY = "DISCOVERY"
+    QUOTE = "QUOTE"
+    TRADES = "TRADES"
+    CANDLES = "CANDLES"
+    ORDER_BOOK = "ORDER_BOOK"
+    CONTRACT_DETAILS = "CONTRACT_DETAILS"
+    FUTURES_CHAIN = "FUTURES_CHAIN"
+    OPEN_INTEREST = "OPEN_INTEREST"
+    FUNDING = "FUNDING"
+    CORPORATE_ACTIONS = "CORPORATE_ACTIONS"
+    BROKER_TRADABILITY = "BROKER_TRADABILITY"
+    ACCOUNT_BALANCES = "ACCOUNT_BALANCES"
+
+
+class ProviderAuthorityPurpose(StrEnum):
+    DISCOVERY = "DISCOVERY"
+    REFERENCE = "REFERENCE"
+    EXECUTABLE_QUOTE = "EXECUTABLE_QUOTE"
+    HISTORY = "HISTORY"
+    CONTRACT_TERMS = "CONTRACT_TERMS"
+    BROKER_RECONCILIATION = "BROKER_RECONCILIATION"
+
+
+class ResearchMatrixVersion(BaseModel):
+    account_id: UUID
+    version: int = Field(default=1, ge=1)
+    lanes: list[ResearchLaneKey] = Field(default_factory=list, min_length=1, max_length=12)
+    enabled: dict[str, bool] = Field(default_factory=dict)
+    schedule: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def unique_lanes(self) -> ResearchMatrixVersion:
+        keys = [lane.as_string() for lane in self.lanes]
+        if len(keys) != len(set(keys)):
+            raise ValueError("research matrix lanes must be unique")
+        return self
+
+
+class ProviderBindingInput(BaseModel):
+    account_id: UUID
+    lane: ResearchLaneKey
+    capability: MarketDataCapability
+    authority_purpose: ProviderAuthorityPurpose
+    connection_id: UUID
+    priority: int = Field(default=1, ge=1)
+    provider_venue: str | None = None
+    freshness_policy: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProviderBinding(ProviderBindingInput):
+    id: UUID = Field(default_factory=uuid4)
+    version: int = Field(default=1, ge=1)
+    verification_status: str = "UNVERIFIED"
+    effective_from: str | None = None

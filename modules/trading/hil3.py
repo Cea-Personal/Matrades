@@ -10,14 +10,17 @@ class Hil3Action(StrEnum):
 
 
 def decide(
-    recommendation: ManagementRecommendation, action: Hil3Action, policy_valid: bool
+    recommendation: ManagementRecommendation,
+    action: Hil3Action,
+    policy_valid: bool,
+    lifecycle_valid: bool = True,
 ) -> dict[str, object]:
     if (
         recommendation.action != RecommendationAction.HOLD
         and action == Hil3Action.APPROVE
-        and not policy_valid
+        and (not policy_valid or not lifecycle_valid)
     ):
-        raise ValueError("recommendation no longer complies with policy")
+        raise ValueError("recommendation no longer complies with policy or instrument lifecycle")
     return {
         "recommendation_id": recommendation.id,
         "decision": action,

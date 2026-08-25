@@ -6,6 +6,8 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
+from packages.shared.domain_types import AssetClass, InstrumentType, QuantityUnit
+
 
 class PerformanceRecord(BaseModel):
     id: UUID = Field(default_factory=uuid4)
@@ -19,6 +21,13 @@ class PerformanceRecord(BaseModel):
     session: str
     pnl: Decimal
     risk: Decimal
+    asset_class: AssetClass | None = None
+    instrument_type: InstrumentType | None = None
+    venue_instrument_id: UUID | None = None
+    futures_contract_id: UUID | None = None
+    quantity_unit: QuantityUnit | None = None
+    financing: Decimal = Decimal("0")
+    funding: Decimal = Decimal("0")
 
 
 class HealthAction(StrEnum):

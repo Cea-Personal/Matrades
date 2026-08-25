@@ -30,3 +30,11 @@ def knowledge_envelope(hits: list) -> dict:
         "citations": [hit.model_dump(mode="json") for hit in hits],
         "may_replace_facts": False,
     }
+
+
+def reject_as_market_authority(record: dict) -> None:
+    """Knowledge may explain a decision but never supply executable facts."""
+    if record.get("authority") not in {None, "CONTEXT_ONLY"}:
+        raise ValueError("knowledge records cannot be promoted to structured authority")
+    if any(key in record for key in ("risk_result", "account_equity", "executable_quote")):
+        raise ValueError("knowledge cannot replace risk, account, or quote authority")

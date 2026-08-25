@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from modules.accounts.models import AccountSnapshot
 from modules.policy.models import EffectiveConstraint
+from packages.shared.domain_types import AssetClass, InstrumentType, QuantityUnit
 
 
 class Direction(StrEnum):
@@ -23,6 +24,13 @@ class OpenPositionRisk(BaseModel):
     currency_exposures: dict[str, Decimal] = {}
     remaining_loss_to_stop: Decimal | None
     unrealized_pnl: Decimal = Decimal("0")
+    asset_class: AssetClass | None = None
+    instrument_type: InstrumentType | None = None
+    venue_instrument_id: UUID | None = None
+    futures_contract_id: UUID | None = None
+    specification_version_id: UUID | None = None
+    quantity_unit: QuantityUnit | None = None
+    underlying_id: UUID | None = None
 
 
 class CandidateTrade(BaseModel):
@@ -35,6 +43,18 @@ class CandidateTrade(BaseModel):
     risk_per_unit: Decimal = Field(gt=0)
     size_increment: Decimal = Field(default=Decimal("0.01"), gt=0)
     currency_exposures: dict[str, Decimal] = {}
+    asset_class: AssetClass | None = None
+    instrument_type: InstrumentType | None = None
+    venue_instrument_id: UUID | None = None
+    futures_contract_id: UUID | None = None
+    specification_version_id: UUID | None = None
+    quantity_unit: QuantityUnit | None = None
+    contract_multiplier: Decimal = Decimal("1")
+    tick_size: Decimal | None = None
+    tick_value: Decimal | None = None
+    margin_required: Decimal = Decimal("0")
+    financing_cost: Decimal = Decimal("0")
+    underlying_id: UUID | None = None
 
 
 class RiskContext(BaseModel):
@@ -44,6 +64,8 @@ class RiskContext(BaseModel):
     correlation_caps: dict[str, Decimal] = {}
     static_max_concurrent_trades: int = Field(default=3, ge=0)
     include_unrealized_profit: bool = False
+    instrument_specifications: dict[str, dict[str, Decimal | str]] = {}
+    current_source_cut_id: str | None = None
 
 
 class RiskDecision(StrEnum):
@@ -80,6 +102,15 @@ class RiskSnapshot(BaseModel):
     source: str
     source_version: str
     constraint_versions: list[str] = []
+    asset_class: AssetClass | None = None
+    instrument_type: InstrumentType | None = None
+    venue_instrument_id: UUID | None = None
+    futures_contract_id: UUID | None = None
+    specification_version_id: UUID | None = None
+    quantity_unit: QuantityUnit | None = None
+    notional_exposure: Decimal = Decimal("0")
+    margin_required: Decimal = Decimal("0")
+    financing_cost: Decimal = Decimal("0")
 
 
 class RiskResult(BaseModel):

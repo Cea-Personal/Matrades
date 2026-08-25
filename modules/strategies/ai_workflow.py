@@ -157,10 +157,27 @@ class StrategyGenerationWorkflow:
         }
         if not instrument or not selection_id or not references:
             raise ValueError("an immutable approved-market evidence pack is required")
+        typed_fields = {
+            key: evidence_pack.get(key)
+            for key in (
+                "asset_class",
+                "instrument_type",
+                "quantity_unit",
+                "venue_instrument_id",
+                "specification_version_id",
+                "futures_contract_id",
+            )
+            if evidence_pack.get(key) is not None
+        }
+        if evidence_pack.get("instrument_type") and (
+            not evidence_pack.get("venue_instrument_id")
+            or not evidence_pack.get("specification_version_id")
+        ):
+            raise ValueError(
+                "typed strategy evidence requires listing and specification references"
+            )
         role = (
-            "strategy_researcher"
-            if origin == StrategyOrigin.AI_GENERATED
-            else "strategy_assistant"
+            "strategy_researcher" if origin == StrategyOrigin.AI_GENERATED else "strategy_assistant"
         )
         response = await self.agents.invoke(
             role,
@@ -200,6 +217,7 @@ class StrategyGenerationWorkflow:
             specification = StrategySpecification.model_validate(
                 {
                     **raw["strategy"],
+                    **typed_fields,
                     "origin": origin.value,
                     "evaluator_version": "strategy-evaluator-v1",
                 }

@@ -70,9 +70,7 @@ async def ingest_broker_snapshot(
     if existing_snapshots and snapshot.sequence <= int(
         existing_snapshots[0].data.get("sequence", -1)
     ):
-        raise HTTPException(
-            status.HTTP_409_CONFLICT, "out-of-order or replayed broker snapshot"
-        )
+        raise HTTPException(status.HTTP_409_CONFLICT, "out-of-order or replayed broker snapshot")
     await store.create(
         "broker_snapshot",
         actor.owner_id,

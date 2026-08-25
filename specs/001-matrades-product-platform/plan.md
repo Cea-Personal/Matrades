@@ -1,11 +1,11 @@
 # Implementation Plan: Matrades Product Platform
 
-**Branch**: `001-matrades-product-platform` | **Date**: 2026-08-24 |
+**Branch**: `001-matrades-product-platform` | **Date**: 2026-08-25 |
 **Spec**: [spec.md](./spec.md)
 
 **Input**: Consolidated feature specification from
 `specs/001-matrades-product-platform/spec.md`, informed by the three supplied implementation
-plans and governed by Matrades Constitution 2.0.0.
+plans and governed by Matrades Constitution 2.1.0.
 
 ## Summary
 
@@ -20,12 +20,20 @@ approval gates as explicit state machines, compiles declarative strategy rules i
 backtest/paper/live evaluator, and bounds AI agents behind versioned contracts, independent prompt
 resolution, least-privilege tools, and a default Codex App Server runtime pool. LiteLLM remains an
 explicit per-agent or per-profile alternative and is never an automatic cross-runtime fallback.
-Coinbase replaces Binance as the required V1 crypto exchange-data provider, `strategy_assistant`
-completes the 15-agent registry, and contextual knowledge is isolated from authoritative market,
-account, policy, and risk state.
+Coinbase replaces Binance as the required V1 crypto exchange-data provider; `strategy_assistant`
+and the newly required `stocks_research` role complete the 16-agent registry; and contextual
+knowledge is isolated from authoritative market, account, policy, and risk state.
 Named data-source and read-only MT5 Bridge profiles are configured in the UI, every market or
 strategy research cycle is archived under a timestamped evidence folder, and provider-backed
 backtests expose deterministic validation gates in the Strategy Lab.
+
+Daily HIL-1 research fans out across the 12 combinations formed by Forex, metals,
+cryptocurrency, and stocks crossed with spot, CFD, and futures. Each matrix cell produces one
+ranked exact tradable listing or an explicit `NO_TRADE`, `NOT_CONFIGURED`, `UNAVAILABLE`, `STALE`,
+or `BLOCKED` result.
+Provider-neutral economic identities remain separate from broker/venue listings and dated futures
+contracts, while immutable contract-specification versions drive sizing, costs, reconciliation,
+backtesting, and cross-wrapper exposure aggregation.
 
 ## Technical Context
 
@@ -40,12 +48,15 @@ vectorbt where appropriate for research; Next.js 16 LTS, React, Tailwind CSS, ac
 primitives, and TanStack Query
 
 **Storage**: PostgreSQL 17 as system of record with compatible TimescaleDB and pgvector extensions;
-Redis for cache, rate limits, locks, and task transport only; uploaded source documents and large
-artifacts use an access-controlled blob abstraction when database storage is unsuitable
+Redis for cache, rate limits, locks, and task transport only; effective-dated instrument
+specifications, futures chains, corporate actions, financing terms, and point-in-time universe
+membership are durable structured records; uploaded source documents and large artifacts use an
+access-controlled blob abstraction when database storage is unsuitable
 
 **Testing**: pytest, pytest-asyncio, Hypothesis, and integration containers for Python; Vitest and
 Testing Library for TypeScript; Playwright for browser journeys; OpenAPI/schema and adapter contract
-tests; deterministic replay, failure injection, and migration tests
+tests; deterministic replay, failure injection, and migration tests; matrix-coverage, contract-
+version, futures-roll, corporate-action, CFD-financing, and cross-wrapper exposure fixtures
 
 **Target Platform**: Linux containers for API, background workers, Codex agent workers, web,
 database, and Redis; optional separately enabled LiteLLM Proxy containers; evergreen desktop
@@ -57,8 +68,8 @@ workers and a separately deployable broker bridge
 
 **Performance Goals**: At least 95% of complete candidate evaluations return a decision or explicit
 safe-failure status within 5 seconds after inputs are available; at least 95% of daily research runs
-produce HIL-1 results or a safe-failure status within 10 minutes; operational state changes reach
-the UI within 2 seconds under normal conditions
+produce all 12 HIL-1 matrix-cell results or explicit per-cell safe-failure statuses within 10
+minutes; operational state changes reach the UI within 2 seconds under normal conditions
 
 **Constraints**: Manual execution only; no default broker writes; current account equity and
 consistent snapshots required before HIL-2; strictest applicable constraint wins; hard-blocked
@@ -66,12 +77,15 @@ candidates never enter an actionable approval queue; secrets never enter prompts
 responses; RAG is non-authoritative; every required agent defaults to the Codex App Server runtime;
 LiteLLM requires an explicit per-agent or per-profile selection and cannot be an automatic fallback;
 PostgreSQL, not Redis or an agent checkpoint alone, owns durable workflow and approval state; all
-timestamps are stored in UTC with source timezone metadata
+timestamps are stored in UTC with source timezone metadata; every actionable instrument has a
+fresh, immutable contract-specification reference; continuous futures are analytical only and
+cannot be approved or reconciled as executable contracts
 
 **Scale/Scope**: V1 supports individual authenticated traders with multiple personal or prop-firm
-accounts, the 15 required logical agents, one normal active instrument per market category, multiple
-provider connections, long-running research/backtest jobs, and event-driven monitoring. Module and
-adapter boundaries permit later multi-user and service extraction without adding V1 microservices.
+accounts, 16 required logical agents including `stocks_research`, 12 daily asset-class/instrument-
+type research cells, multiple provider and broker mappings per cell, long-running research/backtest
+jobs, and event-driven monitoring. Module and adapter boundaries permit later multi-user and service
+extraction without adding V1 microservices.
 
 ## Constitution Check
 
@@ -81,13 +95,13 @@ adapter boundaries permit later multi-user and service extraction without adding
 |---|---|---|---|
 | Ordered authority and deterministic safety | Policy, effective-limit, risk, portfolio, and strategy evaluators are deterministic and precede critic/HIL | PASS | PASS |
 | Three HIL gates and manual execution | Persisted HIL-specific actions; TAKE only reserves and awaits manual entry; broker adapter is read-only | PASS | PASS |
-| Account-aware risk and prop compliance | Immutable account snapshots, versioned rulesets, reserved risk, candidate reservations, and correlated exposure | PASS | PASS |
+| Account-aware risk and prop compliance | Immutable account snapshots, versioned rulesets, reserved risk, candidate reservations, correlated exposure, and type-specific contract/tick/margin/currency calculations | PASS | PASS |
 | Equal strategy validation | AI-generated and AI-assisted proposals require human canonicalization approval and converge on one validation, paper, and promotion pipeline | PASS | PASS |
-| Authoritative data and bounded RAG | Retrieval router and contracts prevent knowledge output from supplying current facts, policy, or risk | PASS | PASS |
+| Authoritative data and bounded RAG | Retrieval router prevents knowledge output from supplying current facts; exact listing, contract-specification, futures-chain, and corporate-action versions remain structured authority | PASS | PASS |
 | Safe failure and NO TRADE | Health/freshness states and circuit breakers make BLOCK, DEGRADED, WAIT, and NO TRADE explicit | PASS | PASS |
 | Orchestrated agents and provider independence | Fixed roles, a default Codex runtime adapter, explicit LiteLLM opt-in, same-runtime fallbacks, versioned I/O, and independent prompt resolution | PASS | PASS |
 | Secure UI-first configuration | MFA, step-up, scoped vault references, masked secrets, audit, and configuration APIs/UI | PASS | PASS |
-| Adapter boundaries and reconciliation | Provider-neutral data/broker contracts; actual reconciled broker state becomes authoritative | PASS | PASS |
+| Adapter boundaries and reconciliation | Capability-routed data/broker contracts separate economic identity from broker/venue listings; actual reconciled listing and broker state become authoritative | PASS | PASS |
 | Auditability and controlled learning | Immutable version/evidence references, shared evaluator, staged promotion, and reproducibility metadata | PASS | PASS |
 
 No constitutional exception is required. Phase 1 artifacts preserve every gate; implementation must
@@ -144,7 +158,8 @@ modules/
 
 adapters/
 ├── agent_runtime/{codex_app_server,litellm}/
-├── market_data/{twelve_data,coinbase,coingecko}/
+├── market_data/{twelve_data,coinbase,coingecko,broker_market_data}/
+├── instrument_reference/    # venue listings, contract terms, chains, corporate actions
 ├── macro/{fred,cftc}/
 ├── calendar/
 ├── news/
@@ -216,8 +231,12 @@ LiteLLM is loaded only for explicitly assigned alternative profiles.
 
 ### Data and integration boundaries
 
-- One market-data service owns provider connections, canonical instrument mapping, validation,
-  normalization, cache, and persistence. Agents never open provider streams.
+- One market-data service owns provider connections, economic-asset identity, exact venue/broker
+  listing mappings, contract-specification versions, validation, normalization, cache, and
+  persistence. Agents never open provider streams.
+- Connection capabilities are indexed by asset class, instrument type, venue, data capability, and
+  account. A matrix cell resolves an authoritative research source and, before HIL-2, an exact
+  executable broker listing; no provider symbol or continuous future becomes a canonical trade ID.
 - Structured application data, time-series observations, and semantic knowledge remain logically
   separated even when PostgreSQL hosts all three.
 - Every input used for a material decision is referenced by immutable ID/version, source timestamp,
@@ -225,6 +244,51 @@ LiteLLM is loaded only for explicitly assigned alternative profiles.
 - HTTP/OpenAPI handles commands and queries; SSE delivers UI operational updates; WebSocket is
   reserved for high-rate provider and MT5 bridge streams. All event consumers are idempotent and
   ordering-safe per aggregate.
+
+### Instrument identity and daily matrix research
+
+- `UnderlyingAsset` identifies the economic asset; `Instrument` identifies its asset class and
+  spot/CFD/futures expression; `VenueInstrument` identifies the exact provider, broker, or exchange
+  listing. Dated `FuturesContract` records are executable; `ContinuousFuture` series are analytical
+  evidence only.
+- Immutable effective-dated `InstrumentSpecificationVersion` records preserve contract multiplier,
+  tick size/value, quantity unit and increment, currencies, session calendar, margin, financing,
+  expiry/notice/roll terms, ownership or custody semantics, and source/freshness provenance.
+- A scheduled account research run creates 12 `ResearchLaneResult` records keyed by
+  `(asset_class, instrument_type)`. Each cell is idempotent, independently retryable, and ends with
+  `READY` plus one candidate or an explicit `NO_TRADE`, `NOT_CONFIGURED`, `UNAVAILABLE`, `STALE`, or
+  `BLOCKED` status; partial failure cannot be represented as a complete healthy matrix.
+- `forex_research`, `metals_research`, `crypto_research`, and `stocks_research` each rank the three
+  instrument types for their asset class. Cross-asset analyst roles and the critic retain bounded
+  structured contracts; HIL-1 decisions and replacements are keyed by both matrix dimensions.
+
+### Contract and data migration
+
+- Preserve existing category-only research runs, selections, proposals, and trades as immutable
+  historical evidence tagged `LEGACY_UNTYPED`; do not guess whether an old symbol meant spot, CFD,
+  or futures. Legacy records remain readable but cannot seed a new actionable proposal until an
+  operator verifies the exact typed listing and specification.
+- Introduce asset-class, instrument-type, lane, venue-listing, specification-version, and dated-
+  contract columns as nullable in the expand migration; backfill only provable mappings; deploy
+  dual-read compatibility; then require typed references for new writes before the contract
+  migration is finalized. Rollback disables new typed writes without deleting typed evidence.
+- Regenerate Python and TypeScript clients atomically from the revised OpenAPI contract. Workers
+  reject unsupported contract/schema versions, and event consumers support the documented overlap
+  window without treating a three-category legacy result as a complete 12-lane run.
+
+### Instrument-type valuation and lifecycle
+
+- Spot exposure uses native quantity and cash/underlying availability; CFD exposure uses broker lot
+  size, contract multiplier, margin, financing, and cash-adjustment terms; futures P&L uses exact
+  dated contracts, tick movement, tick value, margin, settlement, expiry, and roll eligibility.
+- Notional, margin, and maximum loss are separate values. Sizing calculates loss per minimum
+  quantity increment through the Stop Loss plus deterministic costs and gap allowance, rounds down,
+  then recomputes risk, margin, and aggregate exposure. Missing required metadata blocks HIL-2.
+- Shared-underlying exposure aggregates across wrappers: spot gold, gold CFD, and gold futures are
+  correlated economic exposure, not independent diversification.
+- Futures rolls are explicit new decisions and transactions; no approval or position silently moves
+  to another contract. Stock corporate actions and CFD cash adjustments are point-in-time events;
+  raw/as-traded and adjusted analytical series remain distinct.
 
 ### Risk concurrency and conservative defaults
 
@@ -239,6 +303,9 @@ LiteLLM is loaded only for explicitly assigned alternative profiles.
 - Correlation risk uses configured exposure groups plus rolling return correlation where sufficient
   data exists. The more conservative result governs; missing evidence falls back to the configured
   group cap or blocks when no safe bound exists.
+- Every result pins the exact venue instrument and specification version used. Margin availability
+  never substitutes for worst-case-loss capacity, and a specification change, expiry threshold,
+  corporate action, financing change, or stale mapping triggers revalidation.
 
 ### Strategy integrity
 
@@ -249,6 +316,9 @@ LiteLLM is loaded only for explicitly assigned alternative profiles.
   improvements branch to new drafts.
 - One compiler/evaluator contract serves backtesting, paper trading, and live setup detection.
   Arbitrary generated code is never activated.
+- Validation is profile-specific by asset class, instrument type, listing, contract specification,
+  cost model, calendar, lifecycle rules, and account compatibility. Spot validation cannot be
+  silently reused for CFDs or futures.
 - `DRAFT -> SPECIFIED -> IMPLEMENTED -> BACKTESTING -> VALIDATING -> PAPER_TRADING -> APPROVED ->
   ACTIVE` is the promotion path; `DEGRADED`, `SUSPENDED`, and `RETIRED` are explicit post-promotion
   health states.
@@ -257,9 +327,11 @@ LiteLLM is loaded only for explicitly assigned alternative profiles.
 
 ### Stage 0 - Contracts and invariants
 
-Freeze identifiers, money/time units, ownership rules, error format, event envelope, HIL-specific
-actions, state machines, freshness semantics, idempotency, optimistic concurrency, and adapter/agent
-contracts. Build authority-order and forbidden-dependency architecture tests first.
+Freeze asset-class and instrument-type enums, research-lane keys, underlying/listing/contract IDs,
+instrument-specification versions, money/quantity/time units, ownership rules, error format, event
+envelope, HIL-specific actions, state machines, freshness semantics, idempotency, optimistic
+concurrency, legacy-read/new-write migration compatibility, and adapter/agent contracts. Build
+authority-order and forbidden-dependency architecture tests first.
 
 ### Stage 1 - Platform and security foundation
 
@@ -272,29 +344,40 @@ stage.
 
 Implement the Codex App Server worker pool and default runtime adapter first, then the optional
 LiteLLM adapter and explicit selection UI. Add the model catalog, runtime-bound profiles and
-fallbacks, all 15 fixed agent definitions, agent configuration versions, independent system/user
-prompt resolution, tool permission sets, capability validation, test-agent flow, and execution
-audit. Seed the knowledge-source registry but do not permit retrieval to affect authority.
+fallbacks, all 16 fixed agent definitions including `stocks_research`, agent configuration versions,
+independent system/user prompt resolution, tool permission sets, capability validation, test-agent
+flow, and execution audit. Seed the knowledge-source registry but do not permit retrieval to affect
+authority.
 
 ### Stage 3 - Accounts, policy, and risk
 
 Implement accounts, prop-firm hierarchy and versioned rules, guardrails, consistent account
 snapshots, effective limits, money/currency conversion, high-water/daily drawdown, reserved risk,
-correlation/exposure groups, candidate reservations, dynamic capacity, deterministic sizing, and
-hard-block explanations. Complete boundary/property and concurrency tests before trade proposals.
+correlation/exposure groups, candidate reservations, dynamic capacity, and instrument-type-dispatched
+valuation and sizing. Include cash availability, contract multiplier, tick/point value, quantity
+increment, margin, financing/funding, expiry/roll, gap allowance, currency conversion, and shared-
+underlying aggregation in deterministic hard-block explanations. Complete boundary/property and
+concurrency tests before trade proposals.
 
 ### Stage 4 - Market, event, and knowledge data
 
-Implement canonical instruments and aliases; Twelve Data, Coinbase, CoinGecko, FRED, CFTC, calendar,
-and news adapters; normalized time-series storage; freshness and reconnection; knowledge ingestion,
-provenance, owner scoping, hybrid retrieval, and degraded behavior. Coinbase is the V1 exchange feed;
-CoinGecko remains broad research context.
+Implement underlying assets, typed instruments, exact venue/broker listings, aliases, immutable
+specification versions, provider capability/binding registry, broker symbol synchronization,
+futures chains and roll rules, calendars, corporate actions, financing/funding observations, and
+point-in-time universe membership. Extend Twelve Data, Coinbase, CoinGecko, broker-market-data,
+FRED, CFTC, calendar, and news adapters through capability contracts; share provider source cuts
+across account schedules with quota-aware batching, freshness, and reconnection. Coinbase remains a
+configured exchange feed and CoinGecko broad discovery context; neither is silently promoted to an
+unsupported lane authority. Complete knowledge ingestion, provenance, scoping, retrieval, and
+degraded behavior behind the structured-data boundary.
 
 ### Stage 5 - Analysis, research, and HIL-1
 
 Build deterministic indicators, structure, liquidity, volatility, correlation, and fingerprints;
-bounded fundamental/sentiment/regime outputs; daily cross-market ranking; persisted selections;
-APPROVE, REPLACE, and RERUN RESEARCH actions; and NO TRADE/degraded paths.
+bounded fundamental/sentiment/regime outputs; 12 independently terminal daily lane rankings;
+asset-class specialist review; exact typed candidate and exclusion evidence; persisted matrix
+selections; lane-scoped APPROVE and REPLACE plus run-scoped RERUN RESEARCH; and explicit READY,
+NO TRADE, NOT CONFIGURED, UNAVAILABLE, STALE, BLOCKED, and aggregate degraded paths.
 
 ### Stage 6 - Strategy platform and validation
 
@@ -302,6 +385,9 @@ Build taxonomy, patterns, repository, drafts, immutable rule provenance, family-
 Strategy Assistant suggestions/change sets, canonicalization, similarity, comparison UI, shared
 compiler/evaluator, historical replay and costs, out-of-sample/walk-forward/stress/Monte Carlo,
 account-policy simulation, paper trading, promotion, and origin-neutral selection.
+Validation profiles pin instrument type, exact listing/contract, specification version, calendar,
+point-in-time constituents, corporate actions, financing/funding, futures chain/roll, costs, and
+rounding. Continuous futures may supply analysis but dated contracts supply fills and P&L.
 Strategy generation first resolves an immutable approved-market evidence pack, summarizes only a
 chronological discovery partition for the agent, generates multiple cited hypotheses, and uses a
 deterministic unseen holdout partition to select or safely reject them before human approval. This
@@ -317,8 +403,10 @@ acceptance target.
 ### Stage 8 - Broker bridge and reconciliation
 
 Implement authenticated MT5/Wine bridge health and read/event contracts, broker snapshots and
-positions, awaiting-manual-entry state, deterministic matching, ambiguous user confirmation, event
-deduplication/order handling, and conversion from proposal values to actual broker authority.
+positions, read-only symbol directory and quotes, calculation mode, contract size, tick value,
+quantity bounds, margin/swap, session and expiry metadata, awaiting-manual-entry state, exact typed
+instrument/contract matching, ambiguous user confirmation, event deduplication/order handling, and
+conversion from proposal values to actual broker authority.
 
 ### Stage 9 - Monitoring and HIL-3
 
@@ -336,9 +424,13 @@ security review, load/replay tests, failure simulations, source/license review, 
 
 - Unit and property tests cover financial arithmetic, strictest-limit monotonicity, safe rounding,
   drawdown bases, reset boundaries, reserved/correlated risk, prompt/model resolution, and lifecycle
-  transition guards.
+  transition guards. Type-specific properties cover spot cash/quantity, CFD multiplier/financing,
+  futures tick/expiry/roll, and shared-underlying exposure across wrappers.
 - Adapter contract tests run against provider fixtures and sandboxes for normalization, health,
   freshness, reconnection, rate limits, duplicate/out-of-order events, and redaction.
+- Matrix contract/replay tests require 12 terminal lane results, isolate missing/stale bindings,
+  reject symbol-only and cross-type substitution, prove shared source-cut quota behavior, and ensure
+  continuous futures never become actionable.
 - Integration tests cover persistence, migrations, task idempotency, consistent account snapshots,
   concurrent proposal reservations, Codex App Server process recovery, same-runtime fallback,
   explicit LiteLLM selection, prohibition of cross-runtime fallback, knowledge isolation, bridge
