@@ -204,18 +204,18 @@
 
 ## Phase 6: User Story 4 - Create and Validate a Strategy (Priority: P2)
 
-**Goal**: Bring AI-generated, AI-assisted, human-created, and imported strategies through one canonical, deterministic, equally validated lifecycle.
+**Goal**: Bring AI-generated and AI-assisted proposals through explicit human canonicalization approval and one deterministic, equally validated lifecycle.
 
-**Independent Test**: Create one manual and one assisted draft, decide suggestions individually, detect a duplicate, compile a complete unique strategy, run chronological validation and paper evidence, and promote only the passing version.
+**Independent Test**: Create one autonomous AI-generated and one human-described AI-assisted proposal, approve one, detect a duplicate, compile a complete unique strategy, run chronological validation and paper evidence, and promote only the passing version.
 
 ### Tests for User Story 4
 
 - [X] T119 [P] [US4] Add strategy draft, assistance, similarity, submit, and validation API contract tests in `tests/contract/test_strategy_api.py`
-- [X] T120 [P] [US4] Add canonicalization, provenance, lifecycle, and equal-origin property tests in `tests/property/test_strategy_invariants.py`
+- [X] T120 [P] [US4] Add canonicalization, provenance, lifecycle, and equal-validation property tests for both AI origins in `tests/property/test_strategy_invariants.py`
 - [X] T121 [P] [US4] Add compiler and generated edge-case unit tests for the declarative rule vocabulary in `tests/unit/strategies/test_compiler.py`
 - [X] T122 [P] [US4] Add look-ahead, chronological replay, transaction-cost, and ledger invariants in `tests/replay/test_backtest_integrity.py`
 - [X] T123 [P] [US4] Add out-of-sample, walk-forward, stress, Monte Carlo, and prop-rule validation tests in `tests/integration/test_strategy_validation.py`
-- [X] T124 [P] [US4] Add browser tests for all four origins, suggestion decisions, similarity, backtest, and promotion in `tests/e2e/test_strategy_lifecycle.py`
+- [X] T124 [P] [US4] Add browser tests for both AI origins, proposal decisions, similarity, backtest, and promotion in `tests/e2e/test_strategy_lifecycle.py`
 
 ### Implementation for User Story 4
 
@@ -225,7 +225,7 @@
 - [X] T128 [P] [US4] Implement artifact, backtest, validation, paper run, promotion, compatibility, health, and performance entities in `modules/backtesting/models.py`
 - [X] T129 [US4] Add strategy repository, provenance, similarity, validation, paper, and promotion tables in `infra/migrations/versions/0005_strategies.py`
 - [X] T130 [P] [US4] Seed initial strategy families and reusable structure/liquidity patterns in `modules/strategies/seeds.py`
-- [X] T131 [US4] Implement resumable draft creation for natural language, partial, manual, copied, and imported inputs in `modules/strategies/drafts.py`
+- [X] T131 [US4] Implement resumable AI-generated and human-described AI-assisted draft creation in `modules/strategies/drafts.py`
 - [X] T132 [P] [US4] Implement completeness, ambiguity, inconsistency, optional-rule, and deterministic-implementation checks in `modules/strategies/completeness.py`
 - [X] T133 [US4] Implement bounded strategy-assistant suggestions, parameter ranges, challenges, and weakness explanations in `modules/strategies/assistant.py`
 - [X] T134 [US4] Implement individual ACCEPT, EDIT, REJECT and bulk-preview workflows without implicit canonical mutation in `modules/strategies/suggestions.py`
@@ -404,7 +404,7 @@
 - [ ] T234 Add the full signup-to-HIL-1 journey with real API, worker, database, and browser components in `tests/e2e/test_release_signup_to_hil1.py`
 - [ ] T235 Add the full HIL-2-to-manual-MT5-reconciliation journey in `tests/e2e/test_release_hil2_to_reconciliation.py`
 - [ ] T236 Add the full monitoring-to-HIL-3-to-journal/performance journey in `tests/e2e/test_release_hil3_closed_loop.py`
-- [ ] T237 Add full AI-assisted, AI-generated, human-created, and imported strategy lifecycle journeys in `tests/e2e/test_release_strategy_origins.py`
+- [ ] T237 Add full AI-assisted and AI-generated strategy lifecycle journeys, including explicit proposal approval, in `tests/e2e/test_release_strategy_origins.py`
 - [ ] T238 Add full risk hard-block, reduce-size, prop-firm difference, correlation, and dynamic-capacity journeys in `tests/e2e/test_release_risk_controls.py`
 - [ ] T239 Add full Codex-default, explicit LiteLLM opt-in, same-runtime fallback, no cross-runtime retry, per-agent model/prompt, and permission-isolation journeys in `tests/e2e/test_release_agent_configuration.py`
 - [X] T240 Map SC-001 through SC-015 to executable evidence and CI artifact locations in `tests/acceptance/success_criteria.md`
@@ -547,10 +547,25 @@ Journal projection T212, performance models T213, notification service T217, cha
 - [ ] T252 [HIGH] Complete account, policy, prop-firm rule, internal guardrail, instrument/category, reset-basis, currency, effective-limit contributor, import-review, and immutable version-history models and APIs, including historical effective-configuration lookup and frontend management views in `modules/accounts/`, `modules/risk/policies.py`, `apps/api/app/routes/configuration.py`, and `apps/web/src/features/configuration/` (FR-015–FR-021; gap: partial)
 - [ ] T253 [HIGH] Replace the in-memory single-key credential store with persistent envelope encryption backed by a configured KMS/key-encryption abstraction, opaque secret references, authenticated rotation/replace/test/delete operations, key-version migration, redacted responses/logging, step-up authorization, and audit events in `modules/credentials/` and configuration APIs (FR-010–FR-013; Constitution VIII; gap: partial)
 - [ ] T254 [HIGH] Complete Twelve Data and Coinbase REST/WebSocket adapters plus pluggable calendar/news ingestion, normalized quote/candle/trade/order-book/event schemas, source and observation timestamps, provenance, health and stale-data state, reconnect/backfill/deduplication, and TimescaleDB persistence in `modules/market_data/`, `apps/worker/`, and database migrations (FR-034–FR-040; gap: partial)
-- [ ] T255 [HIGH] Replace caller-supplied research rankings with a scheduled, persisted daily research workflow that gathers category data, computes technical/fundamental/sentiment/regime features, invokes bounded analyst and critic agents, stores structured fingerprints and evidence, ranks exactly one candidate per configured category, and supports permissioned replace/rerun/no-trade and degraded states in `modules/research/`, `apps/worker/`, and `apps/api/app/routes/research.py` (FR-002, FR-041–FR-043; gap: partial)
-- [ ] T256 [HIGH] Expand the canonical strategy contract to cover regimes, dependencies, confirmations, filters, invalidation, stops, targets, management, sessions, events, reproducibility metadata, and immutable provenance; align lifecycle states and guarded transitions exactly with the specification and add typed similarity plus versioned branch/review actions for manual, agent-authored, and imported strategies in `packages/strategy_sdk/` and `modules/strategies/` (FR-055–FR-068, FR-073–FR-074; Constitution IV; gap: contradicts)
+- [X] T255 [HIGH] Replace caller-supplied research rankings with a scheduled, persisted daily research workflow that gathers category data, computes technical/fundamental/sentiment/regime features, invokes bounded analyst and critic agents, stores structured fingerprints and evidence, ranks exactly one candidate per configured category, and supports permissioned replace/rerun/no-trade and degraded states in `modules/research/`, `apps/worker/`, and `apps/api/app/routes/research.py` (FR-002, FR-041–FR-043; gap: partial)
+- [ ] T256 [HIGH] Expand the canonical strategy contract to cover regimes, dependencies, confirmations, filters, invalidation, stops, targets, management, sessions, events, reproducibility metadata, and immutable provenance; align lifecycle states and guarded transitions exactly with the specification and add typed similarity plus versioned branch/review actions for AI-generated and AI-assisted strategies in `packages/strategy_sdk/` and `modules/strategies/` (FR-055–FR-068, FR-073–FR-074; Constitution IV; gap: contradicts)
 - [ ] T257 [HIGH] Implement point-in-time-safe backtests with realistic costs and complete metrics/attribution, out-of-sample and walk-forward validation, stress and Monte Carlo analysis, deterministic policy checks, paper-trading evidence, and approval/promotion gates through one origin-neutral evaluator shared by UI, API, and workers in `modules/backtesting/`, `modules/strategies/validation.py`, and `apps/worker/` (FR-069–FR-072; gap: partial)
 - [ ] T258 [HIGH] Implement the authorized knowledge-source lifecycle with durable metadata and blobs, extraction/chunking/embedding/indexing, idempotent reprocessing, disable/delete/status operations, vector and lexical hybrid retrieval with owner/category/date/tag filters, precise source/chunk/version citations, retrieval audit, and fail-safe degraded behavior in `modules/knowledge/` and `apps/api/app/routes/knowledge.py` (FR-075–FR-080; gap: partial)
 - [X] T259 [HIGH] Replace hard-coded web fixtures with authenticated typed API clients, session and step-up flows, query/mutation state, SSE or equivalent realtime updates, error/degraded/empty/loading states, and accessible operational controls for configuration, agents, research, strategy, HIL approvals, monitoring, knowledge, notifications, audit, journal, and performance in `apps/web/src/` (FR-011, FR-046, FR-079, FR-094–FR-098; Constitution VIII; gap: partial)
 - [ ] T260 [HIGH] Implement durable idempotent worker jobs with persisted progress, cancellation, retry/backoff, dead-letter handling, and outbox consumption; replace static health and recording-only notifications with measured dependency health, structured logs/traces/metrics, alert thresholds, user preferences, persistent in-product delivery, and configured email/Telegram/push adapters in `apps/worker/`, `modules/observability/`, `modules/notifications/`, and `apps/api/app/routes/operations.py` (FR-097–FR-100; plan Stage 10; gap: partial)
 - [ ] T261 [HIGH] Replace source-text and direct-function release checks for completed foundation tasks with executable PostgreSQL/Timescale/vector migrations, real API authentication/authorization tests, transactional outbox/idempotency and failure-recovery tests, provider/MT5 contract tests, and browser-level assertions using disposable integration infrastructure in `tests/contract/`, `tests/integration/`, `tests/e2e/`, and `apps/web/` while retaining the open T234–T244 release gates (plan verification strategy; Constitution IX–X; gap: partial)
+
+---
+
+## Phase 13: Product Correction Implementation
+
+**Purpose**: Implement the operator-visible connection, research archive, AI strategy, MT5, and
+validation workflows clarified by the product owner on 2026-08-25. These tasks narrow visible
+product gaps without claiming completion of the broader convergence tasks above.
+
+- [X] T262 [HIGH] Add explicit UI-first data-source connection profiles for Twelve Data, Coinbase, CoinGecko, FRED, calendar, and news providers; resolve encrypted credential references in workers and replace fabricated health with bounded provider tests in `modules/connections/`, `apps/api/app/routes/configuration.py`, and `apps/web/src/features/configuration/Connections.tsx`
+- [X] T263 [HIGH] Persist an immutable timestamped filesystem archive for every market-research and strategy-research cycle, link its path/checksum to the durable run record, and expose archive manifests in the API/UI in `modules/research/artifacts.py`, `apps/worker/app/tasks/`, and `apps/web/src/features/`
+- [X] T264 [HIGH] Restrict strategy origins to `AI_GENERATED` and `AI_ASSISTED`; invoke `strategy_researcher` for autonomous generation and `strategy_assistant` for human-description expansion, preserve step-by-step proposals, and require explicit human approval before canonicalization in `modules/strategies/`, `apps/worker/app/tasks/strategies.py`, `apps/api/app/routes/strategies.py`, and `apps/web/src/features/strategies/StrategyBuilder.tsx`
+- [X] T265 [HIGH] Add a visible read-only MT5 Bridge connection workflow with bridge URL, encrypted HMAC credential, account reference, real capability/health testing, stale/offline state, and no broker-write surface in `modules/connections/`, `apps/api/app/routes/configuration.py`, `apps/web/src/app/connections/`, and `apps/web/src/features/connections/MT5Connection.tsx`
+- [X] T266 [HIGH] Replace pasted validation fixtures with provider-backed asynchronous backtest runs, deterministic point-in-time evaluation, realistic cost configuration, validation gates and persisted evidence/archive manifests exposed through strategy API and UI in `modules/backtesting/`, `apps/worker/app/tasks/strategies.py`, `apps/api/app/routes/strategies.py`, and `apps/web/src/features/strategies/`
+- [X] T267 [HIGH] Ground Strategy Researcher and Strategy Assistant proposals in an immutable approved-market evidence pack containing the selected research candidate and fingerprint, point-in-time provider history, account/policy context, prior strategy/backtest/performance evidence, and owner-scoped contextual knowledge citations; generate multiple hypotheses, deterministically screen them on an unseen chronological holdout, fail safely when grounding is missing or stale, archive every input/result reference, and expose the basis in the API/UI in `modules/strategies/evidence.py`, `modules/strategies/screening.py`, `modules/strategies/ai_workflow.py`, `apps/worker/app/tasks/strategies.py`, `apps/api/app/routes/strategies.py`, and `apps/web/src/features/strategies/StrategyBuilder.tsx`

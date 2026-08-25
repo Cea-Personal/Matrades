@@ -93,25 +93,27 @@ HIL-3 approval and manual action.
 
 ### User Story 4 - Create and Validate a Strategy (Priority: P2)
 
-As a trader or researcher, I want to create an AI-generated, AI-assisted, manual, or imported
-strategy and move it through one evidence-based lifecycle so that origin never substitutes for
-quality.
+As a trader or researcher, I want the Strategy Researcher to generate a strategy autonomously or
+the Strategy Assistant to turn my description into a complete proposal, then move the approved
+proposal through one evidence-based lifecycle so that origin never substitutes for quality.
 
 **Why this priority**: Reusable validated strategies are necessary for disciplined proposals,
 but the trade-decision workflow can first operate with a seeded validated strategy.
 
-**Independent Test**: Start with a partial natural-language strategy, accept and reject individual
-AI suggestions, complete its rules, detect similarity, validate it, and verify that it cannot
-become live before all required stages pass.
+**Independent Test**: Generate one autonomous proposal and one proposal from a partial natural-
+language idea, review their family and step-by-step rules, approve one into the canonical
+repository, detect similarity, validate it, and verify that it cannot become live before all
+required stages pass.
 
 **Acceptance Scenarios**:
 
-1. **Given** an incomplete user idea, **When** AI assistance is requested, **Then** missing or
-   ambiguous rules are identified and suggestions remain non-canonical until individually accepted.
+1. **Given** an incomplete user idea, **When** AI assistance is requested, **Then** the Strategy
+   Assistant selects or confirms a family and returns a complete step-by-step proposal that remains
+   non-canonical until the user explicitly approves it.
 2. **Given** a strategy materially equivalent to an existing one, **When** similarity analysis
    completes, **Then** Matrades offers reuse, comparison, version, or variant actions instead of
    silently creating a duplicate.
-3. **Given** any newly created or imported strategy, **When** live activation is attempted before
+3. **Given** any newly created strategy, **When** live activation is attempted before
    validation and paper trading complete, **Then** activation is prevented with the remaining
    stages shown.
 4. **Given** an active strategy, **When** Improve with AI is selected, **Then** a separate draft is
@@ -241,7 +243,7 @@ work rather than silently changing a live strategy.
   LiteLLM alternative; the agent becomes DEGRADED or BLOCKED and does not switch runtimes silently.
 - Only one of the agent's system or user prompt types is overridden.
 - Retrieved knowledge belongs to another user or account or conflicts with a verified structured rule.
-- An imported strategy is malformed, incomplete, duplicated, or includes unsupported semantics.
+- An AI proposal is malformed, incomplete, duplicated, or includes unsupported semantics.
 - A strategy's parameter-only change is submitted as a new identity, or a material rule change is
   submitted as a profile update.
 - No validated strategy matches the current market regime.
@@ -288,10 +290,13 @@ that have not completed the required validation lifecycle.
 - **FR-010**: Credential, broker, risk-limit, hard-rule, and security changes MUST require step-up
   authentication and MUST produce an audit event.
 - **FR-011**: Routine configuration MUST be available through the UI without requiring source or
-  deployment changes.
+  deployment changes, including named Twelve Data, Coinbase, CoinGecko, FRED, calendar, news, and
+  read-only MT5 Bridge connection profiles.
 - **FR-012**: Stored secrets MUST be encrypted, displayed in full only during initial entry, masked
   thereafter, excluded from logs and model prompts, and accessed only by authorized reference.
-- **FR-013**: Users MUST be able to replace and test credentials without exposing the saved value.
+- **FR-013**: Users MUST be able to replace and test credentials without exposing the saved value;
+  a connection test MUST perform a bounded provider or MT5 Bridge health probe and MUST NOT
+  fabricate a healthy result.
 - **FR-014**: Authorization MUST isolate each user's accounts, strategies, journal, research, and
   knowledge unless explicit sharing is later authorized.
 
@@ -370,7 +375,8 @@ that have not completed the required validation lifecycle.
   previous value, forecast, and actual value where available and MUST expose source health.
 - **FR-041**: Daily research MUST rank candidates using applicable volatility, spread, liquidity,
   trend clarity, session conditions, strategy opportunity, event risk, macro context, and data
-  quality evidence.
+  quality evidence. Every successful, degraded, or failed market-research cycle MUST write an
+  immutable timestamped archive manifest and link its path and checksum to the durable run.
 - **FR-042**: Active-market analysis MUST support technical, structure, liquidity, fundamental,
   event, sentiment/positioning, volatility, and relevant intermarket evidence.
 - **FR-043**: Regime classification MUST produce a structured market fingerprint capable of
@@ -412,18 +418,24 @@ that have not completed the required validation lifecycle.
 
 #### Strategy Creation, Repository, and Validation
 
-- **FR-055**: The Strategy Lab MUST allow `AI_GENERATED`, `AI_ASSISTED`, `HUMAN_CREATED`, and
-  `IMPORTED` creation paths into one canonical repository.
-- **FR-056**: A user MUST be able to begin with natural language, partial structured rules, complete
-  manual rules, a copy of an existing strategy, or a supported imported definition.
-- **FR-057**: The Strategy Assistant MUST identify missing, ambiguous, inconsistent, and optional
-  rules and MUST let the user answer directly or request suggestions.
-- **FR-058**: Assistance MUST support completing missing rules, formalizing, suggesting improvements,
-  challenging, converting to testable rules, suggesting parameter ranges, and explaining weaknesses.
-- **FR-059**: AI suggestions MUST support individual ACCEPT, EDIT, and REJECT actions and MUST NOT
-  alter the canonical draft before acceptance; bulk changes MUST show a reviewable change preview.
-- **FR-060**: Rule history MUST distinguish user-originated, AI-suggested, user-accepted,
-  user-edited, and user-rejected content and retain strategy origin, creator, and AI contribution.
+- **FR-055**: The Strategy Lab MUST support exactly `AI_GENERATED` and `AI_ASSISTED` creation paths
+  into one canonical repository; it MUST NOT expose human-created or imported origins.
+- **FR-056**: `AI_GENERATED` MUST invoke `strategy_researcher` to select the strategy family and
+  produce a complete deterministic proposal without requiring a user-authored idea.
+- **FR-057**: `AI_ASSISTED` MUST require a human description and invoke `strategy_assistant` to
+  identify missing or ambiguous rules and expand the idea into a complete step-by-step proposal.
+- **FR-058**: Each AI proposal MUST include its family, deterministic rules, step-by-step breakdown,
+  evidence, and the originating logical-agent identity. Strategy research MUST be grounded in an
+  immutable approved-market evidence pack containing the selected candidate and fingerprint,
+  point-in-time provider history, applicable account and policy context, prior strategy and
+  performance evidence, and owner-scoped contextual knowledge citations where available. The
+  agent MUST generate multiple hypotheses, while a deterministic chronological holdout screen—not
+  the agent—selects the proposal shown for approval. Missing, stale, or uncitable grounding MUST
+  produce a safe degraded result rather than an invented strategy.
+- **FR-059**: AI output MUST remain proposed and non-canonical until the user explicitly APPROVES
+  it; REJECT MUST preserve the research record without creating a canonical strategy version.
+- **FR-060**: Strategy history MUST retain origin, creator, AI contribution, human approval actor
+  and time, lineage, and the immutable timestamped strategy-research archive path and checksum.
 - **FR-061**: Draft strategies MUST be saveable and resumable; incomplete strategies MUST remain
   drafts and MUST show the rules preventing deterministic implementation.
 - **FR-062**: A complete specification MUST define family, markets and instruments, regimes,
@@ -604,10 +616,10 @@ that have not completed the required validation lifecycle.
 - **SC-005**: 100% of HIL-2 proposals show all required construction and equity-snapshot fields,
   their freshness, and a PASS or REDUCE SIZE result; blocked candidates show equivalent evidence
   outside the actionable approval queue.
-- **SC-006**: 100% of newly created, assisted, generated, or imported strategies are prevented from
+- **SC-006**: 100% of AI-assisted and AI-generated strategies are prevented from
   live eligibility until the same configured validation and paper-trading gates pass.
 - **SC-007**: At least 90% of representative first-time users can turn a partial strategy idea into
-  a saved deterministic draft, accepting and rejecting individual suggestions, without assistance.
+  a reviewable deterministic AI-assisted proposal and approve or reject it without assistance.
 - **SC-008**: In duplicate test cases, 100% of exact canonical duplicates are detected before a new
   strategy identity is committed, and at least 90% of reviewed near-duplicate cases are surfaced.
 - **SC-009**: In acceptance testing, 100% of required logical agents resolve to the Codex-hosted

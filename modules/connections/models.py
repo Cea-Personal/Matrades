@@ -1,0 +1,99 @@
+"""Typed, provider-neutral connection configuration."""
+
+from __future__ import annotations
+
+from enum import StrEnum
+from typing import Any
+from urllib.parse import urlparse
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class ConnectionProvider(StrEnum):
+    TWELVE_DATA = "TWELVE_DATA"
+    COINBASE = "COINBASE"
+    COINGECKO = "COINGECKO"
+    FRED = "FRED"
+    CALENDAR = "CALENDAR"
+    NEWS = "NEWS"
+    FOREX_FACTORY = "FOREX_FACTORY"
+    MT5_BRIDGE = "MT5_BRIDGE"
+
+
+PROVIDER_LABELS = {
+    ConnectionProvider.TWELVE_DATA: "Twelve Data",
+    ConnectionProvider.COINBASE: "Coinbase",
+    ConnectionProvider.COINGECKO: "CoinGecko",
+    ConnectionProvider.FRED: "FRED",
+    ConnectionProvider.CALENDAR: "Calendar",
+    ConnectionProvider.NEWS: "News",
+    ConnectionProvider.FOREX_FACTORY: "Forex Factory calendar scraper",
+    ConnectionProvider.MT5_BRIDGE: "MT5 Bridge",
+}
+
+
+def validated_endpoint(value: str, *, allow_loopback_http: bool = False) -> str:
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("endpoint must be an HTTP(S) URL")
+    blocked = {"169.254.169.254", "metadata.google.internal"}
+    if parsed.hostname.lower() in blocked:
+        raise ValueError("metadata endpoints are prohibited")
+    loopback = parsed.hostname.lower() in {
+        "localhost",
+        "127.0.0.1",
+        "::1",
+        "host.docker.internal",
+        "gateway.docker.internal",
+    }
+    if parsed.scheme != "https" and not (allow_loopback_http and loopback):
+        raise ValueError("remote endpoints must use HTTPS")
+    return value.rstrip("/")
+
+
+class ConnectionProfile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=120)
+    provider: ConnectionProvider
+    credential_id: UUID | None = None
+    configuration: dict[str, Any] = Field(default_factory=dict)
+    active: bool = True
+
+    @model_validator(mode="after")
+    def provider_requirements(self) -> ConnectionProfile:
+        if self.provider in {
+            ConnectionProvider.TWELVE_DATA,
+            ConnectionProvider.FRED,
+            ConnectionProvider.MT5_BRIDGE,
+        } and self.credential_id is None:
+            raise ValueError(f"{PROVIDER_LABELS[self.provider]} requires a credential")
+        if self.provider == ConnectionProvider.MT5_BRIDGE:
+            bridge_url = str(self.configuration.get("bridge_url", ""))
+            if not bridge_url:
+                raise ValueError("MT5 Bridge requires bridge_url")
+            self.configuration["bridge_url"] = validated_endpoint(
+                bridge_url, allow_loopback_http=True
+            )
+        if self.provider in {ConnectionProvider.CALENDAR, ConnectionProvider.NEWS}:
+            base_url = str(self.configuration.get("base_url", ""))
+            if not base_url:
+                raise ValueError(f"{PROVIDER_LABELS[self.provider]} requires base_url")
+            self.configuration["base_url"] = validated_endpoint(base_url)
+        if self.provider == ConnectionProvider.FOREX_FACTORY:
+            feed_url = str(self.configuration.get("feed_url", ""))
+            if feed_url:
+                self.configuration["feed_url"] = validated_endpoint(feed_url)
+        return self
+
+
+class ConnectionProbe(BaseModel):
+    status: str
+    latency_ms: int = Field(ge=0)
+    checked_at: str
+    capabilities: list[str] = Field(default_factory=list)
+    version: str | None = None
+    fresh: bool = False
+    writes: bool | None = None
+    safe_message: str | None = None

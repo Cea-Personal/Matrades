@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from time import monotonic
 from typing import Annotated, Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -8,10 +9,17 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.app.dependencies import current_actor, get_db, require_roles
-from modules.agents.models import AgentDefinition, ModelProfile, RuntimeType
+from modules.agents.models import (
+    AgentDefinition,
+    AgentExecution,
+    ExecutionStatus,
+    ModelProfile,
+    RuntimeType,
+)
 from modules.agents.permissions import PermissionSet
 from modules.agents.prompts import PromptSet, resolve_prompts
 from modules.agents.registry import REQUIRED_AGENT_IDS
+from modules.agents.rpc import RedisAgentGateway
 from modules.agents.runtime import AgentRuntimeRouter
 from modules.identity.authorization import Actor, Role
 from packages.shared.config import get_settings
@@ -185,8 +193,10 @@ async def test_run(
     profiles = await _profiles(store, actor.owner_id)
     agent = agents[logical_id]
     default = _default_profile()
+    profile_id = agent.profile_id or default.id
     if agent.profile_id is None:
         agent = agent.model_copy(update={"profile_id": default.id})
+    profile = profiles[profile_id]
     orchestrator = agents["orchestrator"]
     prompts = resolve_prompts(
         PromptSet(agent.system_prompt_override, agent.user_prompt_override),
@@ -211,14 +221,50 @@ async def test_run(
         "required": ["status", "summary", "evidence", "uncertainties"],
         "additionalProperties": False,
     }
-    execution, result = await runtime_router.execute(
-        agent,
-        profiles,
-        prompts,
-        PermissionSet(agent.permission_set_version, ("market.read", "knowledge.search")),
-        {**payload.input, "output_schema": output_schema},
-        deadline_seconds=120,
-    )
+    configured_profile = agent.profile_id is not None
+    if agent.runtime == RuntimeType.CODEX_APP_SERVER:
+        started = monotonic()
+        result: dict[str, Any] | None = None
+        error: str | None = None
+        gateway = RedisAgentGateway(
+            get_settings().redis_url,
+            get_settings().research_agent_timeout_seconds,
+        )
+        try:
+            result = await gateway.invoke(
+                logical_id,
+                {**payload.input, "purpose": "configuration_test"},
+                output_schema,
+            )
+            execution_status = ExecutionStatus.SUCCEEDED
+        except (TimeoutError, RuntimeError, ValueError) as exc:
+            execution_status = ExecutionStatus.DEGRADED
+            error = str(exc)
+        finally:
+            await gateway.close()
+        execution = AgentExecution(
+            logical_id=agent.logical_id,
+            selected_runtime=agent.runtime,
+            actual_runtime=agent.runtime,
+            selection_source="agent_profile" if configured_profile else "codex_default",
+            configured_model=profile.model,
+            actual_model=profile.model,
+            resolved_system_prompt=prompts.system,
+            resolved_user_prompt=prompts.user,
+            tools=("market.read", "knowledge.search"),
+            status=execution_status,
+            duration_ms=int((monotonic() - started) * 1000),
+            error=error,
+        )
+    else:
+        execution, result = await runtime_router.execute(
+            agent,
+            profiles,
+            prompts,
+            PermissionSet(agent.permission_set_version, ("market.read", "knowledge.search")),
+            {**payload.input, "output_schema": output_schema},
+            deadline_seconds=120,
+        )
     await store.create(
         "agent_execution",
         actor.owner_id,

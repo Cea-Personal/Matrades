@@ -21,9 +21,24 @@ class CoinbaseClient:
         response.raise_for_status()
         return response.json()
 
-    async def candles(self, product_id: str, granularity: int = 3600) -> list[list[float]]:
+    async def candles(
+        self,
+        product_id: str,
+        granularity: int = 3600,
+        *,
+        start: str | None = None,
+        end: str | None = None,
+    ) -> list[list[float]]:
+        params: dict[str, str | int] = {"granularity": granularity}
+        if start:
+            params["start"] = start
+        if end:
+            params["end"] = end
         response = await self.client.get(
-            f"/products/{product_id}/candles", params={"granularity": granularity}
+            f"/products/{product_id}/candles", params=params
         )
         response.raise_for_status()
         return response.json()
+
+    async def close(self) -> None:
+        await self.client.aclose()

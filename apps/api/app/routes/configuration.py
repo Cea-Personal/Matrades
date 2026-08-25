@@ -1,16 +1,32 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Annotated, Any
 from uuid import UUID
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from adapters.news.forex_factory import DEFAULT_FOREX_FACTORY_FEED, fetch_forex_factory_events
 from apps.api.app.dependencies import current_actor, get_db, require_roles, require_step_up
+from modules.connections.models import (
+    PROVIDER_LABELS,
+    ConnectionProfile,
+    ConnectionProvider,
+)
+from modules.connections.resolution import resolve_connection
+from modules.connections.testing import probe_connection, twelve_data_check_due
 from modules.credentials.vault import EnvelopeCipher
 from modules.identity.authorization import Actor, Role
+from modules.research.scheduling import (
+    default_schedule,
+    next_run_at,
+    normalize_schedule,
+    schedule_timezone,
+)
 from packages.shared.config import get_settings
 from packages.shared.store import ResourceStore
 
@@ -29,6 +45,41 @@ class AccountInput(BaseModel):
     active: bool = True
 
 
+class ResearchScheduleInput(BaseModel):
+    enabled: bool = True
+    run_at: str = "05:00"
+    timezone: str = "UTC"
+    weekdays: list[int] = Field(default_factory=lambda: list(range(7)))
+
+    @field_validator("run_at")
+    @classmethod
+    def validate_run_at(cls, value: str) -> str:
+        try:
+            datetime.strptime(value, "%H:%M")
+        except ValueError as exc:
+            raise ValueError("run_at must use HH:MM 24-hour format") from exc
+        return value
+
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, value: str) -> str:
+        schedule_timezone(value)
+        return value
+
+    @field_validator("weekdays")
+    @classmethod
+    def validate_weekdays(cls, value: list[int]) -> list[int]:
+        if any(day < 0 or day > 6 for day in value):
+            raise ValueError("weekdays must contain values from 0 (Monday) through 6 (Sunday)")
+        return sorted(set(value))
+
+    @model_validator(mode="after")
+    def require_weekday_for_enabled_schedule(self) -> ResearchScheduleInput:
+        if self.enabled and not self.weekdays:
+            raise ValueError("an enabled schedule must include at least one weekday")
+        return self
+
+
 class CredentialInput(BaseModel):
     name: str
     provider: str
@@ -36,11 +87,8 @@ class CredentialInput(BaseModel):
     secret: str = Field(min_length=1)
 
 
-class ConnectionInput(BaseModel):
-    name: str
-    provider: str
-    credential_id: UUID | None = None
-    configuration: dict[str, Any] = {}
+class ConnectionInput(ConnectionProfile):
+    pass
 
 
 class RuleInput(BaseModel):
@@ -64,6 +112,43 @@ def _public_credential(record) -> dict[str, Any]:
     return data
 
 
+def _credential_status_for_probe(probe_status: str) -> str:
+    return "ACTIVE" if probe_status in {"HEALTHY", "STALE"} else "INVALID"
+
+
+def _default_research_schedule() -> dict[str, Any]:
+    settings = get_settings()
+    return default_schedule(
+        enabled=settings.research_schedule_enabled,
+        run_at=f"{settings.research_schedule_hour_utc:02d}:{settings.research_schedule_minute_utc:02d}",
+    )
+
+
+async def _sync_credential_status(
+    store: ResourceStore,
+    connection: Any,
+    probe_status: str,
+    actor: Actor,
+) -> None:
+    credential_id = connection.data.get("credential_id")
+    if not credential_id:
+        return
+    credential = await store.get("credential", UUID(str(credential_id)), actor.owner_id)
+    if credential is None:
+        return
+    await store.update(
+        credential,
+        {
+            **credential.data,
+            "status": _credential_status_for_probe(probe_status),
+            "last_tested": datetime.now(UTC).isoformat(),
+            "last_test_result": probe_status,
+        },
+        actor_id=actor.actor_id,
+        event_type="credential.provider_tested",
+    )
+
+
 @router.get("/accounts")
 async def list_accounts(
     actor: Annotated[Actor, Depends(current_actor)],
@@ -81,7 +166,10 @@ async def create_account(
     record = await ResourceStore(db).create(
         "account",
         actor.owner_id,
-        payload.model_dump(mode="json"),
+        {
+            **payload.model_dump(mode="json"),
+            "research_schedule": _default_research_schedule(),
+        },
         actor_id=actor.actor_id,
         event_type="account.created",
     )
@@ -100,7 +188,80 @@ async def update_account(
     if record is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "account not found")
     updated = await store.update(
-        record, payload.model_dump(mode="json"), actor_id=actor.actor_id
+        record,
+        {
+            **payload.model_dump(mode="json"),
+            "research_schedule": record.data.get(
+                "research_schedule", _default_research_schedule()
+            ),
+        },
+        actor_id=actor.actor_id,
+    )
+    return updated.public()
+
+
+@router.get("/accounts/{account_id}/research-schedule")
+async def get_account_research_schedule(
+    account_id: UUID,
+    actor: Annotated[Actor, Depends(current_actor)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    record = await ResourceStore(db).get("account", account_id, actor.owner_id)
+    if record is None or record.state == "DELETED":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "account not found")
+    schedule = normalize_schedule(
+        record.data.get("research_schedule"), fallback=_default_research_schedule()
+    )
+    upcoming = next_run_at(schedule)
+    return {
+        "account_id": str(record.id),
+        **schedule,
+        "next_run_at": upcoming.isoformat() if upcoming else None,
+    }
+
+
+@router.put("/accounts/{account_id}/research-schedule")
+async def update_account_research_schedule(
+    account_id: UUID,
+    payload: ResearchScheduleInput,
+    actor: Annotated[Actor, Depends(require_roles(Role.OWNER, Role.OPERATOR))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    store = ResourceStore(db)
+    record = await store.get("account", account_id, actor.owner_id)
+    if record is None or record.state == "DELETED":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "account not found")
+    schedule = payload.model_dump(mode="json")
+    updated = await store.update(
+        record,
+        {**record.data, "research_schedule": schedule},
+        actor_id=actor.actor_id,
+        event_type="account.research_schedule_updated",
+    )
+    upcoming = next_run_at(schedule)
+    return {
+        "account_id": str(updated.id),
+        **schedule,
+        "next_run_at": upcoming.isoformat() if upcoming else None,
+    }
+
+
+@router.delete("/accounts/{account_id}")
+async def delete_account(
+    account_id: UUID,
+    actor: Annotated[Actor, Depends(require_step_up("broker.change"))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    store = ResourceStore(db)
+    record = await store.get("account", account_id, actor.owner_id)
+    if record is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "account not found")
+    updated = await store.update(
+        record,
+        {**record.data, "active": False, "deleted_at": datetime.now(UTC).isoformat()},
+        state="DELETED",
+        actor_id=actor.actor_id,
+        event_type="account.deleted",
     )
     return updated.public()
 
@@ -166,6 +327,20 @@ async def replace_credential(
     updated = await store.update(
         item, data, actor_id=actor.actor_id, event_type="credential.replaced"
     )
+    for connection in await store.list("connection", actor.owner_id):
+        if str(connection.data.get("credential_id")) != str(item.id):
+            continue
+        await store.update(
+            connection,
+            {
+                **connection.data,
+                "health": "UNTESTED",
+                "last_checked": None,
+                "last_error": None,
+            },
+            actor_id=actor.actor_id,
+            event_type="connection.credential_replaced",
+        )
     return _public_credential(updated)
 
 
@@ -179,14 +354,61 @@ async def test_credential(
     item = await store.get("credential", credential_id, actor.owner_id)
     if item is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "credential not found")
-    try:
-        _cipher().decrypt(actor.owner_id, item.data["envelope"])
-        state = "ACTIVE"
-    except Exception:  # noqa: BLE001 - KMS/vault failure maps to a safe public state
-        state = "INVALID"
+    linked = [
+        connection
+        for connection in await store.list("connection", actor.owner_id)
+        if str(connection.data.get("credential_id")) == str(item.id)
+    ]
+    if linked:
+        outcomes: list[str] = []
+        for connection in linked:
+            twelve_data_cached = (
+                connection.data.get("provider") == ConnectionProvider.TWELVE_DATA.value
+                and not twelve_data_check_due(connection.data.get("last_checked"))
+            )
+            if twelve_data_cached:
+                outcomes.append(str(connection.data.get("health", "STALE")))
+                continue
+            try:
+                resolved = await resolve_connection(db, actor.owner_id, connection.id)
+                result = await probe_connection(resolved.profile, resolved.secret)
+            except (LookupError, RuntimeError, ValueError) as exc:
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+            outcomes.append(result.status)
+            await store.update(
+                connection,
+                {
+                    **connection.data,
+                    "health": result.status,
+                    "last_checked": result.checked_at,
+                    "last_success": (
+                        result.checked_at
+                        if result.status == "HEALTHY"
+                        else connection.data.get("last_success")
+                    ),
+                    "capabilities": result.capabilities,
+                    "fresh": result.fresh,
+                    "writes": result.writes,
+                    "last_error": result.safe_message,
+                },
+                actor_id=actor.actor_id,
+                event_type="connection.health_changed",
+            )
+        state = "ACTIVE" if all(item in {"HEALTHY", "STALE"} for item in outcomes) else "INVALID"
+    else:
+        try:
+            _cipher().decrypt(actor.owner_id, item.data["envelope"])
+            state = "ACTIVE"
+        except Exception:  # noqa: BLE001 - KMS/vault failure maps to a safe public state
+            state = "INVALID"
     updated = await store.update(
         item,
-        {**item.data, "status": state},
+        {
+            **item.data,
+            "status": state,
+            "last_tested": datetime.now(UTC).isoformat(),
+            "last_test_result": state,
+        },
         actor_id=actor.actor_id,
         event_type="credential.tested",
     )
@@ -201,20 +423,90 @@ async def list_connections(
     return [x.public() for x in await ResourceStore(db).list("connection", actor.owner_id)]
 
 
+@router.get("/connection-providers")
+async def connection_providers(_: Annotated[Actor, Depends(current_actor)]):
+    return [
+        {
+            "id": provider.value,
+            "label": PROVIDER_LABELS[provider],
+            "credential_required": provider
+            in {
+                ConnectionProvider.TWELVE_DATA,
+                ConnectionProvider.FRED,
+                ConnectionProvider.MT5_BRIDGE,
+            },
+        }
+        for provider in ConnectionProvider
+    ]
+
+
 @router.post("/connections", status_code=status.HTTP_201_CREATED)
 async def create_connection(
     payload: ConnectionInput,
     actor: Annotated[Actor, Depends(require_roles(Role.OWNER, Role.OPERATOR))],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
+    store = ResourceStore(db)
+    if payload.credential_id is not None:
+        credential = await store.get("credential", payload.credential_id, actor.owner_id)
+        if credential is None:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "credential not found")
+        if credential.data.get("provider") != payload.provider.value:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "credential provider does not match connection provider",
+            )
     item = await ResourceStore(db).create(
         "connection",
         actor.owner_id,
-        {**payload.model_dump(mode="json"), "health": "UNTESTED", "last_success": None},
+        {
+            **payload.model_dump(mode="json"),
+            "health": "UNTESTED",
+            "last_success": None,
+            "last_checked": None,
+            "capabilities": [],
+        },
+        state="ACTIVE" if payload.active else "DISABLED",
         actor_id=actor.actor_id,
         event_type="connection.created",
     )
     return item.public()
+
+
+@router.put("/connections/{connection_id}")
+async def update_connection(
+    connection_id: UUID,
+    payload: ConnectionInput,
+    actor: Annotated[Actor, Depends(require_step_up("connection.change"))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    store = ResourceStore(db)
+    item = await store.get("connection", connection_id, actor.owner_id)
+    if item is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "connection not found")
+    if payload.credential_id is not None:
+        credential = await store.get("credential", payload.credential_id, actor.owner_id)
+        if credential is None:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "credential not found")
+        if credential.data.get("provider") != payload.provider.value:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "credential provider does not match connection provider",
+            )
+    updated = await store.update(
+        item,
+        {
+            **payload.model_dump(mode="json"),
+            "health": "UNTESTED",
+            "last_success": item.data.get("last_success"),
+            "last_checked": None,
+            "capabilities": item.data.get("capabilities", []),
+        },
+        state="ACTIVE" if payload.active else "DISABLED",
+        actor_id=actor.actor_id,
+        event_type="connection.updated",
+    )
+    return updated.public()
 
 
 @router.post("/connections/{connection_id}/test")
@@ -227,11 +519,109 @@ async def test_connection(
     item = await store.get("connection", connection_id, actor.owner_id)
     if item is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "connection not found")
-    data = {**item.data, "health": "HEALTHY", "last_success": "now", "latency_ms": 0}
+    twelve_data_cached = (
+        item.data.get("provider") == ConnectionProvider.TWELVE_DATA.value
+        and not twelve_data_check_due(item.data.get("last_checked"))
+    )
+    if twelve_data_cached:
+        checked_at = datetime.fromisoformat(str(item.data["last_checked"]).replace("Z", "+00:00"))
+        if checked_at.tzinfo is None:
+            checked_at = checked_at.replace(tzinfo=UTC)
+        return {
+            **item.public(),
+            "health_cached": True,
+            "next_check_at": (checked_at.astimezone(UTC) + timedelta(hours=1)).isoformat(),
+        }
+    try:
+        resolved = await resolve_connection(db, actor.owner_id, connection_id)
+        result = await probe_connection(resolved.profile, resolved.secret)
+    except (LookupError, RuntimeError, ValueError) as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+    data = {
+        **item.data,
+        "health": result.status,
+        "last_success": (
+            result.checked_at
+            if result.status == "HEALTHY"
+            else item.data.get("last_success")
+        ),
+        "last_checked": result.checked_at,
+        "latency_ms": result.latency_ms,
+        "capabilities": result.capabilities,
+        "adapter_version": result.version,
+        "fresh": result.fresh,
+        "writes": result.writes,
+        "last_error": result.safe_message,
+    }
     updated = await store.update(
         item, data, actor_id=actor.actor_id, event_type="connection.health_changed"
     )
+    await _sync_credential_status(store, item, result.status, actor)
     return updated.public()
+
+
+@router.post("/connections/{connection_id}/forex-factory/scrape")
+async def scrape_forex_factory(
+    connection_id: UUID,
+    actor: Annotated[Actor, Depends(current_actor)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Fetch and normalize the configured Forex Factory calendar feed on demand."""
+    store = ResourceStore(db)
+    connection = await store.get("connection", connection_id, actor.owner_id)
+    if connection is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "connection not found")
+    if connection.data.get("provider") != ConnectionProvider.FOREX_FACTORY.value:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "connection is not a Forex Factory scraper",
+        )
+    feed_url = str(
+        connection.data.get("configuration", {}).get("feed_url", DEFAULT_FOREX_FACTORY_FEED)
+    )
+    try:
+        events = await fetch_forex_factory_events(feed_url)
+    except (httpx.HTTPError, RuntimeError, ValueError) as exc:
+        checked_at = datetime.now(UTC).isoformat()
+        await store.update(
+            connection,
+            {
+                **connection.data,
+                "health": "OFFLINE",
+                "last_checked": checked_at,
+                "last_error": f"{type(exc).__name__}: scraper failed",
+            },
+            actor_id=actor.actor_id,
+            event_type="connection.forex_factory_scrape_failed",
+        )
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"Forex Factory scraper failed: {type(exc).__name__}",
+        ) from exc
+    fetched_at = datetime.now(UTC).isoformat()
+    await store.update(
+        connection,
+        {
+            **connection.data,
+            "health": "HEALTHY" if events else "STALE",
+            "last_checked": fetched_at,
+            "last_success": fetched_at if events else connection.data.get("last_success"),
+            "capabilities": ["news.read", "calendar.read", "forex_factory.scrape"],
+            "fresh": bool(events),
+            "last_error": None,
+        },
+        actor_id=actor.actor_id,
+        event_type="connection.forex_factory_scraped",
+    )
+    return {
+        "connection_id": str(connection.id),
+        "provider": ConnectionProvider.FOREX_FACTORY.value,
+        "feed_url": feed_url,
+        "fetched_at": fetched_at,
+        "count": len(events),
+        "health": "HEALTHY" if events else "STALE",
+        "events": [event.model_dump(mode="json") for event in events],
+    }
 
 
 async def _list_rules(kind: str, actor: Actor, db: AsyncSession):
@@ -263,6 +653,26 @@ async def create_prop_ruleset(
     return item.public()
 
 
+@router.delete("/prop-rulesets/{rule_id}")
+async def delete_prop_ruleset(
+    rule_id: UUID,
+    actor: Annotated[Actor, Depends(require_step_up("hard_rule.change"))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    store = ResourceStore(db)
+    item = await store.get("prop_ruleset", rule_id, actor.owner_id)
+    if item is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "prop-firm ruleset not found")
+    updated = await store.update(
+        item,
+        {**item.data, "deleted_at": datetime.now(UTC).isoformat()},
+        state="DELETED",
+        actor_id=actor.actor_id,
+        event_type="prop_ruleset.deleted",
+    )
+    return updated.public()
+
+
 @router.get("/guardrails")
 async def list_guardrails(
     actor: Annotated[Actor, Depends(current_actor)],
@@ -286,6 +696,26 @@ async def create_guardrail(
         actor_id=actor.actor_id,
     )
     return item.public()
+
+
+@router.delete("/guardrails/{rule_id}")
+async def delete_guardrail(
+    rule_id: UUID,
+    actor: Annotated[Actor, Depends(require_step_up("hard_rule.change"))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    store = ResourceStore(db)
+    item = await store.get("guardrail", rule_id, actor.owner_id)
+    if item is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "guardrail not found")
+    updated = await store.update(
+        item,
+        {**item.data, "deleted_at": datetime.now(UTC).isoformat()},
+        state="DELETED",
+        actor_id=actor.actor_id,
+        event_type="guardrail.deleted",
+    )
+    return updated.public()
 
 
 @router.get("/effective-limits")

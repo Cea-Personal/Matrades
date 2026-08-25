@@ -4,8 +4,6 @@ from enum import StrEnum
 class StrategyOrigin(StrEnum):
     AI_GENERATED = "AI_GENERATED"
     AI_ASSISTED = "AI_ASSISTED"
-    HUMAN_CREATED = "HUMAN_CREATED"
-    IMPORTED = "IMPORTED"
 
 
 class StrategyFamily(StrEnum):

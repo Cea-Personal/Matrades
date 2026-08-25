@@ -141,8 +141,8 @@ Expected result:
 
 ## Scenario 5: Strategy Lab to Promotion
 
-Create one partial AI-assisted XAUUSD idea, reject one suggestion, edit another, complete required
-rules, and submit it. Repeat with AI-generated, manual, and imported origins.
+Create one partial AI-assisted XAUUSD idea, review the AI-selected family and step-by-step rules,
+approve the proposal, and submit it. Repeat with the autonomous AI-generated origin.
 
 ```bash
 uv run pytest tests/e2e/test_strategy_origins.py tests/replay/strategy_validation -q
@@ -150,7 +150,8 @@ uv run pytest tests/e2e/test_strategy_origins.py tests/replay/strategy_validatio
 
 Expected result:
 
-- Conversation never changes canonical rules; accepted/edit revisions retain provenance.
+- AI output never changes canonical rules before explicit strategy approval; the decision retains
+  actor and timestamp provenance.
 - An exact cross-origin duplicate is blocked from creating a new identity.
 - An active strategy improvement creates a new draft and leaves the active version immutable.
 - All origins use the same compiler, point-in-time backtest, out-of-sample, walk-forward, stress/

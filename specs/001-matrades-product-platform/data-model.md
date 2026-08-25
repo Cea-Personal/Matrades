@@ -279,7 +279,7 @@ requirements, and version; names alone are not executable logic.
 
 `StrategyDraft` stores owner, origin, name/description, base strategy/version lineage, family,
 schema version, revision, status, completeness projection, and timestamps. `DraftRuleRevision` is an
-immutable accepted/edit/import/generated rule change with rule path, typed value, source type,
+immutable accepted/edit/generated rule change with rule path, typed value, source type,
 suggestion/execution reference, actor, prior revision, and timestamp. Conversation is not canonical.
 
 ### StrategySuggestion and StrategyChangeSet

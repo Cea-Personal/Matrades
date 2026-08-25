@@ -592,6 +592,17 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/StrategyDraft' }
         default: { $ref: '#/components/responses/Error' }
+  /strategies/research-context:
+    get:
+      tags: [Strategies]
+      operationId: getStrategyResearchContext
+      responses:
+        '200':
+          description: Readiness and immutable approved-market basis for grounded strategy research
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StrategyResearchContext' }
+        default: { $ref: '#/components/responses/Error' }
   /strategy-drafts/{draft_id}:
     get:
       tags: [Strategies]
@@ -1254,15 +1265,26 @@ components:
               instrument_id: { type: string, format: uuid }
     StrategyDraftInput:
       type: object
-      required: [origin_type, name]
+      required: [origin_type]
       properties:
-        origin_type: { enum: [AI_GENERATED, AI_ASSISTED, HUMAN_CREATED, IMPORTED] }
-        name: { type: string }
-        description: { type: string }
-        family_id: { type: string, format: uuid }
-        natural_language_idea: { type: string }
-        base_strategy_version_id: { type: string, format: uuid }
-        imported_definition: { type: object, additionalProperties: true }
+        origin_type: { enum: [AI_GENERATED, AI_ASSISTED] }
+        description:
+          type: string
+          description: Required for AI_ASSISTED and omitted or optional for AI_GENERATED
+    StrategyResearchContext:
+      type: object
+      required: [ready]
+      properties:
+        ready: { type: boolean }
+        reason: { type: [string, 'null'] }
+        market_selection_id: { type: string, format: uuid }
+        market_research_run_id: { type: string, format: uuid }
+        account_id: { type: string, format: uuid }
+        instrument: { type: string }
+        category: { enum: [FOREX, METAL, CRYPTO] }
+        market_observed_at: { type: string, format: date-time }
+        historical_connection_id: { type: string, format: uuid }
+        historical_provider: { enum: [TWELVE_DATA, COINBASE] }
     RuleChange:
       type: object
       required: [rule_path, value]
@@ -1274,7 +1296,7 @@ components:
       required: [id, origin_type, name, status, revision, completeness]
       properties:
         id: { type: string, format: uuid }
-        origin_type: { enum: [AI_GENERATED, AI_ASSISTED, HUMAN_CREATED, IMPORTED] }
+        origin_type: { enum: [AI_GENERATED, AI_ASSISTED] }
         name: { type: string }
         status: { enum: [DRAFT, SPECIFIED] }
         revision: { type: integer, minimum: 1 }
@@ -1294,7 +1316,7 @@ components:
               - $ref: '#/components/schemas/RuleChange'
               - type: object
                 properties:
-                  provenance: { enum: [USER, AI_GENERATED, AI_ACCEPTED, AI_EDITED, IMPORTED] }
+                  provenance: { enum: [AI_GENERATED, AI_ASSISTED, USER_APPROVED] }
     SuggestionDecision:
       type: object
       required: [action]

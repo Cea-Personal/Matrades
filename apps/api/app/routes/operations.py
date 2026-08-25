@@ -1,19 +1,22 @@
 from __future__ import annotations
 
-import shutil
 from collections import defaultdict
 from decimal import Decimal
+from time import monotonic
 from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from redis.asyncio import Redis
+from redis.exceptions import RedisError
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.app.dependencies import current_actor, get_db
 from modules.identity.authorization import Actor
 from packages.shared.config import get_settings
+from packages.shared.runtime_health import CODEX_APP_SERVER_HEARTBEAT_KEY
 from packages.shared.store import AuditRecord, ResourceStore
 
 router = APIRouter(prefix="/operations", tags=["Operations"])
@@ -25,6 +28,39 @@ class NotificationPreferences(BaseModel):
     email: bool = False
     telegram: bool = False
     urgent_only_external: bool = True
+
+
+async def codex_app_server_health() -> dict[str, Any]:
+    settings = get_settings()
+    if not settings.codex_enabled:
+        return {
+            "component": "codex_app_server",
+            "state": "DISABLED",
+            "fresh": False,
+            "runtime": "CODEX_APP_SERVER",
+        }
+    redis = Redis.from_url(settings.redis_url)
+    started = monotonic()
+    try:
+        heartbeat = await redis.get(CODEX_APP_SERVER_HEARTBEAT_KEY)
+    except RedisError as exc:
+        return {
+            "component": "codex_app_server",
+            "state": "OFFLINE",
+            "fresh": False,
+            "runtime": "CODEX_APP_SERVER",
+            "error": f"heartbeat unavailable: {type(exc).__name__}",
+        }
+    finally:
+        await redis.aclose()
+    healthy = heartbeat == b"healthy"
+    return {
+        "component": "codex_app_server",
+        "state": "HEALTHY" if healthy else "OFFLINE",
+        "fresh": healthy,
+        "runtime": "CODEX_APP_SERVER",
+        "latency_ms": int((monotonic() - started) * 1000),
+    }
 
 
 @router.get("/health")
@@ -40,15 +76,7 @@ async def health(
         components.append(
             {"component": "database", "state": "OFFLINE", "fresh": False, "error": str(exc)}
         )
-    codex_available = shutil.which(get_settings().codex_binary) is not None
-    components.append(
-        {
-            "component": "codex_app_server",
-            "state": "HEALTHY" if codex_available else "OFFLINE",
-            "fresh": codex_available,
-            "runtime": "CODEX_APP_SERVER",
-        }
-    )
+    components.append(await codex_app_server_health())
     connections = await ResourceStore(db).list("connection", actor.owner_id)
     components.extend(
         {

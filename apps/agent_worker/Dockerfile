@@ -1,5 +1,15 @@
 FROM python:3.13-slim
+
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends ca-certificates curl \
+    && curl -fsSL https://chatgpt.com/codex/install.sh | sh \
+    && test -x /root/.local/bin/codex \
+    && apt-get purge --yes --auto-remove curl \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV PATH="/root/.local/bin:${PATH}"
 WORKDIR /app
 COPY . .
 RUN pip install --no-cache-dir .
+RUN codex --version
 CMD ["python", "-m", "apps.agent_worker.app.main"]

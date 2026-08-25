@@ -1,11 +1,11 @@
 <!--
 Sync Impact Report
-- Version change: Matrades source baseline 1.2.0 -> 1.3.0
-- Modified principles: template placeholders replaced by ten Matrades principles
-- Added sections: mission and scope; product and operational constraints;
-  development workflow and quality gates; governance
-- Removed sections: none (placeholder sections were concretized)
-- Source lineage: TraderX 1.0.0; Matrades 1.0.0, 1.1.0, and 1.2.0
+- Version change: 1.3.0 -> 2.0.0
+- Modified principles: IV. Evidence-Based, Equally Validated Strategies now supports only
+  AI_GENERATED and AI_ASSISTED strategy origins
+- Added sections: none
+- Removed sections: HUMAN_CREATED and IMPORTED strategy-origin obligations
+- Source lineage: TraderX 1.0.0; Matrades 1.0.0, 1.1.0, 1.2.0, and 1.3.0
 - Follow-up TODOs: none
 -->
 # Matrades Constitution
@@ -82,10 +82,13 @@ external or internal limit MUST govern.
 
 ### IV. Evidence-Based, Equally Validated Strategies
 
-Matrades MUST support `AI_GENERATED`, `AI_ASSISTED`, `HUMAN_CREATED`, and `IMPORTED`
-strategy origins and persist origin, authorship, accepted AI suggestions, lineage, and
-version history. AI MUST NOT silently alter a user's canonical strategy rules. Origin
-MUST NOT grant preferential selection, automatic activation, or reduced scrutiny.
+Matrades MUST support exactly `AI_GENERATED` and `AI_ASSISTED` strategy origins and
+persist origin, authorship, accepted AI suggestions, lineage, and version history.
+`AI_GENERATED` begins from autonomous Strategy Researcher output. `AI_ASSISTED` begins
+from a human description that AI expands into a complete, step-by-step proposed strategy.
+In both cases, AI MUST NOT silently alter canonical strategy rules; a human MUST approve
+the proposed specification before it becomes canonical. Origin MUST NOT grant
+preferential selection, automatic activation, or reduced scrutiny.
 
 Before live eligibility, every strategy MUST have a complete, deterministic
 specification; pass canonicalization and duplicate/variant/version classification; be
@@ -275,4 +278,4 @@ remediation plan; no exception may permit live trading that violates a hard exte
 rule. The constitution itself MUST be reviewed whenever product authority, execution
 mode, account model, or safety boundary changes.
 
-**Version**: 1.3.0 | **Ratified**: 2026-08-22 | **Last Amended**: 2026-08-23
+**Version**: 2.0.0 | **Ratified**: 2026-08-22 | **Last Amended**: 2026-08-25

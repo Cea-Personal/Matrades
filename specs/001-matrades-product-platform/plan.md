@@ -5,7 +5,7 @@
 
 **Input**: Consolidated feature specification from
 `specs/001-matrades-product-platform/spec.md`, informed by the three supplied implementation
-plans and governed by Matrades Constitution 1.3.0.
+plans and governed by Matrades Constitution 2.0.0.
 
 ## Summary
 
@@ -23,6 +23,9 @@ explicit per-agent or per-profile alternative and is never an automatic cross-ru
 Coinbase replaces Binance as the required V1 crypto exchange-data provider, `strategy_assistant`
 completes the 15-agent registry, and contextual knowledge is isolated from authoritative market,
 account, policy, and risk state.
+Named data-source and read-only MT5 Bridge profiles are configured in the UI, every market or
+strategy research cycle is archived under a timestamped evidence folder, and provider-backed
+backtests expose deterministic validation gates in the Strategy Lab.
 
 ## Technical Context
 
@@ -79,7 +82,7 @@ adapter boundaries permit later multi-user and service extraction without adding
 | Ordered authority and deterministic safety | Policy, effective-limit, risk, portfolio, and strategy evaluators are deterministic and precede critic/HIL | PASS | PASS |
 | Three HIL gates and manual execution | Persisted HIL-specific actions; TAKE only reserves and awaits manual entry; broker adapter is read-only | PASS | PASS |
 | Account-aware risk and prop compliance | Immutable account snapshots, versioned rulesets, reserved risk, candidate reservations, and correlated exposure | PASS | PASS |
-| Equal strategy validation | Four origins converge on one canonicalization, implementation, validation, paper, and promotion pipeline | PASS | PASS |
+| Equal strategy validation | AI-generated and AI-assisted proposals require human canonicalization approval and converge on one validation, paper, and promotion pipeline | PASS | PASS |
 | Authoritative data and bounded RAG | Retrieval router and contracts prevent knowledge output from supplying current facts, policy, or risk | PASS | PASS |
 | Safe failure and NO TRADE | Health/freshness states and circuit breakers make BLOCK, DEGRADED, WAIT, and NO TRADE explicit | PASS | PASS |
 | Orchestrated agents and provider independence | Fixed roles, a default Codex runtime adapter, explicit LiteLLM opt-in, same-runtime fallbacks, versioned I/O, and independent prompt resolution | PASS | PASS |
@@ -299,6 +302,10 @@ Build taxonomy, patterns, repository, drafts, immutable rule provenance, family-
 Strategy Assistant suggestions/change sets, canonicalization, similarity, comparison UI, shared
 compiler/evaluator, historical replay and costs, out-of-sample/walk-forward/stress/Monte Carlo,
 account-policy simulation, paper trading, promotion, and origin-neutral selection.
+Strategy generation first resolves an immutable approved-market evidence pack, summarizes only a
+chronological discovery partition for the agent, generates multiple cited hypotheses, and uses a
+deterministic unseen holdout partition to select or safely reject them before human approval. This
+preliminary screen is research evidence and never substitutes for formal validation or paper trading.
 
 ### Stage 7 - Proposal vertical slice and HIL-2
 
@@ -342,7 +349,7 @@ security review, load/replay tests, failure simulations, source/license review, 
   authorization, prompt injection boundaries, runtime-selection authorization, no silent runtime
   migration, and agent tool-permission invariance.
 - End-to-end tests cover all actions at HIL-1/2/3, NO TRADE, hard block, reduced size, manual entry,
-  ambiguous reconciliation, protective closure, all four strategy origins, and retrieval failure.
+  ambiguous reconciliation, protective closure, both AI strategy origins, and retrieval failure.
 - Acceptance suites map SC-001 through SC-015 directly and publish evidence for release gates.
 
 ## Complexity Tracking
