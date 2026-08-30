@@ -112,9 +112,8 @@ def test_signup_verification_mfa_login_and_owner_scoped_api(tmp_path) -> None:
                 "regime": "TREND",
             },
         )
-        assert proposal.status_code == 201
-        assert proposal.json()["risk"]["snapshot"]["account_equity"] == "197500"
-        assert proposal.json()["risk"]["snapshot"]["source"] == "MT5_READ_ONLY_BRIDGE"
+        assert proposal.status_code == 410
+        assert "validated Trade Plan" in proposal.json()["detail"]
         assert client.delete("/api/v1/auth/sessions").status_code == 204
         assert client.get("/api/v1/configuration/accounts").status_code == 401
 

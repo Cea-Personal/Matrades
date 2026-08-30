@@ -41,3 +41,27 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+
+  autonomous-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with: { python-version: "3.13" }
+      - uses: actions/setup-node@v4
+        with: { node-version: "24", cache: npm }
+      - run: uv sync --all-extras --dev
+      - run: npm ci
+      - run: uv run python scripts/generate_contracts.py --check
+      - run: uv run pytest tests/contract tests/property tests/replay tests/security tests/unit
+      - run: npm run test:contracts
+      - run: npm exec tsc --workspace apps/web -- --noEmit
+
+  autonomous-bridge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with: { python-version: "3.13" }
+      - run: uv sync --all-extras --dev
+      - run: uv run pytest tests/integration/test_mt5_execution_bridge.py tests/unit/test_mt5_command_queue.py tests/security/test_execution_command_security.py

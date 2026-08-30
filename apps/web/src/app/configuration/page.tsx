@@ -1,2 +1,7 @@
-import {SecuritySettings} from "@/features/security/SecuritySettings";import {AccountRules} from "@/features/configuration/AccountRules";
-export default function Page(){return <><SecuritySettings/><AccountRules/></>}
+import { AccountRules } from "@/features/configuration/AccountRules";
+import { AutomationControls } from "@/features/configuration/AutomationControls";
+import { SecuritySettings } from "@/features/security/SecuritySettings";
+
+export default function Page() {
+  return <><SecuritySettings /><AutomationControls /><AccountRules /></>;
+}

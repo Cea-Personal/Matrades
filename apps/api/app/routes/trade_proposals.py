@@ -53,6 +53,10 @@ async def create_proposal(
     actor: Annotated[Actor, Depends(require_roles(Role.OWNER, Role.OPERATOR))],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
+    raise HTTPException(
+        status.HTTP_410_GONE,
+        "legacy trade proposals are read-only evidence; create a validated Trade Plan instead",
+    )
     context = await authoritative_risk_context(
         db, actor.owner_id, payload.account_id, payload.candidate
     )
@@ -136,6 +140,7 @@ async def hil2_decision(
     actor: Annotated[Actor, Depends(require_roles(Role.OWNER, Role.OPERATOR))],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
+    raise HTTPException(status.HTTP_410_GONE, "legacy proposal decisions are retired")
     store = ResourceStore(db)
     record = await store.get("trade_proposal", proposal_id, actor.owner_id)
     if record is None:

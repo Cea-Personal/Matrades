@@ -22,8 +22,10 @@ celery_app.conf.update(
         "apps.worker.app.tasks.operations",
         "apps.worker.app.tasks.research",
         "apps.worker.app.tasks.forex_factory",
+        "apps.worker.app.tasks.knowledge",
         "apps.worker.app.tasks.strategies",
         "apps.worker.app.tasks.trading",
+        "apps.worker.app.tasks.execution",
     ),
     beat_schedule={
         "per-account-autonomous-research": {
@@ -33,6 +35,22 @@ celery_app.conf.update(
         "per-account-forex-factory-scraper": {
             "task": "apps.worker.app.tasks.forex_factory.schedule_forex_factory_scrapes",
             "schedule": crontab(minute="*"),
+        },
+        "owner-youtube-knowledge-discovery": {
+            "task": "apps.worker.app.tasks.knowledge.schedule_youtube_discoveries",
+            "schedule": crontab(minute="*"),
+        },
+        "notification-outbox": {
+            "task": "apps.worker.app.tasks.operations.drain_notification_outbox",
+            "schedule": 5.0,
+        },
+        "journal-index-outbox": {
+            "task": "apps.worker.app.tasks.operations.index_journal_entries",
+            "schedule": 10.0,
+        },
+        "journal-observation-projection": {
+            "task": "apps.worker.app.tasks.operations.project_pending_journal_events",
+            "schedule": 5.0,
         },
     },
 )

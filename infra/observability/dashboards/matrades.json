@@ -11,6 +11,10 @@
     {"type": "table", "title": "Provider and bridge freshness", "targets": [{"expr": "matrades_component_fresh"}]},
     {"type": "stat", "title": "PostgreSQL", "targets": [{"expr": "pg_up"}]},
     {"type": "stat", "title": "Redis", "targets": [{"expr": "redis_up"}]},
-    {"type": "stat", "title": "Web", "targets": [{"expr": "up{service=\"web\"}"}]}
+    {"type": "stat", "title": "Web", "targets": [{"expr": "up{service=\"web\"}"}]},
+    {"type": "timeseries", "title": "Execution commands", "targets": [{"expr": "rate(matrades_execution_commands_total[5m])"}]},
+    {"type": "table", "title": "Kill switches and reconciliation", "targets": [{"expr": "matrades_kill_switch_active"}, {"expr": "matrades_reconciliation_uncertain_total"}]},
+    {"type": "timeseries", "title": "Journal indexing lag", "targets": [{"expr": "matrades_journal_index_lag_seconds"}]},
+    {"type": "timeseries", "title": "Notification delivery", "targets": [{"expr": "rate(matrades_notification_delivery_total[5m])"}]}
   ]
 }

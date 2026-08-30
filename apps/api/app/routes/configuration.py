@@ -229,6 +229,8 @@ async def get_account_research_schedule(
         "account_id": str(record.id),
         **schedule,
         "next_run_at": upcoming.isoformat() if upcoming else None,
+        "configured": not bool(record.data.get("research_schedule_removed_at")),
+        "saved_at": record.data.get("research_schedule_saved_at") or record.updated_at,
     }
 
 
@@ -244,9 +246,12 @@ async def update_account_research_schedule(
     if record is None or record.state == "DELETED":
         raise HTTPException(status.HTTP_404_NOT_FOUND, "account not found")
     schedule = payload.model_dump(mode="json")
+    saved_at = datetime.now(UTC).isoformat()
+    data = {**record.data, "research_schedule": schedule, "research_schedule_saved_at": saved_at}
+    data.pop("research_schedule_removed_at", None)
     updated = await store.update(
         record,
-        {**record.data, "research_schedule": schedule},
+        data,
         actor_id=actor.actor_id,
         event_type="account.research_schedule_updated",
     )
@@ -255,6 +260,42 @@ async def update_account_research_schedule(
         "account_id": str(updated.id),
         **schedule,
         "next_run_at": upcoming.isoformat() if upcoming else None,
+        "configured": True,
+        "saved_at": saved_at,
+    }
+
+
+@router.delete("/accounts/{account_id}/research-schedule")
+async def delete_account_research_schedule(
+    account_id: UUID,
+    actor: Annotated[Actor, Depends(require_roles(Role.OWNER, Role.OPERATOR))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    store = ResourceStore(db)
+    record = await store.get("account", account_id, actor.owner_id)
+    if record is None or record.state == "DELETED":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "account not found")
+    current = normalize_schedule(
+        record.data.get("research_schedule"), fallback=_default_research_schedule()
+    )
+    removed_at = datetime.now(UTC).isoformat()
+    schedule = {**current, "enabled": False, "weekdays": []}
+    updated = await store.update(
+        record,
+        {
+            **record.data,
+            "research_schedule": schedule,
+            "research_schedule_removed_at": removed_at,
+        },
+        actor_id=actor.actor_id,
+        event_type="account.research_schedule_removed",
+    )
+    return {
+        "account_id": str(updated.id),
+        **schedule,
+        "next_run_at": None,
+        "configured": False,
+        "saved_at": removed_at,
     }
 
 
@@ -275,6 +316,8 @@ async def get_account_forex_factory_schedule(
         "account_id": str(record.id),
         **schedule,
         "next_run_at": upcoming.isoformat() if upcoming else None,
+        "configured": not bool(record.data.get("forex_factory_schedule_removed_at")),
+        "saved_at": record.data.get("forex_factory_schedule_saved_at") or record.updated_at,
     }
 
 
@@ -290,9 +333,16 @@ async def update_account_forex_factory_schedule(
     if record is None or record.state == "DELETED":
         raise HTTPException(status.HTTP_404_NOT_FOUND, "account not found")
     schedule = payload.model_dump(mode="json")
+    saved_at = datetime.now(UTC).isoformat()
+    data = {
+        **record.data,
+        "forex_factory_schedule": schedule,
+        "forex_factory_schedule_saved_at": saved_at,
+    }
+    data.pop("forex_factory_schedule_removed_at", None)
     updated = await store.update(
         record,
-        {**record.data, "forex_factory_schedule": schedule},
+        data,
         actor_id=actor.actor_id,
         event_type="account.forex_factory_schedule_updated",
     )
@@ -301,6 +351,42 @@ async def update_account_forex_factory_schedule(
         "account_id": str(updated.id),
         **schedule,
         "next_run_at": upcoming.isoformat() if upcoming else None,
+        "configured": True,
+        "saved_at": saved_at,
+    }
+
+
+@router.delete("/accounts/{account_id}/forex-factory-schedule")
+async def delete_account_forex_factory_schedule(
+    account_id: UUID,
+    actor: Annotated[Actor, Depends(require_roles(Role.OWNER, Role.OPERATOR))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    store = ResourceStore(db)
+    record = await store.get("account", account_id, actor.owner_id)
+    if record is None or record.state == "DELETED":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "account not found")
+    current = normalize_schedule(
+        record.data.get("forex_factory_schedule"), fallback=_default_forex_factory_schedule()
+    )
+    removed_at = datetime.now(UTC).isoformat()
+    schedule = {**current, "enabled": False, "weekdays": []}
+    updated = await store.update(
+        record,
+        {
+            **record.data,
+            "forex_factory_schedule": schedule,
+            "forex_factory_schedule_removed_at": removed_at,
+        },
+        actor_id=actor.actor_id,
+        event_type="account.forex_factory_schedule_removed",
+    )
+    return {
+        "account_id": str(updated.id),
+        **schedule,
+        "next_run_at": None,
+        "configured": False,
+        "saved_at": removed_at,
     }
 
 
@@ -400,6 +486,65 @@ async def replace_credential(
             event_type="connection.credential_replaced",
         )
     return _public_credential(updated)
+
+
+@router.delete("/credentials/{credential_id}")
+async def delete_credential(
+    credential_id: UUID,
+    actor: Annotated[Actor, Depends(require_step_up("credential.change"))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Permanently discard a stored secret while preserving a non-secret audit trail.
+
+    Any active connection using the secret is disabled before the encrypted envelope
+    is removed, so an old connection cannot continue with a dangling credential.
+    """
+    store = ResourceStore(db)
+    item = await store.get("credential", credential_id, actor.owner_id)
+    if item is None or item.state == "DELETED":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "credential not found")
+
+    linked = [
+        connection
+        for connection in await store.list("connection", actor.owner_id)
+        if str(connection.data.get("credential_id")) == str(item.id)
+    ]
+    deleted_at = datetime.now(UTC).isoformat()
+    for connection in linked:
+        await store.update(
+            connection,
+            {
+                **connection.data,
+                "credential_id": None,
+                "active": False,
+                "health": "UNTESTED",
+                "last_checked": None,
+                "last_error": "Credential removed",
+            },
+            state="DISABLED",
+            actor_id=actor.actor_id,
+            event_type="connection.credential_removed",
+            evidence={"credential_id": str(item.id)},
+        )
+    updated = await store.update(
+        item,
+        {
+            **item.data,
+            "envelope": None,
+            "key_version": None,
+            "masked_suffix": "••••deleted",
+            "status": "DELETED",
+            "deleted_at": deleted_at,
+        },
+        state="DELETED",
+        actor_id=actor.actor_id,
+        event_type="credential.deleted",
+        evidence={"disabled_connection_count": len(linked)},
+    )
+    return {
+        **_public_credential(updated),
+        "disabled_connection_count": len(linked),
+    }
 
 
 @router.post("/credentials/{credential_id}/test")
@@ -509,7 +654,7 @@ async def create_connection(
     store = ResourceStore(db)
     if payload.credential_id is not None:
         credential = await store.get("credential", payload.credential_id, actor.owner_id)
-        if credential is None:
+        if credential is None or credential.state == "DELETED":
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "credential not found")
         if credential.data.get("provider") != payload.provider.value:
             raise HTTPException(
@@ -546,7 +691,7 @@ async def update_connection(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "connection not found")
     if payload.credential_id is not None:
         credential = await store.get("credential", payload.credential_id, actor.owner_id)
-        if credential is None:
+        if credential is None or credential.state == "DELETED":
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "credential not found")
         if credential.data.get("provider") != payload.provider.value:
             raise HTTPException(

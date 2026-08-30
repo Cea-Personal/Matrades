@@ -11,8 +11,8 @@ proves the constitutional paths end to end without containing application implem
 - Docker with Compose support
 - Python 3.13 and `uv`
 - Node.js 24 LTS with npm
-- Test/sandbox credentials for configured providers; no live broker write permission
-- MT5 demo account and bridge only for broker validation scenarios
+- Test/sandbox credentials for configured providers; never use production broker write permission in CI
+- MT5 demo account, Python bridge, and EA for broker execution and reconciliation scenarios
 - Provider/broker fixtures with verified canonical mappings and effective instrument specifications
   for Forex, metals, cryptocurrency, and stocks across spot, CFD, and futures
 - Dated futures-chain/roll fixtures, stock corporate actions, and CFD financing fixtures
@@ -41,8 +41,8 @@ Expected result:
   LiteLLM is absent unless its optional profile was explicitly started.
 - TimescaleDB and pgvector extension checks pass or the configured compatible adapter reports why
   an external substitute is active.
-- Required agent seed validation reports exactly 16 protected logical IDs, including
-  `stocks_research` and `strategy_assistant`.
+- Required agent seed validation reports exactly 17 protected logical IDs, including
+  `stocks_research`, `strategy_assistant`, and `knowledge_assistant`.
 - No provider or broker credential value appears in command output.
 
 ## Validate Contracts and Architecture
@@ -60,12 +60,14 @@ Expected result:
 - Domain dependency tests reject agent/provider access to broker writes, policy writes, guardrail
   writes, raw credentials, or canonical strategy mutation.
 - System and user prompt inheritance are independent.
-- PostgreSQL is the durable owner of workflow, approval, reservation, and audit state.
+- PostgreSQL is the durable owner of workflow, execution authorization, permissions, kill-switch
+  epochs, reservations, broker-command outcomes, and audit state.
 
 ## Scenario 1: Secure Account Configuration
 
 1. Create a user, verify email, enroll TOTP MFA, capture recovery codes once, and sign in with MFA.
-2. Add a masked provider credential and a read-only broker/MT5 connection.
+2. Add a masked provider credential and an MT5 demo connection. Confirm all six execution
+   permissions default to disabled.
 3. Create a prop-firm program/ruleset draft, verify it, activate its version, and create a stricter
    internal guardrail profile.
 4. Attempt a sensitive credential/risk change without step-up, then repeat after step-up.
@@ -124,7 +126,7 @@ uv run pytest tests/integration/agents tests/e2e/test_agent_configuration.py -q
 
 Expected result:
 
-- All 16 required agents resolve to `CODEX_APP_SERVER` before an explicit alternative is assigned.
+- All 17 required agents resolve to `CODEX_APP_SERVER` before an explicit alternative is assigned.
 - The first technical-analysis run resolves agent system prompt + orchestrator user prompt.
 - A later run uses the compatible Codex fallback and records selected/actual runtime, configured/
   actual models, and the reason.
@@ -134,14 +136,14 @@ Expected result:
 - Tool permissions remain byte-for-byte the same across model/prompt changes.
 - An incompatible required agent configuration cannot activate.
 
-## Scenario 4: Daily Research and HIL-1
+## Scenario 4: Autonomous Daily Research and Selection
 
 Use recorded broker/MT5, Twelve Data, Coinbase, CoinGecko, futures-chain, corporate-action, macro,
 positioning, and calendar fixtures. Configure the account's full four-asset-class by three-
 instrument-type research matrix.
 
 ```bash
-uv run pytest tests/replay/research tests/e2e/test_hil1_market_selection.py -q
+uv run pytest tests/replay/research tests/e2e/test_autonomous_market_selection.py -q
 ```
 
 Expected result:
@@ -152,8 +154,11 @@ Expected result:
   `stocks_research` for stocks.
 - Every READY result pins an exact venue listing or dated futures contract, instrument-specification
   version, provider binding, source cut, and evidence set.
-- REPLACE changes only the chosen lane and creates a new selection version.
-- RERUN RESEARCH creates a new run rather than overwriting prior evidence.
+- An eligible top-ranked candidate progresses automatically into analysis without waiting for a
+  human decision state.
+- If downstream validation invalidates the selected candidate, the lane deterministically advances
+  to the next eligible ranked candidate or terminates with an explicit no-trade reason.
+- A rerun creates a new run rather than overwriting prior evidence.
 - Stale Coinbase data blocks affected crypto action; stale knowledge only degrades contextual research.
 - Missing capability/binding/mapping produces `NOT_CONFIGURED` or `BLOCKED`; a provider outage or
   stale source produces `UNAVAILABLE` or `STALE`; none may fall back to another instrument type.
@@ -182,42 +187,62 @@ Expected result:
   model, corporate actions, financing, and futures roll rule applicable to its instrument profile.
 - Continuous futures data may support analysis but never represents an executable contract.
 
-## Scenario 6: HIL-2, Manual Entry, and Reconciliation
+## Scenario 6: Permission-Gated Autonomous Entry and Reconciliation
 
 Seed one validated strategy and a current account/market snapshot. Produce one PASS, one reduced-size,
 and one hard-blocked candidate.
 
 ```bash
-uv run pytest tests/e2e/test_hil2_manual_reconciliation.py -q
+uv run pytest tests/e2e/test_autonomous_entry_reconciliation.py -q
 ```
 
 Expected result:
 
-- HARD_BLOCK never enters the actionable approval queue.
-- PASS/REDUCE_SIZE proposals contain all FR-032 and FR-084 fields and complete within SC-013.
-- WAIT/REJECT release candidate risk. TAKE preserves the reservation and enters
-  `AWAITING_MANUAL_ENTRY` without a broker write.
-- A unique broker position auto-reconciles; an ambiguous one requests user confirmation.
+- HARD_BLOCK never produces an `ExecutionAuthorization` or dispatchable command.
+- PASS/REDUCE_SIZE plans contain all FR-032 and FR-084 fields and complete within SC-013.
+- With new-entry permission disabled, a valid plan remains blocked and no adapter call occurs.
+- After step-up enables new-entry permission, the same current plan is revalidated against the
+  permission version, safety epochs, risk reservation, account snapshot, and expiry before dispatch.
+- Replaying the same command/idempotency key produces at most one broker-side effect.
+- A timeout or disconnect moves the command to `OUTCOME_UNKNOWN`; Matrades reconciles broker orders,
+  fills, and positions before any retry. It never treats an acknowledgement as a fill.
+- A unique broker outcome auto-reconciles; an ambiguous outcome remains visibly blocked for evidence
+  classification and cannot be blindly retried.
 - Reconciliation requires the same instrument type and exact broker listing/dated contract; a
-  same-underlying spot, CFD, or futures position cannot match a proposal for another wrapper.
+  same-underlying spot, CFD, or futures position cannot match a plan for another wrapper.
 - Actual broker entry, quantity unit, size, protections, margin, financing, fees, and P&L supersede
-  proposed values.
+  planned values.
+- A platform or account kill switch raised before dispatch invalidates the prior safety epoch and
+  fences queued commands from reaching the adapter.
+- A confirmed new fill emits one deduplicated trade-entered notification containing actual broker
+  values; rejected or merely acknowledged commands never emit that notification.
 
-## Scenario 7: Monitoring and HIL-3
+## Scenario 7: Autonomous Trade Management, Live Journal, and Charts
 
 ```bash
-uv run pytest tests/e2e/test_hil3_trade_management.py -q
+uv run pytest tests/e2e/test_autonomous_trade_lifecycle.py tests/e2e/test_live_trade_workspace.py -q
 ```
 
 Expected result:
 
-- HOLD creates no approval.
-- A validated partial-profit or Stop Loss recommendation creates HIL-3.
-- APPROVE records intent only; the user performs the broker change manually and reconciliation records it.
-- A broker-side Stop Loss/Take Profit execution closes the trade without HIL-3.
-- Bridge disconnect marks state stale, blocks dependent actions, and does not fabricate confirmation.
+- HOLD creates no broker command.
+- Permitted Stop Loss, Take Profit, partial-close, cancel, and full-exit actions pass fresh
+  deterministic authorization and use the same idempotent command/reconciliation pipeline as entry.
+- A disabled action permission or active kill switch blocks only the prohibited mutation and records
+  the limiting source.
+- The active-trade workspace shows the immutable Trade Plan beside authoritative broker position,
+  protection, command, and fill state.
+- Read-only interactive charts show mapped candles, plan levels, fills, protections, management
+  events, source freshness, and exact venue listing or dated futures contract; chart interaction
+  cannot create a broker command.
+- Structured broker/risk/market events are journaled first. The journal agent adds time-stamped,
+  evidence-linked live observations and produces one terminal summary when the position closes.
+- Journal events and observations enter the owner/account-scoped knowledge index through an outbox;
+  index delay or embedding failure is visible but cannot block deterministic safety or execution.
+- Bridge disconnect marks state stale, enters reconciliation, blocks dependent mutations, and does
+  not fabricate confirmation.
 
-## Scenario 8: Knowledge Isolation and Failure
+## Scenario 8: Knowledge Isolation, Journal Retrieval, and Read-Only Q&A
 
 ```bash
 uv run pytest tests/integration/knowledge tests/security/test_knowledge_isolation.py \
@@ -228,11 +253,34 @@ Expected result:
 
 - Cross-owner/account search returns no data, including through semantic-nearest candidates.
 - Results retain source/document/segment/version provenance and retrieval audit.
+- Newly indexed trade-journal events are retrievable only within their owner/account scope.
+- The `knowledge_assistant` answers descriptive questions with claim-level citations to authorized
+  knowledge and journal segments, explicitly says when evidence is insufficient, and exposes source
+  freshness/degradation.
+- Requests for personalized trade decisions, execution, or state mutation are refused and produce no
+  command, strategy, policy, guardrail, or broker side effect.
 - Retrieved prop text produces only a draft rule until user verification/versioned activation.
-- Adversarial retrieved text cannot change equity, policy, risk, approval, strategy activation, or tools.
+- Adversarial retrieved text cannot change equity, policy, risk, execution authorization, strategy
+  activation, tool permissions, or broker state.
 - Vector/embedding failure degrades contextual work while structured safety continues or safely blocks.
 
-## Scenario 9: Full Release Gate
+## Scenario 9: Evidence-Separated Analytics and Notifications
+
+```bash
+uv run pytest tests/e2e/test_performance_analytics.py tests/e2e/test_trade_notifications.py -q
+```
+
+Expected result:
+
+- BACKTEST, PAPER, and LIVE observations are never pooled into one headline metric by default.
+- Win rate, net profitability, gross profit/loss, profit factor, expectancy, drawdown, payoff ratio,
+  and deterministic edge calculations reconcile to the underlying immutable observations.
+- Filters and comparisons retain strategy-version, account, instrument, asset-class,
+  instrument-type, and period provenance, with drill-down to source trades/runs.
+- Notification delivery supports Telegram and Pushover independently, stores per-channel attempts,
+  retries transient failures idempotently, and never changes execution outcome.
+
+## Scenario 10: Full Release Gate
 
 ```bash
 uv run pytest tests/unit tests/property tests/integration tests/contract tests/replay \
@@ -243,18 +291,20 @@ npm run test:e2e --workspace apps/web
 
 Expected result:
 
-- SC-001 through SC-015 publish machine-readable evidence and all pass.
+- SC-001 through SC-024 publish machine-readable evidence and all pass.
 - The full journal reconstructs sampled decisions from input snapshots, policy/risk/strategy/config/
-  prompt/code versions, human actions, and broker events.
-- Duplicate/out-of-order provider, task, approval, and broker events are idempotent.
+  prompt/code versions, permission versions, safety epochs, commands, attempts, and broker events.
+- Duplicate/out-of-order provider, task, execution-command, notification, and broker events are
+  idempotent.
 - Backup restore meets the planned 15-minute RPO/four-hour RTO exercise.
-- There is no route, tool, or adapter operation capable of autonomous V1 broker entry/modification/exit.
+- There is no route or agent tool that bypasses deterministic authorization, action permission,
+  kill-switch fencing, idempotency, or reconciliation for a broker mutation.
 
 ## Stop Conditions
 
 Do not proceed to live-connected validation if any of these occurs:
 
-- risk/policy/critic unavailable or a hard-block candidate reaches HIL-2;
+- risk/policy/critic unavailable or a hard-block plan receives execution authorization;
 - current account, market, calendar, or broker data violates its required freshness policy;
 - a candidate lacks a verified venue mapping, dated futures contract, critical specification version,
   or provider capability/binding, or a continuous futures series appears as executable;
@@ -262,7 +312,10 @@ Do not proceed to live-connected validation if any of these occurs:
 - raw secrets appear in UI responses, logs, prompts, events, fixtures, or reports;
 - any required agent defaults to LiteLLM, or any execution changes runtime without an explicitly
   activated per-agent or model-profile selection;
-- any agent can mutate canonical strategy, policy, guardrail, approval, or broker state directly;
-- TAKE or HIL-3 APPROVE sends a broker write;
+- any agent can mutate canonical strategy, policy, guardrail, execution permission, kill-switch, or
+  broker state directly;
+- any disabled action, stale authorization, stale safety epoch, expired plan, or unreconciled unknown
+  outcome reaches the broker adapter;
+- a chart or knowledge-assistant request creates an execution command;
 - strategy validation stages can be skipped or active rules mutate in place;
 - a cross-user/account authorization or retrieval-isolation test fails.

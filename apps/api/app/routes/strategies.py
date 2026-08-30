@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.app.dependencies import current_actor, get_db, require_roles
 from apps.worker.app.tasks.strategies import generate_strategy_draft, run_strategy_backtest
+from modules.backtesting.promotion import typed_promotable
 from modules.connections.models import ConnectionProvider
 from modules.connections.resolution import find_connection, resolve_connection
 from modules.identity.authorization import Actor, Role
@@ -83,14 +84,18 @@ def _dispatch_backtest(run_id: UUID) -> None:
 async def _resolve_strategy_basis(db: AsyncSession, owner_id: UUID) -> dict[str, str]:
     store = ResourceStore(db)
     selections = [
-        item for item in await store.list("market_selection", owner_id) if item.state == "APPROVED"
+        item
+        for item in await store.list("market_selection", owner_id)
+        if item.state == "ACTIVE_MARKET_ANALYSIS"
     ]
     if not selections:
-        raise ValueError("approve a fresh autonomous market research selection first")
+        raise ValueError("a fresh typed autonomous market research lane is required")
     selection = selections[0]
-    research_run = await store.get("research_run", UUID(str(selection.data["run_id"])), owner_id)
+    research_run = await store.get(
+        "research_run", UUID(str(selection.data["research_run_id"])), owner_id
+    )
     if research_run is None:
-        raise ValueError("the approved market research run is unavailable")
+        raise ValueError("the typed market research run is unavailable")
     candidate = resolve_approved_candidate(
         selection.data,
         research_run.data,
@@ -385,9 +390,10 @@ async def submit(
             "generated_code_language": "python",
             "artifact_hash": compiled.artifact_hash,
             "origin": draft.data["origin"],
-            "lifecycle_state": StrategyState.SPECIFIED,
+            "lifecycle_state": StrategyState.IMPLEMENTED,
+            "validation_evidence": {"compiler": True},
         },
-        state=StrategyState.SPECIFIED,
+        state=StrategyState.IMPLEMENTED,
         actor_id=actor.actor_id,
         event_type="strategy_version.created",
     )
@@ -468,6 +474,13 @@ async def create_backtest(
         actor_id=actor.actor_id,
         event_type="backtest.queued",
     )
+    await store.update(
+        strategy,
+        {**strategy.data, "lifecycle_state": StrategyState.BACKTESTING},
+        state=StrategyState.BACKTESTING,
+        actor_id=actor.actor_id,
+        event_type="strategy.backtesting_started",
+    )
     await db.commit()
     _dispatch_backtest(record.id)
     return record.public()
@@ -485,6 +498,12 @@ async def transition_strategy(
     if item is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "strategy version not found")
     try:
+        if payload.target in {
+            StrategyState.PAPER_TRADING,
+            StrategyState.APPROVED,
+            StrategyState.ACTIVE,
+        }:
+            raise ValueError("evidence-gated stages are advanced only by recorded validation work")
         target = transition(StrategyState(item.state), payload.target)
     except ValueError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
@@ -504,10 +523,27 @@ async def promote(
     actor: Annotated[Actor, Depends(require_roles(Role.OWNER))],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    strategy = await ResourceStore(db).get("strategy_version", strategy_id, actor.owner_id)
+    store = ResourceStore(db)
+    strategy = await store.get("strategy_version", strategy_id, actor.owner_id)
     if strategy is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "strategy version not found")
-    raise HTTPException(
-        status.HTTP_409_CONFLICT,
-        "backtest validation alone cannot promote; paper-trading evidence is still required",
+    evidence = dict(strategy.data.get("validation_evidence", {}))
+    profile_complete = bool(strategy.data.get("specification")) and bool(
+        strategy.data.get("artifact_hash")
     )
+    if StrategyState(strategy.state) is not StrategyState.APPROVED or not typed_promotable(
+        evidence, profile_complete=profile_complete
+    ):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "promotion requires complete compatible backtest, validation, policy, "
+            "and paper evidence",
+        )
+    updated = await store.update(
+        strategy,
+        {**strategy.data, "lifecycle_state": StrategyState.ACTIVE},
+        state=StrategyState.ACTIVE,
+        actor_id=actor.actor_id,
+        event_type="strategy.promoted_after_evidence",
+    )
+    return updated.public()

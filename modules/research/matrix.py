@@ -47,7 +47,7 @@ def aggregate_status(results: list[ResearchLaneResult]) -> str:
         return "DEGRADED"
     complete = {LaneStatus.READY, LaneStatus.NO_TRADE, LaneStatus.NOT_CONFIGURED}
     if all(status in complete for status in terminal):
-        return "MARKETS_PENDING_APPROVAL"
+        return "COMPLETED"
     return "RESEARCHING"
 
 

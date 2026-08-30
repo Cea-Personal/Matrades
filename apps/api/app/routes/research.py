@@ -1,4 +1,4 @@
-"""Autonomous research-cycle and HIL-1 selection endpoints."""
+"""Autonomous research-cycle endpoints with read-only legacy selection history."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.api.app.dependencies import current_actor, get_db, require_roles
 from apps.worker.app.tasks.research import DEFAULT_CATEGORIES, run_research_cycle
 from modules.identity.authorization import Actor, Role
+from modules.research.matrix import ALL_LANES
 from modules.research.models import MarketCategory
 from modules.research.scheduling import default_schedule, next_run_at
 from packages.shared.config import settings
@@ -38,6 +39,8 @@ def _run_data(payload: ResearchRunRequest, trigger: str) -> dict:
     return {
         "account_id": str(payload.account_id),
         "market_categories": [item.value for item in dict.fromkeys(payload.market_categories)],
+        "matrix_version": 1,
+        "lanes": [lane.model_dump(mode="json") for lane in ALL_LANES],
         "trigger": trigger,
         "candidates": [],
         "missing_categories": [],
@@ -89,7 +92,7 @@ async def list_research_artifacts(
             "run_id": str(item.id),
             "cycle_type": "market_research",
             "state": item.state,
-            "completed_at": item.data.get("completed_at"),
+            "completed_at": item.data.get("completed_at") or item.updated_at.isoformat(),
             **item.data["artifact"],
         }
         for item in records
@@ -113,7 +116,7 @@ async def run_research(
         _run_data(payload, "MANUAL"),
         state="QUEUED",
         actor_id=actor.actor_id,
-        event_type="research.queued",
+        event_type="research.queued_typed_matrix",
     )
     _dispatch(record.id)
     return record.public()
@@ -161,45 +164,10 @@ async def decide_selection(
         _dispatch(cloned.id)
         return cloned.public()
 
-    if run.state not in {"MARKETS_PENDING_APPROVAL", "DEGRADED"}:
-        raise HTTPException(status.HTTP_409_CONFLICT, "research run is not awaiting HIL-1")
-    if action == "APPROVE" and run.state == "DEGRADED":
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "degraded research cannot be approved; rerun, replace, or select no trade",
-        )
-
-    selected = {
-        str(item["category"]): str(item["instrument"]) for item in run.data.get("candidates", [])
-    }
-    if action == "REPLACE":
-        if payload.category is None or not payload.instrument:
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY, "category and instrument required"
-            )
-        selected[payload.category.value] = payload.instrument.upper()
-    elif action == "NO_TRADE":
-        selected = {}
-    elif action != "APPROVE":
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "unsupported HIL-1 action")
-
-    selection = await store.create(
-        "market_selection",
-        actor.owner_id,
-        {
-            "run_id": str(run.id),
-            "selected": selected,
-            "action": action,
-            "reason": payload.reason,
-            "research_fingerprints": [
-                item.get("fingerprint") for item in run.data.get("candidates", [])
-            ],
-        },
-        state="NO_TRADE" if action == "NO_TRADE" else "APPROVED",
-        actor_id=actor.actor_id,
-        event_type=f"market_selection.{action.lower()}",
+    raise HTTPException(
+        status.HTTP_410_GONE,
+        "research candidates progress autonomously; manual selection writes are retired",
     )
-    return selection.public()
 
 
 @router.get("/selections")

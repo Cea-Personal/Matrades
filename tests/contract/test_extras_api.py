@@ -30,3 +30,5 @@ def test_runtime_and_knowledge_expansion_routes_are_in_contract() -> None:
     assert "post" in paths["/api/v1/agents/runtime-settings/test"]
     assert "post" in paths["/api/v1/knowledge/sources/upload"]
     assert "post" in paths["/api/v1/knowledge/youtube/scrape"]
+    assert {"get", "put", "delete"}.issubset(paths["/api/v1/knowledge/youtube/schedule"])
+    assert "get" in paths["/api/v1/knowledge/youtube/runs"]

@@ -59,7 +59,9 @@ class RiskEngine:
         remaining_dd = max(Decimal("0"), allowed_dd - drawdown)
         remaining_daily = max(Decimal("0"), allowed_daily - used_daily)
         try:
-            existing = reserved_risk(context.positions, context.include_unrealized_profit)
+            existing = reserved_risk(context.positions, context.include_unrealized_profit) + sum(
+                context.active_reservations, Decimal("0")
+            )
         except ValueError as exc:
             return self._blocked(
                 context,

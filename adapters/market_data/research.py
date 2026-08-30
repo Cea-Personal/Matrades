@@ -12,11 +12,19 @@ from modules.connections.models import ConnectionProvider
 from modules.market_data.models import InstrumentSpecificationVersion, VenueInstrument
 from modules.research.models import MarketCategory, ResearchSnapshot, TypedResearchSnapshot
 from packages.shared.config import Settings
-from packages.shared.domain_types import AssetClass, InstrumentType, QuantityUnit, ResearchLaneKey
+from packages.shared.domain_types import (
+    AssetClass,
+    InstrumentType,
+    LaneStatus,
+    QuantityUnit,
+    ResearchLaneKey,
+)
 
 
 class ResearchDataUnavailable(RuntimeError):
-    pass
+    def __init__(self, message: str, *, lane_status: LaneStatus = LaneStatus.UNAVAILABLE) -> None:
+        super().__init__(message)
+        self.lane_status = lane_status
 
 
 def _symbols(value: str) -> list[str]:
@@ -35,12 +43,16 @@ class LiveResearchDataProvider:
         forex_universe: str | None = None,
         metals_universe: str | None = None,
         crypto_universe: str | None = None,
+        lane_snapshots: dict[str, list[TypedResearchSnapshot]] | None = None,
+        configured_lanes: set[str] | None = None,
     ) -> None:
         self.settings = settings
         self.enabled_providers = enabled_providers
         self.forex_universe = forex_universe or settings.research_forex_universe
         self.metals_universe = metals_universe or settings.research_metals_universe
         self.crypto_universe = crypto_universe or settings.research_crypto_universe
+        self.lane_snapshots = lane_snapshots or {}
+        self.configured_lanes = configured_lanes
         self.coinbase = CoinbaseClient()
         api_key = twelve_data_api_key or (
             settings.twelve_data_api_key.get_secret_value()
@@ -77,10 +89,20 @@ class LiveResearchDataProvider:
 
     async def gather_lane(self, lane: ResearchLaneKey) -> list[TypedResearchSnapshot]:
         """Discover candidates for a configured lane without accepting a symbol as its type."""
+        lane_key = lane.as_string()
+        if self.configured_lanes is not None and lane_key not in self.configured_lanes:
+            raise ResearchDataUnavailable(
+                f"no verified provider binding for {lane_key}",
+                lane_status=LaneStatus.NOT_CONFIGURED,
+            )
+        persisted = self.lane_snapshots.get(lane_key)
+        if persisted:
+            return persisted
         if lane.instrument_type is not InstrumentType.SPOT:
             raise ResearchDataUnavailable(
                 f"{lane.instrument_type.value} authority is not configured for "
-                f"{lane.asset_class.value}"
+                f"{lane.asset_class.value}",
+                lane_status=LaneStatus.NOT_CONFIGURED,
             )
         category = {
             AssetClass.FOREX: MarketCategory.FOREX,
@@ -88,8 +110,23 @@ class LiveResearchDataProvider:
             AssetClass.CRYPTOCURRENCY: MarketCategory.CRYPTO,
         }.get(lane.asset_class)
         if category is None:
-            raise ResearchDataUnavailable("stock instrument directory is not configured")
-        snapshots = await self.gather(category)
+            # Twelve Data can be bound as a spot-stock discovery source; a
+            # configured explicit universe avoids an implicit symbol/type cast.
+            if self.twelve_data is None:
+                raise ResearchDataUnavailable(
+                    "stock instrument directory is not configured",
+                    lane_status=LaneStatus.NOT_CONFIGURED,
+                )
+            snapshots = await asyncio.gather(
+                *[
+                    self._twelve_data_snapshot(symbol, MarketCategory.FOREX)
+                    for symbol in _symbols(self.settings.research_stocks_universe)
+                ],
+                return_exceptions=True,
+            )
+            snapshots = [item for item in snapshots if isinstance(item, ResearchSnapshot)]
+        else:
+            snapshots = await self.gather(category)
         typed: list[TypedResearchSnapshot] = []
         for snapshot in snapshots:
             listing_id = uuid5(

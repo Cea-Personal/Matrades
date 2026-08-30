@@ -7,8 +7,23 @@ def compare(left: StrategySpecification, right: StrategySpecification) -> dict[s
     left_rules = {str(x) for x in left.entry + left.exit}
     right_rules = {str(x) for x in right.entry + right.exit}
     union = left_rules | right_rules
+    semantic_parts = [
+        left.family == right.family,
+        left.horizon == right.horizon,
+        left.instruments == right.instruments,
+        left.regimes == right.regimes,
+    ]
+    behavior_union = {
+        *(str(x) for x in left.entry + left.exit + left.invalidation),
+        *(str(x) for x in right.entry + right.exit + right.invalidation),
+    }
+    behavior_overlap = {
+        str(x) for x in left.entry + left.exit + left.invalidation
+    } & {str(x) for x in right.entry + right.exit + right.invalidation}
     return {
         "exact": exact,
         "structural": len(left_rules & right_rules) / len(union) if union else 1.0,
         "parameter": 1.0 if left.parameters == right.parameters else 0.5,
+        "semantic": sum(semantic_parts) / len(semantic_parts),
+        "behavioral": len(behavior_overlap) / len(behavior_union) if behavior_union else 1.0,
     }

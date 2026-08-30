@@ -19,29 +19,35 @@ prompt-resolution clarifications into one non-repetitive product specification.
 ### Session 2026-08-25
 
 - Q: Should Matrades select one research candidate per asset class, or one per asset-class and instrument-type combination? → A: One candidate for every supported asset-class and instrument-type combination in each daily research cycle. The initial matrix covers Forex, metals, cryptocurrency, and stocks across spot, CFD, and futures, including metals CFD and cryptocurrency CFD. Spot represents cash or underlying ownership, CFD represents a derivative exposure, and futures represent contract exposure.
+- Q: After deterministic policy and risk checks pass, which parts of the trade lifecycle may Matrades execute autonomously without HIL approval? → A: Full lifecycle automation with per-account controls: Matrades may place and cancel orders, set or modify Stop Loss and Take Profit, partially close positions, and fully exit positions without HIL approval, subject to deterministic hard limits, explicit per-account permissions, complete audit logging, and an emergency kill switch.
+- Q: May the new knowledge-and-journal AI agent trigger trades or change live positions through chat, or should it only answer questions? → A: The agent is read-only: it answers from authorized knowledge and journal evidence with citations and cannot trigger, prepare, modify, or execute trades.
+- Q: When should live trade-journal content become searchable by the Knowledge Assistant? → A: Immutable journal events are indexed into knowledge continuously during the active trade, the structured journal remains authoritative, and a consolidated summary is indexed when the trade closes.
+- Q: What actions should users be able to perform from an embedded live chart? → A: The chart is interactive but read-only, with live prices, indicators, and overlays for the trade plan, fills, Stop Loss and Take Profit, journal events, and automated actions; it cannot create execution requests or broker writes.
+- Q: How should Matrades present backtest, paper-trading, and live-trading results in performance analytics? → A: Keep backtest, paper-trading, and live-trading analytics as separate evidence classes, allow filtered side-by-side comparison, and default operational analytics to live results without blending simulated and live headline metrics.
 
 ## User Scenarios & Testing *(mandatory)*
 
-### User Story 1 - Make a Safe Trade Decision (Priority: P1)
+### User Story 1 - Execute a Safe Automated Trade (Priority: P1)
 
 As a trader, I want Matrades to turn current market, account, policy, and strategy evidence
-into a risk-checked proposal so that I can decide whether to take a trade without surrendering
-execution control.
+into a risk-checked trade plan and execute it automatically within the permissions configured
+for that account.
 
-**Why this priority**: Safe decision support is the product's primary value and the point at
-which inaccurate data or weak enforcement can cause direct financial harm.
+**Why this priority**: Safe automated execution is the product's primary value and the point at
+which inaccurate data, duplicate commands, or weak enforcement can cause direct financial harm.
 
 **Independent Test**: Configure one account, one eligible strategy, current market and account
-snapshots, and applicable limits; verify that an eligible proposal reaches HIL-2 with a complete
-risk snapshot while an over-limit proposal is blocked.
+snapshots, applicable limits, and entry permission; verify that an eligible plan is executed once
+with a complete risk snapshot while an over-limit plan is blocked before any broker write.
 
 **Acceptance Scenarios**:
 
 1. **Given** current authoritative data, a validated eligible strategy, and sufficient remaining
    capacity, **When** a candidate trade passes policy, risk, and critic review, **Then** the user
-   receives a proposal with TAKE, WAIT, and REJECT actions and no trade is executed.
+   receives a visible trade plan and Matrades submits exactly one broker order when the account's
+   entry permission is enabled.
 2. **Given** a candidate's worst-case loss would breach any applicable hard limit, **When** the
-   candidate is evaluated, **Then** it is HARD BLOCKED before HIL-2 and the breached limit and
+   candidate is evaluated, **Then** it is HARD BLOCKED before execution and the breached limit and
    source are shown.
 3. **Given** a valid setup whose original size exceeds available capacity, **When** a smaller
    size can comply with every limit, **Then** the result is REDUCE SIZE with the compliant size
@@ -49,52 +55,67 @@ risk snapshot while an over-limit proposal is blocked.
 
 ---
 
-### User Story 2 - Select Markets for the Session (Priority: P1)
+### User Story 2 - Research Markets for the Session (Priority: P1)
 
 As a trader, I want one ranked candidate for every supported asset-class and instrument-type
-combination so that I can explicitly choose the session's daily research universe across Forex,
-metals, cryptocurrency, and stocks in spot, CFD, and futures markets.
+combination so that Matrades can autonomously establish the session's research universe across
+Forex, metals, cryptocurrency, and stocks in spot, CFD, and futures markets.
 
-**Why this priority**: Market selection is the first mandatory human gate and bounds all later
-analysis without implying permission to open trades.
+**Why this priority**: Market selection bounds all later analysis while allowing the configured
+automation pipeline to operate without a human approval queue.
 
-**Independent Test**: Run daily research with healthy sources, review one ranked recommendation
-for every supported asset-class and instrument-type combination, replace one instrument, and
-approve the final selection.
+**Independent Test**: Run daily research with healthy sources, verify one ranked recommendation
+for every supported asset-class and instrument-type combination continues into analysis without
+approval, and verify an ineligible first-ranked candidate falls back safely or produces NO TRADE.
 
 **Acceptance Scenarios**:
 
 1. **Given** healthy required sources, **When** each daily research cycle completes, **Then**
    Matrades recommends one instrument for every supported Forex, metals, cryptocurrency, and
-   stocks spot, CFD, and futures combination and waits for HIL-1.
-2. **Given** the recommendations, **When** the user replaces one instrument, **Then** the new
-   instrument becomes part of the active universe and the other approved choices remain intact.
+   stocks spot, CFD, and futures combination and continues eligible candidates into analysis.
+2. **Given** a first-ranked candidate becomes ineligible before analysis, **When** another ranked
+   candidate still satisfies the configured universe, freshness, and eligibility rules, **Then**
+   Matrades records the invalidation and continues with the next eligible candidate without approval.
 3. **Given** no eligible market has adequate evidence, **When** research completes, **Then**
    Matrades reports NO TRADE or DEGRADED rather than forcing a recommendation.
 
 ---
 
-### User Story 3 - Execute and Manage a Trade Manually (Priority: P1)
+### User Story 3 - Execute and Manage a Trade Automatically (Priority: P1)
 
-As a trader, I want an approved idea reconciled with the position I manually enter and monitored
-thereafter so that recommendations use actual broker values while I retain control of changes.
+As a trader, I want Matrades to execute an authorized trade plan, reconcile the broker result, and
+manage the live position automatically within account-specific permissions and hard risk limits.
 
-**Why this priority**: Approval must remain separate from execution, and risk monitoring is only
-reliable after proposed values are replaced with actual broker state.
+**Why this priority**: Full lifecycle automation is reliable only when requested actions are
+reconciled to actual broker state and every write remains bounded, idempotent, and auditable.
 
-**Independent Test**: TAKE a proposal, manually create a matching position in a connected account,
-reconcile it, generate a management recommendation, and confirm that no broker write occurs before
-HIL-3 approval and manual action.
+**Independent Test**: Authorize full lifecycle automation for one test account, execute a plan,
+reconcile the fill, automatically modify protection, partially close, and fully exit; verify each
+action occurs once, respects hard limits, is audited, and is stopped by the account kill switch.
 
 **Acceptance Scenarios**:
 
-1. **Given** a proposal marked TAKE, **When** no broker position exists, **Then** the proposal
-   remains awaiting manual entry and is not represented as live.
-2. **Given** the broker reports a matching position, **When** reconciliation succeeds, **Then**
+1. **Given** an executable plan and enabled entry permission, **When** the broker accepts the order,
+   **Then** Matrades records the broker order and does not represent it as a live position until a
+   fill is confirmed.
+2. **Given** the broker reports the resulting position, **When** reconciliation succeeds, **Then**
    actual entry, size, protections, fees, and P&L become authoritative for monitoring.
 3. **Given** monitoring recommends a partial profit, Stop Loss move, or discretionary exit,
-   **When** the recommendation is issued, **Then** HIL-3 offers APPROVE, WAIT, and REJECT and
-   Matrades does not modify the position.
+   **When** the relevant account permission is enabled and deterministic checks pass, **Then**
+   Matrades executes the action once and records its reason, inputs, request, and broker result.
+4. **Given** the emergency kill switch is active, **When** any new entry or discretionary position
+   change is requested, **Then** the request is blocked before broker submission while existing
+   broker-hosted protective orders remain intact.
+5. **Given** a reconciled active position, **When** the user opens it, **Then** its complete current
+   trade plan is visible alongside an interactive live chart showing actual fills, protections,
+   journal events, and automated management actions.
+6. **Given** the user pans, zooms, changes timeframe, or applies a supported indicator, **When** the
+   chart updates, **Then** the interaction changes only the view and creates no execution request or
+   broker command.
+7. **Given** the broker confirms an entry order or fill, **When** Matrades records the execution,
+   **Then** it sends one deduplicated trade-entry notification through every enabled channel with the
+   account, instrument, side, actual or pending quantity, price or order level, protections, strategy,
+   and Trade Plan link.
 
 ---
 
@@ -186,16 +207,17 @@ model, prompts, and fallback are recorded without permission changes or cross-ru
 
 ### User Story 7 - Retrieve Context Without Replacing Facts (Priority: P3)
 
-As a trader or research agent, I want relevant strategy, source-document, journal, and research
-context retrieved with provenance so that prior knowledge helps decisions without replacing current
-structured facts.
+As a trader or research agent, I want a read-only Knowledge Assistant to answer questions from
+relevant strategy, source-document, journal, and research context with provenance so that prior
+knowledge helps understanding without replacing current structured facts or creating trading actions.
 
 **Why this priority**: Knowledge retrieval improves research quality, but core trading safety must
 remain functional without it.
 
-**Independent Test**: Retrieve a related strategy note and a prop-firm source passage, verify
-provenance and authorization, then disable retrieval and confirm deterministic risk and policy
-decisions continue safely.
+**Independent Test**: Ask the Knowledge Assistant a question whose answer requires one strategy
+note and one journal entry, verify authorization and source citations, attempt to prompt it to place
+or modify a trade and confirm that no trade plan or broker command is created, then disable retrieval
+and confirm deterministic risk and policy decisions continue safely.
 
 **Acceptance Scenarios**:
 
@@ -206,29 +228,52 @@ decisions continue safely.
 3. **Given** unavailable semantic retrieval, **When** a risk decision is required, **Then** the Risk
    Engine does not use retrieved content and continues or blocks solely according to authoritative
    data health.
+4. **Given** an authorized user asks about prior trading behavior, **When** the Knowledge Assistant
+   answers, **Then** each material factual claim links to the journal or knowledge segments used.
+5. **Given** any conversational instruction to enter, cancel, modify, partially close, or fully exit
+   a trade, **When** the Knowledge Assistant processes it, **Then** it refuses the trading action and
+   creates no executable trade plan, execution-service request, or broker command.
 
 ---
 
 ### User Story 8 - Review Decisions and Performance (Priority: P3)
 
-As a trader, I want a complete journal, performance views, health states, and approval inbox so that
-I can understand what happened, respond to urgent actions, and improve through controlled research.
+As a trader, I want a complete journal, performance views, health states, and automation operations
+view so that I can understand what happened, respond to urgent conditions, and improve through
+controlled research.
 
 **Why this priority**: Audit and learning close the feedback loop after safe research and trading
 workflows exist.
 
-**Independent Test**: Complete a simulated trade lifecycle, reconstruct its inputs and decisions,
-view performance by strategy and regime, and verify that degradation creates research or suspension
-work rather than silently changing a live strategy.
+**Independent Test**: Complete a simulated trade lifecycle while the Journal agent records live
+monitoring observations, query those events through the Knowledge Assistant before the trade closes,
+verify the post-trade summary and provenance after close, reconstruct the inputs and decisions, and
+confirm that degradation creates research or suspension work rather than silently changing a live
+strategy.
 
 **Acceptance Scenarios**:
 
 1. **Given** a completed trade, **When** its journal is opened, **Then** the user can trace the
-   proposal, approvals, actual position, management decisions, versions, outcome, and evidence.
+   plan, execution, actual position, live monitoring observations, management decisions, versions,
+   outcome, and evidence.
 2. **Given** an active strategy with degraded recent performance, **When** health evaluation runs,
    **Then** Matrades may flag or suspend it and may initiate research but does not mutate its rules.
-3. **Given** multiple pending human decisions, **When** the approval inbox opens, **Then** market,
-   entry, and management approvals are grouped and urgency is clear.
+3. **Given** multiple automated workflows and open positions, **When** the operations view opens,
+   **Then** active plans, executions, monitoring actions, hard blocks, and kill-switch state are
+   grouped by account and urgency is clear.
+4. **Given** a reconciled active position, **When** monitoring receives a material market, account,
+   risk, strategy, execution, or position-state event, **Then** the Journal agent appends a timestamped
+   observation and its evidence without rewriting earlier entries.
+5. **Given** a committed live journal event, **When** its knowledge index is healthy, **Then** the
+   event becomes searchable during the active trade and links back to the authoritative journal event.
+6. **Given** a trade reaches a terminal state, **When** journaling finalizes it, **Then** the Journal
+   agent creates and indexes a consolidated post-trade summary without replacing the underlying events.
+7. **Given** backtest, paper-trading, and live results exist for one strategy, **When** performance
+   analytics opens, **Then** live results are selected by default and each evidence class has separate
+   headline metrics with an optional side-by-side comparison.
+8. **Given** a user inspects the reported edge, **When** the metric is expanded, **Then** Matrades
+   shows after-cost expectancy, sample size, observation period, uncertainty, and the contributing
+   trades without mixing evidence classes.
 
 ### Edge Cases
 
@@ -245,6 +290,8 @@ work rather than silently changing a live strategy.
 - Prop-firm and internal limits use different currencies, reset times, or drawdown bases.
 - More than one approved proposal could match a newly detected broker position.
 - Broker, bridge, calendar, or market data disconnects while a position remains open.
+- The chart stream is delayed, disconnected, or uses a symbol mapping or timeframe inconsistent with
+  the active broker position; the chart must display the mismatch and must not imply current state.
 - An agent's primary and fallback models both lack a required capability.
 - The Codex-hosted runtime is unavailable for an agent that has not been explicitly assigned a
   LiteLLM alternative; the agent becomes DEGRADED or BLOCKED and does not switch runtimes silently.
@@ -254,39 +301,45 @@ work rather than silently changing a live strategy.
 - A strategy's parameter-only change is submitted as a new identity, or a material rule change is
   submitted as a profile update.
 - No validated strategy matches the current market regime.
-- A broker-side Stop Loss or Take Profit executes while HIL-3 is pending.
+- A broker-side Stop Loss or Take Profit executes while an automated modification request is in flight.
+- A broker response times out after accepting an order, so Matrades must reconcile before retrying.
+- An account permission or kill-switch state changes while an execution request is in flight.
 
 ## Requirements *(mandatory)*
 
 ### Scope
 
-Matrades V1 covers AI-assisted research and decision support for Forex, metals, cryptocurrency,
+Matrades V1 covers AI-assisted research and full-lifecycle automated trading for Forex, metals, cryptocurrency,
 and stocks across supported spot, CFD, and futures instruments. It includes secure user access,
 UI-managed configuration, provider-neutral data and broker connections, agent orchestration,
 market research, strategy creation and validation, account-specific deterministic risk and policy
-enforcement, manual trading workflows, monitoring, journaling, performance analysis,
+enforcement, automated execution and position management, monitoring, journaling, performance analysis,
 notifications, health, and auditability.
 
-The default V1 excludes autonomous live trade entry, autonomous discretionary position changes,
-autonomous discretionary exits, high-frequency or market-making execution, latency-sensitive
+The default V1 excludes high-frequency or market-making execution, latency-sensitive
 arbitrage execution, hard-rule overrides by AI or users, and live recommendations from strategies
 that have not completed the required validation lifecycle.
 
+This scope removes HIL-1, HIL-2, and HIL-3 and requires a major constitutional amendment before
+dependent planning or implementation can be considered constitutionally compliant.
+
 ### Functional Requirements
 
-#### Human Authority and Daily Workflow
+#### Automated Daily Workflow
 
-- **FR-001**: Matrades MUST require HIL-1 approval of the active research universe, HIL-2 approval
-  of each trade idea, and HIL-3 approval of every discretionary live-position change.
-- **FR-002**: Each daily HIL-1 cycle MUST normally present one ranked candidate for every supported
+- **FR-001**: Matrades MUST operate without HIL-1, HIL-2, or HIL-3 approval gates; no market-selection,
+  entry, modification, partial-close, or exit action may depend on a routine human approval step.
+- **FR-002**: Each daily research cycle MUST normally present one ranked candidate for every supported
   combination of asset class (Forex, metals, cryptocurrency, and stocks) and instrument type
-  (spot, CFD, and futures), including metals CFD and cryptocurrency CFD, with APPROVE, REPLACE,
-  and RERUN RESEARCH actions.
-- **FR-003**: The number of HIL-1 instruments MUST NOT imply the number of trades permitted.
-- **FR-004**: HIL-2 MUST offer TAKE, WAIT, and REJECT; TAKE MUST move the proposal to awaiting
-  manual entry and MUST NOT place an order.
-- **FR-005**: HIL-3 MUST offer APPROVE, WAIT, and REJECT for a Stop Loss change, Take Profit change,
-  partial profit, exposure reduction, early exit, or discretionary full exit.
+  (spot, CFD, and futures), including metals CFD and cryptocurrency CFD, and MUST continue eligible
+  candidates into the configured analysis pipeline without waiting for approval.
+- **FR-003**: The number of researched instruments MUST NOT imply the number of trades permitted.
+- **FR-004**: After strategy, data-freshness, policy, guardrail, account-equity, portfolio-risk, and
+  critic checks pass, Matrades MUST submit an entry order only when that account's entry permission
+  is enabled and MUST NOT require a human approval.
+- **FR-005**: Matrades MUST support autonomous order cancellation, Stop Loss and Take Profit creation
+  or modification, partial close, exposure reduction, early exit, and full exit when the specific
+  action is enabled for the account and all deterministic hard checks pass.
 - **FR-006**: Broker-side protective Stop Loss and Take Profit execution MUST be recognized without
   requiring an additional human decision.
 - **FR-007**: WAIT, NO TRADE, BLOCK, and DEGRADED MUST be supported as valid, visible outcomes.
@@ -301,7 +354,7 @@ that have not completed the required validation lifecycle.
   authentication and MUST produce an audit event.
 - **FR-011**: Routine configuration MUST be available through the UI without requiring source or
   deployment changes, including named Twelve Data, Coinbase, CoinGecko, FRED, calendar, news, and
-  read-only MT5 Bridge connection profiles.
+  execution-capable MT5 Bridge connection profiles.
 - **FR-012**: Stored secrets MUST be encrypted, displayed in full only during initial entry, masked
   thereafter, excluded from logs and model prompts, and accessed only by authorized reference.
 - **FR-013**: Users MUST be able to replace and test credentials without exposing the saved value;
@@ -344,7 +397,7 @@ that have not completed the required validation lifecycle.
   active policy explicitly permits and defines that treatment.
 - **FR-026**: The Risk Engine MUST evaluate account equity, drawdown capacity, daily loss capacity,
   reserved risk, portfolio and correlated exposure, candidate risk, prop-firm restrictions,
-  internal guardrails, and the concurrent-trade ceiling in that authority order before HIL-2.
+  internal guardrails, and the concurrent-trade ceiling in that authority order before execution.
 - **FR-027**: A candidate MUST be HARD BLOCKED if its worst-case loss would breach any applicable
   hard limit.
 - **FR-028**: The Risk Engine MUST return PASS, REDUCE SIZE, or HARD BLOCK and MUST identify the
@@ -358,7 +411,7 @@ that have not completed the required validation lifecycle.
 - **FR-031**: A candidate MAY be blocked below the concurrent-trade ceiling when aggregate,
   category, or correlated exposure is insufficient; open positions MUST NOT automatically be
   treated as independent risk events.
-- **FR-032**: HIL-2 MUST include a pre-trade equity snapshot showing account equity, starting
+- **FR-032**: Every executable trade plan MUST include a pre-trade equity snapshot showing account equity, starting
   balance, current and maximum drawdown, remaining drawdown, daily loss used and remaining,
   existing open risk, candidate risk, projected portfolio risk, open-trade count, concurrent-trade
   ceiling, additional-trade capacity, and the Risk Engine result.
@@ -401,7 +454,7 @@ that have not completed the required validation lifecycle.
   `forex_research`, `metals_research`, `crypto_research`, `technical_analyst`,
   `fundamental_analyst`, `sentiment_analyst`, `regime_analyst`, `strategy_selector`,
   `strategy_researcher`, `strategy_assistant`, `critic`, `trade_monitor`, `journal`, and
-  `performance`.
+  `performance`, plus the read-only `knowledge_assistant`.
 - **FR-045**: Required logical identities MUST be protected from user deletion but MAY evolve
   through an approved constitutional or product-specification change.
 - **FR-046**: Every required logical agent MUST use the Codex-hosted runtime by default. Runtime,
@@ -425,8 +478,9 @@ that have not completed the required validation lifecycle.
   changing a model or prompt MUST NOT grant additional authority.
 - **FR-053**: Agents MUST exchange versioned structured results containing evidence, source times,
   confidence or uncertainty, assumptions, and status.
-- **FR-054**: Agents MUST NOT receive broker-write, hard-policy-write, or guardrail-write authority
-  in the default V1 workflow.
+- **FR-054**: Agents MUST NOT receive direct broker-write, hard-policy-write, or guardrail-write
+  credentials. Broker writes MUST pass through the deterministic execution service, which validates
+  the structured action against current account permissions, policy, risk, and kill-switch state.
 
 #### Strategy Creation, Repository, and Validation
 
@@ -495,6 +549,27 @@ that have not completed the required validation lifecycle.
   knowledge sources and see source and retrieval health without operating storage internals.
 - **FR-080**: Knowledge unavailability MUST mark dependent research DEGRADED while leaving
   deterministic account, policy, risk, and essential monitoring functions unaffected.
+- **FR-108**: The `knowledge_assistant` MUST answer natural-language questions only from records
+  authorized for the current user and account scope, cite the knowledge or journal segments
+  supporting material factual claims, distinguish retrieved evidence from inference, and state when
+  the available evidence is insufficient.
+- **FR-109**: The `knowledge_assistant` MUST have no execution-service or broker-write tool, MUST NOT
+  create executable trade plans, and MUST refuse requests to enter, cancel, modify, partially close,
+  or fully exit a trade even when the account otherwise permits autonomous execution.
+- **FR-110**: Every committed live-trade journal event MUST be queued for continuous, owner-scoped
+  semantic indexing and MUST retain a stable reference to the authoritative structured journal event;
+  indexing failure MUST NOT remove, alter, or delay the authoritative journal record.
+- **FR-111**: The Journal agent MUST append immutable observations for material market, account,
+  risk, strategy, execution, and position-state changes throughout a reconciled trade and MUST record
+  observation time, evidence time, sources, trade-plan and position identities, agent/model/prompt
+  identity, and whether the content is observation or inference.
+- **FR-112**: When a trade reaches a terminal state, the Journal agent MUST create a consolidated
+  post-trade summary covering the plan, execution, management chronology, rationale, outcome, fees,
+  MAE, MFE, lessons, and cited journal-event range, then index that summary without replacing its
+  underlying events.
+- **FR-113**: The Knowledge Assistant MAY answer from indexed live events before trade close but
+  MUST label the trade as active and the account, position, price, P&L, and risk values as historical
+  observations unless they are independently refreshed from authoritative structured services.
 
 #### Trade Construction, Reconciliation, and Monitoring
 
@@ -502,16 +577,19 @@ that have not completed the required validation lifecycle.
 - **FR-082**: Trade construction MUST deterministically calculate direction, entry or zone, Stop
   Loss, target or targets, invalidation, compliant size, risk, maximum loss, and Risk:Reward.
 - **FR-083**: Every candidate MUST pass the active account's policy, effective guardrails, current
-  equity and dynamic capacity, portfolio risk, and adversarial critic review before HIL-2.
-- **FR-084**: A HIL-2 proposal MUST include trade construction, strategy and version, regime,
+  equity and dynamic capacity, portfolio risk, and adversarial critic review before execution.
+- **FR-084**: An executable trade plan MUST include trade construction, strategy and version, regime,
   evidence and invalidation, the complete FR-032 equity snapshot, policy and guardrail results,
-  critic result, and concise reasons for approval or restriction.
-- **FR-085**: Broker connections MUST default to read-only and MUST support account, equity,
-  positions, orders, protections, history, P&L, and symbol details required for reconciliation.
+  critic result, and concise reasons for execution or restriction.
+- **FR-085**: Broker connections MUST default to read-only until the user explicitly enables
+  per-account execution permissions and MUST then support authorized order entry, cancellation,
+  protection changes, partial closes, full exits, and the account, equity, positions, orders,
+  history, P&L, and symbol details required for reconciliation.
 - **FR-086**: Matrades MUST support a health-reporting MT5 Bridge for Windows, macOS/Wine, or
   hosted environments without making MT5 the only supported broker path.
 - **FR-087**: Reconciliation MUST match detected positions using instrument, direction, time, entry
-  proximity, size, and pending approved setups and MUST request user confirmation when ambiguous.
+  proximity, size, and pending executable Trade Plans; an ambiguous match MUST be marked BLOCKED and
+  MUST NOT receive autonomous management actions until authoritative evidence resolves it uniquely.
 - **FR-088**: Once reconciled, actual broker entry, size, Stop Loss, Take Profit, fees, and P&L MUST
   replace proposed values as the authority for monitoring and journaling.
 - **FR-089**: Monitoring MUST assess the actual position, market evidence, strategy invalidation,
@@ -519,30 +597,70 @@ that have not completed the required validation lifecycle.
   PARTIAL TP, EARLY EXIT, or FULL EXIT.
 - **FR-090**: A broker or bridge disconnect MUST mark broker state stale, block confirmation-
   dependent actions, and continue safe monitoring from remaining authoritative sources where possible.
+- **FR-114**: Every active-position view MUST display the complete versioned Trade Plan alongside an
+  embedded interactive chart, including strategy and version, direction, planned and actual entry,
+  size, invalidation, Stop Loss, Take Profit targets, risk, maximum loss, Risk:Reward, management
+  rules, current execution state, and concise rationale.
+- **FR-115**: Embedded charts MUST support live and historical authoritative candles or price updates,
+  pan, zoom, configured timeframes, and supported indicators, with overlays for planned and actual
+  entry, fills, Stop Loss, Take Profit, partial and full exits, live journal events, and automated
+  management actions.
+- **FR-116**: Embedded charts MUST be operationally read-only: chart interactions MUST NOT create a
+  Trade Plan, execution-service request, or broker command and the chart component MUST receive no
+  broker-write credential or tool.
+- **FR-117**: Every chart MUST show normalized instrument identity, asset class, instrument type,
+  provider, source timestamp, freshness or delay state, timeframe, and broker-symbol mapping; stale,
+  disconnected, or mismatched chart data MUST be visibly degraded and MUST NOT be presented as the
+  authoritative current broker position.
 
 #### Journal, Performance, Operations, and UI
 
-- **FR-091**: The journal MUST retain research, HIL selections and decisions, analysis, strategy and
+- **FR-091**: The journal MUST retain research selections, analysis, strategy and
   policy versions, proposed and actual trades, account-risk snapshots, agent/model/prompt identities,
-  recommendations, broker changes, timestamps, fees, exit reason, MAE, MFE, and outcome.
+  automated decisions, execution requests, broker changes, timestamps, fees, exit reason, MAE, MFE,
+  and outcome.
 - **FR-092**: Performance MUST be calculated from structured results and be attributable by strategy
   and version, instrument, market category, regime, session, account, prop firm, and relevant agent
   configuration where data permits.
+- **FR-118**: Every performance observation MUST be classified as `BACKTEST`, `PAPER`, or `LIVE`;
+  headline win rate, P&L, drawdown, profitability, loss, and edge metrics MUST be calculated separately
+  for each evidence class and MUST NOT blend simulated and live results.
+- **FR-119**: Operational performance views MUST default to `LIVE` and MUST support side-by-side
+  comparison of evidence classes plus filters for period, account, prop firm, strategy and version,
+  asset class, instrument type, instrument, direction, regime, session, and exit reason.
+- **FR-120**: Each evidence-class metric set MUST include completed, winning, losing, and breakeven
+  trades; win and loss rate; gross and net P&L; return; average and total monetary loss; average winner
+  and loser; payoff ratio; expectancy in money and R after costs; Profit Factor; maximum and current
+  drawdown; recovery factor; consecutive wins and losses; MAE; MFE; holding time; fees; financing or
+  funding; slippage where observable; and risk-adjusted return where the sample supports it.
+- **FR-121**: Matrades MUST present trading edge as after-cost expectancy with its evidence class,
+  formula, sample size, observation period, uncertainty or confidence interval, and status of POSITIVE,
+  INCONCLUSIVE, or NEGATIVE; AI narrative MUST NOT calculate or override the deterministic metric.
+- **FR-122**: Unrealized P&L and risk for open positions MUST be displayed separately from realized
+  performance and MUST NOT alter completed-trade win rate or expectancy.
+- **FR-123**: Every displayed aggregate MUST drill down to its contributing structured trades and
+  disclose exclusions, missing values, source freshness, currency conversion, and calculation version.
 - **FR-093**: Strategy degradation MAY create research or suspension actions but MUST NOT directly
   mutate an active strategy.
 - **FR-094**: The UI MUST separate operational work from configuration and provide markets,
-  research, trade desk, open trades, approvals, strategies, validation, journal, performance,
-  accounts, rules, connections, risk, agents, knowledge, notifications, and security views.
-- **FR-095**: A centralized approval inbox MUST group HIL-1, HIL-2, and HIL-3 decisions and clearly
-  distinguish urgent actions.
+  research, trade desk, open trades with embedded charts and adjacent trade plans, automation controls,
+  strategies, validation, journal, performance, accounts, rules, connections, risk, agents, knowledge,
+  notifications, and security views.
+- **FR-095**: A centralized automation operations view MUST group active trade plans, broker orders,
+  position-management actions, blocked actions, and kill-switch state by account and urgency.
 - **FR-096**: The UI MUST expose RESEARCHING, WAITING, ACTION REQUIRED, ACTIVE, BLOCKED, DEGRADED,
   and OFFLINE states without requiring the user to inspect agent logs.
 - **FR-097**: Health views MUST cover required agents, models, data and calendar sources, broker and
   bridge connections, knowledge retrieval, and notification channels, including status, freshness,
   last success, and error state.
 - **FR-098**: Notifications MUST support in-product delivery and MAY support browser, email,
-  Telegram, and additional replaceable channels for approvals, safety warnings, critical events,
+  Telegram, and additional replaceable channels for executions, safety warnings, critical events,
   disconnections, failures, and strategy degradation.
+- **FR-124**: A confirmed broker acceptance or fill for a new entry MUST generate one deduplicated
+  trade-entry notification through every enabled channel. The notification MUST distinguish pending,
+  partial, and complete fills and include account, instrument, side, quantity, broker price or order
+  level, Stop Loss and Take Profit, strategy and version, execution time, and a link to the active
+  Trade Plan; a proposed or submitted order without broker confirmation MUST NOT be reported as entered.
 - **FR-099**: Every material trading decision MUST be reconstructable from data sources and times,
   market fingerprint, strategy and version, policy and guardrails, equity and risk snapshot, agent
   configuration, actual model and fallback, prompt versions, tools used, human actions, and broker
@@ -566,6 +684,15 @@ that have not completed the required validation lifecycle.
   mean-reversion, liquidity, support/resistance, supply/demand, event, macro, carry, volatility,
   statistical, relative-value, arbitrage, market-making, order-flow, positioning, seasonality,
   intermarket, and funding/basis families, plus reusable structure and liquidity patterns.
+- **FR-105**: Each trading account MUST have independently configurable permissions for new entry,
+  order cancellation, Stop Loss changes, Take Profit changes, partial closes, and full exits; a
+  disabled permission MUST hard-block that broker write without disabling safe read-only monitoring.
+- **FR-106**: Each account and the platform as a whole MUST provide an emergency kill switch that
+  immediately blocks new entries and discretionary broker writes, remains effective across service
+  restarts, is visible in operational views, and does not cancel broker-hosted protective orders.
+- **FR-107**: Every broker write MUST use an idempotency key or equivalent command identity, record
+  its initiating trade plan and deterministic checks, and reconcile uncertain broker outcomes before
+  any retry to prevent duplicate execution.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -594,6 +721,12 @@ that have not completed the required validation lifecycle.
 - **Agent Definition**: Stable logical role and ID with required capabilities and allowed tools;
   defaults to the Codex-hosted runtime and remains separate from its independently versioned,
   explicitly selected runtime/model profile and prompt configuration.
+- **Knowledge Answer**: Read-only response containing the question, authorized source segments,
+  citations, evidence-versus-inference labels, insufficiency state, agent/model/prompt identity, and
+  timestamp; it has no executable trading representation.
+- **Live Journal Observation**: Immutable, trade-scoped record created during monitoring with event
+  and evidence timestamps, cited sources, structured state references, observation-versus-inference
+  label, and indexing status.
 - **Prompt Version**: Versioned system or user prompt with scope, inheritance mode, author, and time;
   the two prompt types resolve independently.
 - **Strategy**: Permanent canonical identity with origin, creator, family, rules, lineage, supported
@@ -602,33 +735,39 @@ that have not completed the required validation lifecycle.
   state, evidence, compatibility, performance, and lifecycle status.
 - **Knowledge Record**: Authorized contextual document or segment with source provenance, version,
   owner/account scope, date, ingestion state, and tags; never authoritative for current risk facts.
-- **Trade Proposal**: Pre-execution recommendation linking market evidence, selected strategy,
-  construction, equity snapshot, policy, guardrail, risk and critic results, and HIL-2 decision.
+- **Trade Plan**: Executable, versioned instruction linking market evidence, selected strategy,
+  construction, equity snapshot, policy, guardrail, risk and critic results, account permissions,
+  deterministic authorization, and execution state.
 - **Broker Position**: Actual connected-account state used after reconciliation, including entry,
   size, protection levels, fees, P&L, status, and broker timestamps.
-- **Approval**: HIL-1, HIL-2, or HIL-3 decision with allowed actions, subject, urgency, actor,
-  timestamp, rationale if supplied, and resulting state.
+- **Chart View State**: Non-executable presentation state containing normalized instrument mapping,
+  provider and freshness, timeframe, indicators, visible range, Trade Plan reference, broker-position
+  reference, and overlay event references; it carries no broker command semantics.
+- **Execution Permission Profile**: Account-scoped switches for entry, cancellation, protection
+  changes, partial closes, and full exits, including kill-switch state, actor, version, and audit time.
 - **Journal Event**: Immutable chronological evidence of research, configuration, decisions,
   execution reconciliation, monitoring, changes, and outcomes.
 - **Performance Record**: Structured metric set tied to account, strategy version, instrument,
-  regime, session, period, and evidence population.
+  regime, session, period, evidence class (`BACKTEST`, `PAPER`, or `LIVE`), contributing-trade
+  population, calculation version, costs, exclusions, sample sufficiency, and uncertainty.
 
 ## Success Criteria *(mandatory)*
 
 ### Measurable Outcomes
 
 - **SC-001**: In controlled acceptance testing, 100% of candidate trades without a current,
-  account-matched equity snapshot are prevented from reaching actionable HIL-2.
+  account-matched equity snapshot are prevented from reaching broker execution.
 - **SC-002**: Across all tested boundary cases, 100% of candidates whose worst-case loss breaches
   an applicable hard rule are blocked, and the user sees the limiting value and source.
-- **SC-003**: For 100% of HIL-2 and HIL-3 decisions in V1, user approval changes workflow state but
-  does not itself send a broker write instruction.
+- **SC-003**: In lifecycle acceptance testing, 100% of authorized entry, cancellation, Stop Loss,
+  Take Profit, partial-close, and full-exit actions execute without HIL approval, while 100% of
+  disabled or hard-blocked actions produce no broker write.
 - **SC-004**: In a test set containing independent and correlated positions, every displayed
   additional-trade capacity matches the effective risk, drawdown, portfolio, correlation, category,
   and concurrent-position constraints.
-- **SC-005**: 100% of HIL-2 proposals show all required construction and equity-snapshot fields,
-  their freshness, and a PASS or REDUCE SIZE result; blocked candidates show equivalent evidence
-  outside the actionable approval queue.
+- **SC-005**: 100% of executable trade plans show all required construction and equity-snapshot
+  fields, their freshness, and a PASS or REDUCE SIZE result; blocked candidates show equivalent
+  evidence with no broker submission.
 - **SC-006**: 100% of AI-assisted and AI-generated strategies are prevented from
   live eligibility until the same configured validation and paper-trading gates pass.
 - **SC-007**: At least 90% of representative first-time users can turn a partial strategy idea into
@@ -644,7 +783,7 @@ that have not completed the required validation lifecycle.
 - **SC-011**: When semantic knowledge is unavailable, 100% of tested risk, policy, equity, and
   essential live-monitoring decisions either continue from healthy authoritative data or fail safe
   without using fabricated retrieval results.
-- **SC-012**: At least 95% of daily market-research runs present HIL-1 results or an explicit safe-
+- **SC-012**: At least 95% of daily market-research runs present ranked results or an explicit safe-
   failure status within 10 minutes after all required source data becomes available.
 - **SC-013**: At least 95% of complete candidate evaluations present a decision or a clear blocked/
   degraded status within 5 seconds after all authoritative inputs are available.
@@ -654,18 +793,43 @@ that have not completed the required validation lifecycle.
 - **SC-015**: At least 90% of representative users can identify whether the system is waiting for
   them, actively monitoring, blocked, degraded, or offline within 10 seconds of opening the relevant
   operational view.
+- **SC-016**: In adversarial acceptance testing, 100% of conversational requests to enter, cancel,
+  modify, partially close, or fully exit a trade through the Knowledge Assistant create no trade
+  plan, execution-service request, or broker command.
+- **SC-017**: In a representative grounded-answer test set, 100% of the Knowledge Assistant's
+  material factual claims include an authorized journal or knowledge citation or are explicitly
+  labeled as unsupported or inferred.
+- **SC-018**: At least 99% of committed live journal events become searchable within 60 seconds when
+  the knowledge index is healthy, and 100% remain present in the authoritative journal when indexing
+  is unavailable or fails.
+- **SC-019**: In lifecycle acceptance testing, 100% of terminal trades produce one consolidated
+  post-trade summary linked to the complete immutable event range and the corresponding trade,
+  position, account, strategy version, and execution records.
+- **SC-020**: In active-trade UI acceptance testing, 100% of sampled positions display their current
+  Trade Plan beside a chart whose entry, fill, Stop Loss, Take Profit, exit, journal, and automated-
+  action overlays resolve to the same account, instrument mapping, position, and source timestamps.
+- **SC-021**: In interaction and security testing, 100% of chart pan, zoom, timeframe, and indicator
+  actions create no Trade Plan, execution-service request, broker command, or broker credential access.
+- **SC-022**: In analytics acceptance testing, 100% of headline metrics are traceable to exactly one
+  evidence class and the live default never includes a backtest or paper-trading observation.
+- **SC-023**: For a deterministic analytics fixture, 100% of displayed win rate, net P&L, total loss,
+  expectancy, Profit Factor, drawdown, and edge status match the versioned calculation definitions and
+  drill down to the exact contributing trades.
+- **SC-024**: In broker-notification acceptance testing, 100% of confirmed new entries emit exactly
+  one notification per enabled channel, including partial-fill updates without duplicate entry alerts,
+  and 0% of unconfirmed submissions are described as entered trades.
 
 ## Assumptions
 
 - V1 serves an individual authenticated trader; multi-user teams and shared strategy workspaces are
   outside this feature unless explicit authorized sharing is added later.
-- Live trade entry and discretionary modification remain manual, and broker connections default to
-  read-only; broker-side protective orders may execute normally.
-- The default HIL-1 universe is one instrument per enabled asset-class and instrument-type
+- Live trade entry and position management are automated only for explicitly enabled per-account
+  permissions; broker connections remain read-only until those permissions are activated.
+- The default research universe is one instrument per enabled asset-class and instrument-type
   combination. Spot means cash or underlying ownership, CFD means derivative exposure, and futures
   mean contract exposure. Each combination is eligible only when its market semantics and
   authoritative provider or broker mapping are configured; configuration or a later specification
-  may broaden the universe without weakening HIL or risk constraints.
+  may broaden the universe without weakening deterministic policy or risk constraints.
 - Users supply and verify their applicable prop-firm terms. Matrades may assist extraction but does
   not guarantee that unverified source text is complete or legally authoritative.
 - Risk policies define reset boundaries, currencies, conversion rules, drawdown bases, and whether

@@ -51,6 +51,7 @@ async def probe_connection(
     version: str | None = None
     fresh = False
     writes: bool | None = None
+    safe_message: str | None = None
     try:
         if profile.provider == ConnectionProvider.TWELVE_DATA:
             # Validate only the credential/provider boundary here.  The market
@@ -113,6 +114,15 @@ async def probe_connection(
                 raise RuntimeError("SerpApi rejected the connection test")
             capabilities = ["search.read", "youtube.discovery", "transcript.read"]
             fresh = bool(body.get("search_metadata"))
+        elif profile.provider == ConnectionProvider.OPENAI:
+            response = await http.get(
+                "https://api.openai.com/v1/models",
+                headers={"Authorization": f"Bearer {credential_secret}"},
+            )
+            if response.is_error:
+                raise RuntimeError(f"OpenAI rejected the API key ({response.status_code})")
+            fresh = bool(response.json().get("data"))
+            capabilities = ["embeddings.create", "responses.create"]
         elif profile.provider == ConnectionProvider.FOREX_FACTORY:
             feed_url = str(profile.configuration.get("feed_url", DEFAULT_FOREX_FACTORY_FEED))
             response = await http.get(feed_url)
@@ -139,8 +149,21 @@ async def probe_connection(
             version = str(body.get("bridge_version")) if body.get("bridge_version") else None
             fresh = bool(body.get("fresh"))
             writes = bool(body.get("writes", True))
-            if writes or not {"accounts.read", "positions.read"}.issubset(capabilities):
-                raise RuntimeError("bridge does not satisfy the read-only capability contract")
+            if not {"accounts.read", "positions.read"}.issubset(capabilities):
+                raise RuntimeError(
+                    "bridge does not advertise the required account and position capabilities"
+                )
+            if not fresh:
+                safe_message = (
+                    "Bridge is reachable, but no fresh MT5 EA snapshot was received. "
+                    "Enable Algorithmic Trading for the terminal and EA, allow the bridge URL "
+                    "under WebRequest, and keep the EA attached"
+                )
+                if writes:
+                    safe_message += (
+                        "; this bridge advertises broker-write capability, so review execution "
+                        "permissions and every attached EA before enabling it"
+                    )
         return ConnectionProbe(
             status="HEALTHY" if fresh else "STALE",
             latency_ms=int((time.monotonic() - started) * 1000),
@@ -149,6 +172,7 @@ async def probe_connection(
             version=version,
             fresh=fresh,
             writes=writes,
+            safe_message=safe_message,
         )
     except Exception as exc:
         return ConnectionProbe(

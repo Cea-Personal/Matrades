@@ -9,9 +9,15 @@ def test_operations_ui_has_inbox_journal_performance_and_health():
             "apps/web/src/features/journal/JournalTimeline.tsx",
             "apps/web/src/features/performance/PerformanceDashboard.tsx",
             "apps/web/src/features/health/HealthDashboard.tsx",
+            "apps/web/src/features/trading/TradeManagement.tsx",
         )
     )
     assert all(
         x in text
-        for x in ("HIL-1", "Decision timeline", "Performance attribution", "Operational health")
+        for x in (
+            "Live trade journal",
+            "Performance analytics",
+            "Operational health",
+            "AUTONOMOUS",
+        )
     )

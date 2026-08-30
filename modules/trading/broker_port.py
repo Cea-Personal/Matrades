@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Protocol
+from typing import Any, Protocol
 from uuid import UUID
 
+from modules.trading.models import ExecutionAuthorization, ExecutionCommand
 from packages.broker_sdk.schemas import BrokerInstrument, BrokerSnapshot
 from packages.shared.domain_types import AssetClass, InstrumentType
 
@@ -19,3 +20,27 @@ class ReadOnlyBrokerPort(Protocol):
     ) -> dict: ...
     async def history(self, account_id: UUID, since: str) -> list[dict]: ...
     async def health(self) -> dict: ...
+
+
+class BrokerCommandPort(Protocol):
+    """Bounded broker writes; callers must provide a server-issued authorization."""
+
+    async def submit_order(
+        self, command: ExecutionCommand, authorization: ExecutionAuthorization
+    ) -> dict[str, Any]: ...
+
+    async def cancel_order(
+        self, command: ExecutionCommand, authorization: ExecutionAuthorization
+    ) -> dict[str, Any]: ...
+
+    async def change_protection(
+        self, command: ExecutionCommand, authorization: ExecutionAuthorization
+    ) -> dict[str, Any]: ...
+
+    async def partial_close(
+        self, command: ExecutionCommand, authorization: ExecutionAuthorization
+    ) -> dict[str, Any]: ...
+
+    async def full_exit(
+        self, command: ExecutionCommand, authorization: ExecutionAuthorization
+    ) -> dict[str, Any]: ...

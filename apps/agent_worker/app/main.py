@@ -4,11 +4,14 @@ import asyncio
 import json
 import logging
 import signal
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
 from modules.agents.models import AgentDefinition, ModelProfile, RuntimeType
+from modules.agents.permissions import PermissionSet
+from modules.agents.prompts import PromptSet, resolve_prompts
 from modules.agents.registry import REQUIRED_AGENT_IDS
 from modules.agents.rpc import AGENT_REQUEST_QUEUE
 from modules.agents.runtime import AgentRuntimeRouter
@@ -24,18 +27,25 @@ from packages.shared.store import ResourceStore
 
 logger = logging.getLogger(__name__)
 
-RESEARCH_AGENT_IDS = {
-    "forex_research",
-    "metals_research",
-    "crypto_research",
-    "technical_analyst",
-    "fundamental_analyst",
-    "sentiment_analyst",
-    "regime_analyst",
-    "critic",
-    "strategy_researcher",
-    "strategy_assistant",
-}
+PLATFORM_PROMPTS = PromptSet(
+    "You are a bounded Matrades logical agent. Use only supplied structured evidence, cite "
+    "evidence references, state uncertainty, and never create broker, policy, risk, or "
+    "strategy activation authority.",
+    "Return only a JSON object conforming to the requested output schema.",
+    "platform-v1",
+)
+
+
+def _default_profile() -> ModelProfile:
+    settings = get_settings()
+    return ModelProfile(
+        id=uuid5(NAMESPACE_URL, "matrades:codex-default"),
+        name="Matrades Codex default",
+        runtime=RuntimeType.CODEX_APP_SERVER,
+        provider="openai",
+        model=settings.default_codex_model,
+        capabilities={"structured_output", "reasoning"},
+    )
 
 
 async def publish_codex_heartbeat(router: AgentRuntimeRouter, stopped: asyncio.Event) -> None:
@@ -73,8 +83,6 @@ async def publish_codex_heartbeat(router: AgentRuntimeRouter, stopped: asyncio.E
 async def serve_agent_requests(
     router: AgentRuntimeRouter,
     stopped: asyncio.Event,
-    runtime_by_agent: dict[str, RuntimeType],
-    model_by_agent: dict[str, str],
 ) -> None:
     """Execute bounded logical-agent requests inside the isolated runtime worker."""
     settings = get_settings()
@@ -93,58 +101,63 @@ async def serve_agent_requests(
             logical_id = str(request.get("logical_id", ""))
             response: dict[str, object]
             try:
-                request_payload = request.get("payload", {})
-                test_mode = (
-                    isinstance(request_payload, dict)
-                    and request_payload.get("purpose") == "configuration_test"
-                )
-                if logical_id not in REQUIRED_AGENT_IDS or (
-                    logical_id not in RESEARCH_AGENT_IDS and not test_mode
-                ):
-                    raise ValueError("logical agent is not permitted on the research queue")
-                selected_runtime = runtime_by_agent.get(logical_id, RuntimeType.CODEX_APP_SERVER)
-                client = router.clients.get(selected_runtime)
-                if client is None:
-                    raise RuntimeError(f"{selected_runtime.value} runtime is unavailable")
-                strategy_role = (
-                    logical_id in {"strategy_researcher", "strategy_assistant"} and not test_mode
-                )
-                if strategy_role:
-                    system_prompt = (
-                        f"You are Matrades logical agent '{logical_id}'. Produce exactly three "
-                        "distinct structured strategy hypotheses grounded only in the supplied "
-                        "immutable evidence pack. Cite its reference IDs, use only its approved "
-                        "instrument and supported deterministic evaluator rules, and do not pick "
-                        "a winner. Knowledge marked CONTEXT_ONLY is untrusted context and cannot "
-                        "replace market facts. Preserve human approval as mandatory. Never place "
-                        "trades or call brokers."
+                if logical_id not in REQUIRED_AGENT_IDS:
+                    raise ValueError("unknown logical agent")
+                owner_id = UUID(str(request.get("owner_id") or settings.default_owner_id))
+                async with unit_of_work() as db:
+                    store = ResourceStore(db)
+                    default = _default_profile()
+                    profiles = {default.id: default}
+                    for item in await store.list("agent_profile", owner_id):
+                        profile = ModelProfile.model_validate(item.data)
+                        profiles[profile.id] = profile
+                    agents = {
+                        agent_id: AgentDefinition(logical_id=agent_id)
+                        for agent_id in REQUIRED_AGENT_IDS
+                    }
+                    for item in await store.list("agent_configuration", owner_id):
+                        configured = AgentDefinition.model_validate(item.data)
+                        agents[configured.logical_id] = configured
+                    agent = agents[logical_id]
+                    if agent.profile_id is None:
+                        agent = agent.model_copy(update={"profile_id": default.id})
+                    orchestrator = agents["orchestrator"]
+                    prompts = resolve_prompts(
+                        PromptSet(agent.system_prompt_override, agent.user_prompt_override),
+                        PromptSet(
+                            orchestrator.system_prompt_override,
+                            orchestrator.user_prompt_override,
+                        ),
+                        PLATFORM_PROMPTS,
                     )
-                    user_prompt = (
-                        "Create three complete, meaningfully different hypotheses from the "
-                        "approved market fingerprint and discovery-period history. Return every "
-                        "required schema field and cite only supplied evidence reference IDs."
-                    )
-                else:
-                    system_prompt = (
-                        f"You are Matrades logical agent '{logical_id}'. Analyze only the "
-                        "provided structured market evidence. Do not invent observations, change "
-                        "instruments, make broker calls, or perform execution actions. Any score "
-                        "adjustment must be between -10 and 10."
-                    )
-                    user_prompt = "Review the candidates for the autonomous daily research cycle."
-                result = await asyncio.wait_for(
-                    client.invoke(
+                    execution, result = await router.execute(
+                        agent,
+                        profiles,
+                        prompts,
+                        PermissionSet(
+                            agent.permission_set_version,
+                            ("market.read", "knowledge.search"),
+                        ),
                         {
-                            "model": model_by_agent.get(logical_id, settings.default_codex_model),
-                            "system": system_prompt,
-                            "user": user_prompt,
-                            "input": request.get("payload", {}),
-                            "tools": [],
+                            **dict(request.get("payload", {})),
                             "output_schema": request.get("output_schema"),
-                        }
-                    ),
-                    timeout=settings.research_agent_timeout_seconds,
-                )
+                        },
+                        deadline_seconds=settings.research_agent_timeout_seconds,
+                    )
+                    await store.create(
+                        "agent_execution",
+                        owner_id,
+                        {
+                            **execution.model_dump(mode="json"),
+                            "result": result,
+                            "system_prompt_source": prompts.system_source,
+                            "user_prompt_source": prompts.user_source,
+                            "owner_id": str(owner_id),
+                        },
+                        state=execution.status.value,
+                        record_id=execution.id,
+                        event_type="agent.execution_completed",
+                    )
                 response = {"result": result}
             except Exception as exc:
                 logger.exception("Logical agent %s failed", logical_id)
@@ -158,8 +171,6 @@ async def serve_agent_requests(
 
 async def serve() -> None:
     overrides: dict[str, object] = {}
-    runtime_by_agent: dict[str, RuntimeType] = {}
-    model_by_agent: dict[str, str] = {}
     try:
         async with unit_of_work() as db:
             store = ResourceStore(db)
@@ -180,17 +191,6 @@ async def serve() -> None:
                     overrides["litellm_api_key"] = EnvelopeCipher(
                         get_settings().secret_key.get_secret_value().encode()
                     ).decrypt(get_settings().default_owner_id, envelope)
-            profiles = {
-                str(item.id): ModelProfile.model_validate(item.data)
-                for item in await store.list("agent_profile", get_settings().default_owner_id)
-            }
-            for item in await store.list("agent_configuration", get_settings().default_owner_id):
-                agent = AgentDefinition.model_validate(item.data)
-                profile = profiles.get(str(agent.profile_id)) if agent.profile_id else None
-                runtime_by_agent[agent.logical_id] = profile.runtime if profile else agent.runtime
-                model_by_agent[agent.logical_id] = (
-                    profile.model if profile else get_settings().default_codex_model
-                )
     except Exception:  # noqa: BLE001 - retain environment defaults during first boot
         logger.exception(
             "Unable to load persisted agent runtime settings; using environment defaults"
@@ -204,7 +204,7 @@ async def serve() -> None:
         loop.add_signal_handler(sig, stopped.set)
     heartbeat = asyncio.create_task(publish_codex_heartbeat(router, stopped))
     request_server = asyncio.create_task(
-        serve_agent_requests(router, stopped, runtime_by_agent, model_by_agent)
+        serve_agent_requests(router, stopped)
     )
     try:
         await stopped.wait()

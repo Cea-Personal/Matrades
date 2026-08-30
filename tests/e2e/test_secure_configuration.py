@@ -73,8 +73,11 @@ def test_mt5_ea_and_bridge_service_are_shipped():
         for value in ("WebRequest", "/ingest", "InpBridgeSecret", "InpMatradesAccountId")
     )
     assert all(
-        value in compose for value in ("mt5-bridge", "8765:8765", "MATRADES_MT5_BRIDGE_SECRET")
+        value in compose
+        for value in ("mt5-bridge", "8765:8765", "MATRADES_MT5_AUTHORITY_URL")
     )
+    connections_ui = Path("apps/web/src/features/configuration/Connections.tsx").read_text()
+    assert "source of truth" in connections_ui
     assert all(
         value in readme
         for value in ("MatradesMT5BridgeEA.mq5", "Allow WebRequest", "docker compose")
@@ -90,5 +93,12 @@ def test_research_ui_exposes_per_account_schedule_controls():
     text = Path("apps/web/src/features/research/MarketSelection.tsx").read_text()
     assert all(
         value in text
-        for value in ("Per-account research cycle", "Run time", "Save account schedule", "Timezone")
+        for value in (
+            "Per-account research cycle",
+            "Run time",
+            "Save new account schedule",
+            "Edit / replace schedule",
+            "Remove schedule",
+            "Timezone",
+        )
     )

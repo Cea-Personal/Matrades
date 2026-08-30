@@ -12,4 +12,5 @@ WORKDIR /app
 COPY . .
 RUN pip install --no-cache-dir .
 RUN codex --version
-CMD ["python", "-m", "apps.agent_worker.app.main"]
+RUN chmod 755 /app/apps/agent_worker/entrypoint.sh
+CMD ["/app/apps/agent_worker/entrypoint.sh"]

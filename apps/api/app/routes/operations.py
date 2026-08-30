@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-from collections import defaultdict
 from datetime import UTC, datetime
-from decimal import Decimal
 from time import monotonic
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
@@ -19,6 +17,8 @@ from apps.worker.app.tasks.operations import deliver_notification
 from modules.credentials.vault import EnvelopeCipher
 from modules.identity.authorization import Actor, Role
 from modules.notifications.providers import send_notification
+from modules.performance.metrics import aggregate
+from modules.performance.models import PerformanceRecord
 from packages.shared.config import get_settings
 from packages.shared.runtime_health import CODEX_APP_SERVER_HEARTBEAT_KEY
 from packages.shared.store import AuditRecord, ResourceStore
@@ -128,23 +128,18 @@ async def approvals(
     actor: Annotated[Actor, Depends(current_actor)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
+    """Compatibility read model; new work is surfaced by automation operations."""
     store = ResourceStore(db)
-    hil1 = [
-        item.public()
-        for item in await store.list("research_run", actor.owner_id)
-        if item.state == "READY"
-    ]
-    hil2 = [
-        item.public()
-        for item in await store.list("trade_proposal", actor.owner_id)
-        if item.state == "AWAITING_HIL2"
-    ]
-    hil3 = [
-        item.public()
-        for item in await store.list("management_recommendation", actor.owner_id)
-        if item.state == "ACTION_REQUIRED"
-    ]
-    return {"HIL-1": hil1, "HIL-2": hil2, "HIL-3": hil3}
+    return {
+        "trade_plans": [item.public() for item in await store.list("trade_plan", actor.owner_id)],
+        "execution_commands": [
+            item.public() for item in await store.list("execution_command", actor.owner_id)
+        ],
+        "active_trades": [
+            item.public() for item in await store.list("active_trade", actor.owner_id)
+        ],
+        "human_approval_required": False,
+    }
 
 
 @router.get("/journal/{aggregate_id}")
@@ -165,10 +160,13 @@ async def journal(
             )
         ).all()
     )
-    proposal = await ResourceStore(db).get("trade_proposal", aggregate_id, actor.owner_id)
+    proposal = await ResourceStore(db).get("trade_plan", aggregate_id, actor.owner_id)
+    if proposal is None:
+        proposal = await ResourceStore(db).get("trade_proposal", aggregate_id, actor.owner_id)
     return {
         "aggregate_id": str(aggregate_id),
-        "proposal": proposal.public() if proposal else None,
+        "trade_plan": proposal.public() if proposal and proposal.kind == "trade_plan" else None,
+        "proposal": proposal.public() if proposal and proposal.kind == "trade_proposal" else None,
         "events": [item.public() for item in events],
         "reconstructable": bool(events),
     }
@@ -179,23 +177,32 @@ async def performance(
     actor: Annotated[Actor, Depends(current_actor)],
     db: Annotated[AsyncSession, Depends(get_db)],
     dimension: str = "strategy_version",
+    evidence_class: str = "LIVE",
 ):
-    groups: dict[str, list[Decimal]] = defaultdict(list)
-    for trade in await ResourceStore(db).list("active_trade", actor.owner_id):
-        position = trade.data.get("broker_position", {})
-        key = str(trade.data.get(dimension) or position.get(dimension) or "unattributed")
-        net = Decimal(str(position.get("pnl", 0))) - Decimal(str(position.get("fees", 0)))
-        groups[key].append(net)
-    result = {
-        key: {
-            "trade_count": len(values),
-            "net_pnl": str(sum(values, Decimal("0"))),
-            "expectancy": str(sum(values, Decimal("0")) / len(values)),
-            "win_rate": sum(1 for value in values if value > 0) / len(values),
-        }
-        for key, values in groups.items()
+    if dimension not in PerformanceRecord.model_fields:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "unsupported performance dimension"
+        )
+    records = [
+        PerformanceRecord.model_validate(item.data)
+        for item in await ResourceStore(db).list("performance_observation", actor.owner_id)
+        if item.data.get("evidence_class") == evidence_class
+        and item.data.get("status") == "COMPLETED"
+    ]
+    result = aggregate(records, dimension)
+    return {
+        "dimension": dimension,
+        "evidence_class": evidence_class,
+        "groups": {
+            key: {metric: str(value) for metric, value in values.items()}
+            for key, values in result.items()
+        },
+        "open_trades": [
+            item.public()
+            for item in await ResourceStore(db).list("active_trade", actor.owner_id)
+            if item.state == "ACTIVE"
+        ],
     }
-    return {"dimension": dimension, "groups": result}
 
 
 @router.get("/audit")

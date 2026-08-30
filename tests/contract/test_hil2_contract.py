@@ -1,10 +1,13 @@
 from decimal import Decimal
 from uuid import uuid4
 
+import pytest
+
 from modules.risk.engine import RiskEngine
 from modules.risk.reservations import ReservationBook, ReservationState
 from modules.trading.hil2 import decide
-from modules.trading.models import ApprovalDecision, Hil2Action, ProposalState, TradeProposal
+from modules.trading.legacy_compatibility import LegacyWorkflowDisabled
+from modules.trading.models import ApprovalDecision, Hil2Action, TradeProposal
 from tests.fixtures.pretrade import candidate, context
 
 
@@ -26,11 +29,13 @@ def proposal(book: ReservationBook) -> TradeProposal:
     return item.model_copy(update={"reservation_id": reservation.id})
 
 
-def test_take_records_intent_without_execution() -> None:
+def test_hil2_write_is_disabled_for_autonomous_execution() -> None:
     book = ReservationBook()
     item = proposal(book)
-    result = decide(
-        item, ApprovalDecision(proposal_id=item.id, actor_id=uuid4(), action=Hil2Action.TAKE), book
-    )
-    assert result.state == ProposalState.AWAITING_MANUAL_ENTRY
-    assert book._items[item.reservation_id].state == ReservationState.CONFIRMED
+    with pytest.raises(LegacyWorkflowDisabled):
+        decide(
+            item,
+            ApprovalDecision(proposal_id=item.id, actor_id=uuid4(), action=Hil2Action.TAKE),
+            book,
+        )
+    assert book._items[item.reservation_id].state == ReservationState.ACTIVE

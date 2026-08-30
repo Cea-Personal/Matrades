@@ -9,7 +9,7 @@ from uuid import UUID
 
 from adapters.market_data.history import historical_candles
 from apps.worker.app.celery_app import celery_app
-from modules.agents.rpc import RedisAgentGateway
+from modules.agents.rpc import OwnerScopedAgentGateway, RedisAgentGateway
 from modules.backtesting.engine import BacktestConfiguration, PointInTimeBacktester
 from modules.connections.resolution import resolve_connection
 from modules.knowledge.ingestion import build_source_data
@@ -68,8 +68,8 @@ async def _generate_strategy(run_id: UUID) -> dict:
         selection = await store.get("market_selection", selection_id, owner_id)
         market_run = await store.get("research_run", market_run_id, owner_id)
         account = await store.get("account", account_id, owner_id)
-        if selection is None or selection.state != "APPROVED" or market_run is None:
-            raise RuntimeError("immutable approved market research basis is unavailable")
+        if selection is None or selection.state != "ACTIVE_MARKET_ANALYSIS" or market_run is None:
+            raise RuntimeError("immutable typed market research basis is unavailable")
         if account is None or account.state == "DELETED":
             raise RuntimeError("strategy research account is unavailable")
         candidate = resolve_approved_candidate(
@@ -335,7 +335,9 @@ async def _generate_strategy(run_id: UUID) -> dict:
             event_type="strategy_evidence.prepared",
         )
 
-    gateway = RedisAgentGateway(settings.redis_url, settings.research_agent_timeout_seconds)
+    gateway = OwnerScopedAgentGateway(
+        RedisAgentGateway(settings.redis_url, settings.research_agent_timeout_seconds), owner_id
+    )
     try:
         hypotheses = await StrategyGenerationWorkflow(gateway).generate_hypotheses(
             origin, serialized_pack, description
@@ -613,6 +615,14 @@ async def _run_backtest(run_id: UUID) -> dict:
                 "lifecycle_state": StrategyState.VALIDATING,
                 "latest_backtest_id": str(run_id),
                 "latest_backtest_state": state,
+                "validation_evidence": {
+                    **strategy.data.get("validation_evidence", {}),
+                    "backtest": state == "PASSED",
+                    "out_of_sample": state == "PASSED",
+                    "walk_forward": state == "PASSED",
+                    "stress": state == "PASSED",
+                    "policy": state == "PASSED",
+                },
             },
             state=StrategyState.VALIDATING,
             event_type="validation_stage.completed",

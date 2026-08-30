@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -13,10 +13,11 @@ from sqlalchemy import select
 from adapters.market_data.research import LiveResearchDataProvider
 from adapters.news.forex_factory import DEFAULT_FOREX_FACTORY_FEED, fetch_forex_factory_events
 from apps.worker.app.celery_app import celery_app
-from modules.agents.rpc import RedisAgentGateway
-from modules.connections.models import ConnectionProvider
+from modules.agents.rpc import OwnerScopedAgentGateway, RedisAgentGateway
+from modules.connections.models import ConnectionProvider, MarketDataCapability, ProviderBinding
 from modules.connections.resolution import find_connection
 from modules.research.artifacts import ResearchCycleArchive
+from modules.research.matrix import ALL_LANES
 from modules.research.models import MarketCategory, TypedResearchRun
 from modules.research.scheduling import default_schedule, is_due, normalize_schedule
 from modules.research.workflow import AutonomousResearchWorkflow
@@ -35,6 +36,8 @@ DEFAULT_CATEGORIES = [
 async def _execute_research_cycle(run_id: UUID) -> dict:
     typed_lanes: list[ResearchLaneKey] | None = None
     typed_matrix_version = 1
+    configured_lanes: set[str] | None = None
+    lane_binding_ids: dict[str, UUID] = {}
     async with unit_of_work() as session:
         record = await session.get(ResourceRecord, run_id)
         if record is None or record.kind != "research_run":
@@ -59,6 +62,34 @@ async def _execute_research_cycle(run_id: UUID) -> dict:
         coinbase = await find_connection(session, owner_id, ConnectionProvider.COINBASE)
         forex_factory = await find_connection(session, owner_id, ConnectionProvider.FOREX_FACTORY)
         custom_news = await find_connection(session, owner_id, ConnectionProvider.NEWS)
+        if typed_lanes:
+            connections = {
+                item.id: item
+                for item in await ResourceStore(session).list("connection", owner_id)
+            }
+            bindings = [
+                ProviderBinding.model_validate(item.data)
+                for item in await ResourceStore(session).list("provider_binding", owner_id)
+                if item.data.get("account_id") == str(record.data["account_id"])
+                and item.data.get("verification_status") == "VERIFIED"
+            ]
+            eligible_capabilities = {
+                MarketDataCapability.DISCOVERY,
+                MarketDataCapability.INSTRUMENT_DIRECTORY,
+                MarketDataCapability.QUOTE,
+                MarketDataCapability.CANDLES,
+                MarketDataCapability.FUTURES_CHAIN,
+            }
+            configured_lanes = set()
+            for binding in bindings:
+                connection = connections.get(binding.connection_id)
+                if (
+                    binding.capability in eligible_capabilities
+                    and connection is not None
+                    and connection.data.get("health") in {"HEALTHY", "STALE"}
+                ):
+                    configured_lanes.add(binding.lane.as_string())
+                    lane_binding_ids.setdefault(binding.lane.as_string(), binding.id)
 
     enabled = {
         provider_name
@@ -77,15 +108,20 @@ async def _execute_research_cycle(run_id: UUID) -> dict:
         forex_universe=twelve_configuration.get("forex_universe"),
         metals_universe=twelve_configuration.get("metals_universe"),
         crypto_universe=coinbase_configuration.get("crypto_universe"),
+        configured_lanes=configured_lanes,
     )
-    agents = RedisAgentGateway(
-        settings.redis_url,
-        timeout_seconds=settings.research_agent_timeout_seconds,
+    agents = OwnerScopedAgentGateway(
+        RedisAgentGateway(
+            settings.redis_url,
+            timeout_seconds=settings.research_agent_timeout_seconds,
+        ),
+        owner_id,
     )
     try:
         workflow = AutonomousResearchWorkflow(provider, agents)
         if typed_lanes:
             typed_run = TypedResearchRun(
+                id=run_id,
                 owner_id=owner_id,
                 account_id=UUID(str(record.data["account_id"])),
                 matrix_version=typed_matrix_version,
@@ -93,6 +129,25 @@ async def _execute_research_cycle(run_id: UUID) -> dict:
                 created_at=datetime.now(UTC),
             )
             typed_result = await workflow.run_matrix(typed_run)
+            typed_result = typed_result.model_copy(
+                update={
+                    "lane_results": [
+                        item.model_copy(
+                            update={
+                                "binding_id": lane_binding_ids.get(item.lane.as_string()),
+                            }
+                        )
+                        for item in typed_result.lane_results
+                    ],
+                    "source_cut_refs": sorted(
+                        {
+                            source_cut
+                            for item in typed_result.lane_results
+                            for source_cut in item.source_cut_refs
+                        }
+                    ),
+                }
+            )
             serialized = typed_result.model_dump(mode="json")
             serialized["lane_results"] = [
                 item.model_dump(mode="json") for item in typed_result.lane_results
@@ -120,6 +175,79 @@ async def _execute_research_cycle(run_id: UUID) -> dict:
                     state=typed_result.state,
                     event_type=f"research.{typed_result.state.lower()}",
                 )
+                typed_store = ResourceStore(typed_session)
+                for lane_result in typed_result.lane_results:
+                    if lane_result.status.value != "READY" or lane_result.candidate is None:
+                        continue
+                    candidate = lane_result.candidate
+                    instrument_id = uuid5(
+                        NAMESPACE_URL,
+                        f"instrument:{owner_id}:{candidate.listing.id}:{candidate.specification.id}",
+                    )
+                    existing_instrument = await typed_store.get(
+                        "typed_instrument", instrument_id, owner_id
+                    )
+                    instrument_data = {
+                        "account_id": str(typed_run.account_id),
+                        "asset_class": candidate.lane.asset_class.value,
+                        "instrument_type": candidate.lane.instrument_type.value,
+                        "listing": candidate.listing.model_dump(mode="json"),
+                        "specification": candidate.specification.model_dump(mode="json"),
+                        "specification_version_id": str(candidate.specification.id),
+                        "connection_binding_id": str(lane_result.binding_id)
+                        if lane_result.binding_id
+                        else None,
+                        "source_cut_refs": lane_result.source_cut_refs,
+                        "freshness": candidate.specification.freshness,
+                    }
+                    if existing_instrument is None:
+                        await typed_store.create(
+                            "typed_instrument",
+                            owner_id,
+                            instrument_data,
+                            record_id=instrument_id,
+                            event_type="research.typed_instrument_persisted",
+                        )
+                    else:
+                        await typed_store.update(
+                            existing_instrument,
+                            instrument_data,
+                            event_type="research.typed_instrument_refreshed",
+                        )
+                    selection_id = uuid5(
+                        NAMESPACE_URL,
+                        f"market-selection:{typed_run.id}:{lane_result.lane.as_string()}",
+                    )
+                    selection = {
+                        "research_run_id": str(typed_run.id),
+                        "account_id": str(typed_run.account_id),
+                        "lane": lane_result.lane.model_dump(mode="json"),
+                        "candidate": candidate.model_dump(mode="json"),
+                        "ranked_candidates": [
+                            item.model_dump(mode="json") for item in lane_result.ranked_candidates
+                        ],
+                        "source_cut_refs": lane_result.source_cut_refs,
+                        "state": "ACTIVE_MARKET_ANALYSIS",
+                    }
+                    existing_selection = await typed_store.get(
+                        "market_selection", selection_id, owner_id
+                    )
+                    if existing_selection is None:
+                        await typed_store.create(
+                            "market_selection",
+                            owner_id,
+                            selection,
+                            state="ACTIVE_MARKET_ANALYSIS",
+                            record_id=selection_id,
+                            event_type="research.candidate_progressed",
+                        )
+                    else:
+                        await typed_store.update(
+                            existing_selection,
+                            selection,
+                            state="ACTIVE_MARKET_ANALYSIS",
+                            event_type="research.candidate_refreshed",
+                        )
             return serialized
         result = await workflow.run(categories)
     finally:
@@ -273,8 +401,16 @@ async def _create_scheduled_runs() -> list[str]:
         for account in accounts:
             if not account.data.get("active", True):
                 continue
+            matrices = [
+                item
+                for item in await store.list("research_matrix", account.owner_id)
+                if item.data.get("account_id") == str(account.id)
+            ]
+            matrix = matrices[0] if matrices else None
             schedule = normalize_schedule(
-                account.data.get("research_schedule"), fallback=fallback_schedule
+                account.data.get("research_schedule")
+                or (matrix.data.get("schedule") if matrix else None),
+                fallback=fallback_schedule,
             )
             if not is_due(schedule, now=now):
                 continue
@@ -287,7 +423,16 @@ async def _create_scheduled_runs() -> list[str]:
                 account.owner_id,
                 {
                     "account_id": str(account.id),
-                    "market_categories": [item.value for item in DEFAULT_CATEGORIES],
+                    "matrix_version": int(matrix.data.get("version", 1)) if matrix else 1,
+                    "lanes": [
+                        item
+                        for item in (
+                            matrix.data.get("lanes")
+                            if matrix
+                            else [lane.model_dump(mode="json") for lane in ALL_LANES]
+                        )
+                        if item.get("enabled", True)
+                    ],
                     "scheduled_date": local_date,
                     "scheduled_at": now.isoformat(),
                     "research_schedule": schedule,

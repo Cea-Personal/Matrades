@@ -5,26 +5,38 @@ import io
 import math
 import re
 import zipfile
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 from xml.etree import ElementTree
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from adapters.blob_store.local import LocalBlobStore
 from apps.api.app.dependencies import current_actor, get_db, require_roles, require_step_up
-from modules.connections.models import ConnectionProvider
-from modules.connections.resolution import find_connection
 from modules.identity.authorization import Actor, Role
-from modules.knowledge.ingestion import build_source_data, token_embedding
-from modules.knowledge.youtube import scrape_youtube_transcripts
+from modules.knowledge.assistant import KnowledgeAssistant, KnowledgeQuestion
+from modules.knowledge.ingestion import build_source_data
+from modules.knowledge.models import RetrievalHit
+from modules.knowledge.openai_embeddings import (
+    DEFAULT_MODEL,
+    embed_source_data,
+    embed_texts_for_owner,
+    openai_embeddings,
+)
+from modules.knowledge.youtube_ingestion import ingest_youtube_discovery
+from modules.connections.models import ConnectionProvider
+from modules.connections.resolution import resolve_connection
+from modules.research.scheduling import default_schedule, next_run_at, normalize_schedule
 from modules.security.platform import validate_upload
 from packages.shared.config import get_settings
 from packages.shared.store import ResourceStore
 
 router = APIRouter(prefix="/knowledge", tags=["Knowledge"])
+assistant_router = APIRouter(prefix="/knowledge-assistant", tags=["Knowledge"])
 
 
 class SourceInput(BaseModel):
@@ -61,6 +73,44 @@ class YouTubeScrapeInput(BaseModel):
     limit: int = Field(default=5, ge=1, le=20)
     languages: list[str] = Field(default_factory=lambda: ["en"])
     category: str = "trading"
+
+
+class YouTubeScheduleInput(YouTubeScrapeInput):
+    enabled: bool = True
+    run_at: str = "05:00"
+    timezone: str = "UTC"
+    weekdays: list[int] = Field(default_factory=lambda: list(range(7)))
+
+    @model_validator(mode="after")
+    def valid_schedule(self) -> YouTubeScheduleInput:
+        normalize_schedule(
+            {
+                "enabled": self.enabled,
+                "run_at": self.run_at,
+                "timezone": self.timezone,
+                "weekdays": self.weekdays,
+            },
+            fallback=default_schedule(enabled=False, run_at="05:00"),
+        )
+        if self.enabled and not self.weekdays:
+            raise ValueError("an enabled schedule must include at least one weekday")
+        return self
+
+
+class AssistantInput(BaseModel):
+    question: str = Field(min_length=1, max_length=4000)
+    limit: int = Field(default=5, ge=1, le=20)
+    category: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    asset_class: str | None = None
+    instrument_type: str | None = None
+    venue_instrument_id: str | None = None
+
+
+class EmbeddingConfigurationInput(BaseModel):
+    connection_id: UUID
+    model: str = Field(default=DEFAULT_MODEL, pattern=r"^text-embedding-3-(small|large)$")
+    dimensions: int | None = Field(default=None, ge=64, le=3072)
 
 
 def _document_data(payload: SourceInput, version: int = 1) -> dict:
@@ -117,7 +167,7 @@ async def create_source(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     try:
-        data = _document_data(payload)
+        data = await embed_source_data(db, actor.owner_id, _document_data(payload))
     except ValueError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
     item = await ResourceStore(db).create(
@@ -169,7 +219,7 @@ async def upload_source(
         tags=[value.strip() for value in tags.split(",") if value.strip()],
         source_kind="DOCUMENT_UPLOAD",
     )
-    data = _document_data(payload)
+    data = await embed_source_data(db, actor.owner_id, _document_data(payload))
     data["blob_key"] = blob_key
     item = await store.create(
         "knowledge_source",
@@ -205,7 +255,9 @@ async def reprocess_source(
     item = await store.get("knowledge_source", source_id, actor.owner_id)
     if item is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "knowledge source not found")
-    data = _document_data(payload, item.version + 1)
+    data = await embed_source_data(
+        db, actor.owner_id, _document_data(payload, item.version + 1)
+    )
     updated = await store.update(
         item,
         data,
@@ -269,7 +321,8 @@ async def search(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     query_terms = set(re.findall(r"[a-z0-9]+", payload.query.lower()))
-    query_vector = token_embedding(payload.query)
+    query_vectors, _ = await embed_texts_for_owner(db, actor.owner_id, [payload.query])
+    query_vector = query_vectors[0]
 
     def cosine(left: list[float], right: list[float]) -> float:
         if not left or not right:
@@ -350,87 +403,321 @@ async def search(
     }
 
 
+@router.post("/assistant")
+async def assistant(
+    payload: AssistantInput,
+    actor: Annotated[Actor, Depends(current_actor)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Answer from owner-scoped evidence; this endpoint cannot create execution commands."""
+    result = await search(
+        SearchInput(
+            query=payload.question,
+            limit=payload.limit,
+            category=payload.category,
+            tags=payload.tags,
+            asset_class=payload.asset_class,
+            instrument_type=payload.instrument_type,
+            venue_instrument_id=payload.venue_instrument_id,
+        ),
+        actor,
+        db,
+    )
+    retrieval_hits = [
+        RetrievalHit(
+            segment_id=UUID(item["segment_id"]),
+            document_id=UUID(item["document_id"]),
+            source_id=UUID(item["source_id"]),
+            score=float(item["score"]),
+            text=item["text"],
+            provenance={
+                "source_name": str(item.get("source_name", "")),
+                "source_version": str(item.get("source_version", "")),
+                "segment": str(item.get("segment_ordinal", "")),
+            },
+        )
+        for item in result["citations"]
+    ]
+    active_trade = bool(await ResourceStore(db).list("active_trade", actor.owner_id))
+    answer = KnowledgeAssistant().answer(
+        KnowledgeQuestion(
+            owner_id=actor.owner_id, question=payload.question, active_trade=active_trade
+        ),
+        retrieval_hits,
+    )
+    return answer.model_dump(mode="json") | {
+        "authority": result["authority"],
+        "retrieval_audit_id": result["retrieval_audit_id"],
+    }
+
+
 @router.post("/youtube/scrape")
 async def scrape_youtube(
     payload: YouTubeScrapeInput,
     actor: Annotated[Actor, Depends(require_roles(Role.OWNER, Role.OPERATOR))],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    connection = await find_connection(db, actor.owner_id, ConnectionProvider.SERPAPI)
-    if connection is None or not connection.secret:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT, "configure an active SerpApi connection first"
-        )
     store = ResourceStore(db)
-    existing = await store.list("knowledge_source", actor.owner_id)
-    existing_ids = {
-        str(item.data.get("external_id"))
-        for item in existing
-        if item.data.get("source_kind") == "YOUTUBE_TRANSCRIPT"
-    }
-    existing_hashes = {
-        str(item.data.get("content_hash"))
-        for item in existing
-        if item.data.get("source_kind") == "YOUTUBE_TRANSCRIPT"
-    }
-    results = await scrape_youtube_transcripts(
-        connection.secret,
-        payload.query,
-        limit=payload.limit,
-        languages=payload.languages,
-        skip_video_ids=existing_ids,
+    requested_at = datetime.now(UTC).isoformat()
+    run = await store.create(
+        "youtube_discovery_run",
+        actor.owner_id,
+        {
+            **payload.model_dump(mode="json"),
+            "trigger": "MANUAL",
+            "provider": "SERPAPI",
+            "provider_requested_at": requested_at,
+        },
+        state="RUNNING",
+        actor_id=actor.actor_id,
+        event_type="knowledge_youtube_discovery.requested",
     )
-    created: list[dict] = []
-    skipped = 0
-    failed: list[dict] = []
-    for result in results:
-        video = result["video"]
-        transcript = result.get("transcript")
-        if result.get("error") == "already_scraped":
-            skipped += 1
-            continue
-        if not transcript:
-            failed.append(
-                {"video_id": video.video_id, "title": video.title, "error": result.get("error")}
-            )
-            continue
-        content = f"{video.title}\n\n{video.description}\n\n{transcript}".strip()
-        content_hash = hashlib.sha256(content.encode()).hexdigest()
-        if video.video_id in existing_ids or content_hash in existing_hashes:
-            skipped += 1
-            continue
-        source = SourceInput(
-            name=video.title,
-            content=content,
-            media_type="text/plain",
-            category=payload.category,
-            tags=["youtube", "transcript", "trading"],
-            source_kind="YOUTUBE_TRANSCRIPT",
-            source_url=video.url,
-            external_id=video.video_id,
-        )
-        data = _document_data(source)
-        item = await store.create(
-            "knowledge_source",
+    try:
+        result = await ingest_youtube_discovery(
+            db,
             actor.owner_id,
+            **payload.model_dump(mode="json"),
+            actor_id=actor.actor_id,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    completed_at = datetime.now(UTC).isoformat()
+    await store.update(
+        run,
+        {**run.data, **result, "completed_at": completed_at},
+        state="SUCCEEDED",
+        actor_id=actor.actor_id,
+        event_type="knowledge_youtube_discovery.completed",
+    )
+    return {
+        **result,
+        "run_id": str(run.id),
+        "trigger": "MANUAL",
+        "provider": "SERPAPI",
+        "provider_requested_at": requested_at,
+        "completed_at": completed_at,
+    }
+
+
+@router.get("/youtube/schedule")
+async def get_youtube_schedule(
+    actor: Annotated[Actor, Depends(current_actor)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    records = await ResourceStore(db).list("youtube_discovery_schedule", actor.owner_id)
+    record = next(iter(records), None)
+    if record is None or record.state == "DELETED":
+        schedule = default_schedule(enabled=False, run_at="05:00")
+        return {
+            "configured": False,
+            **schedule,
+            "query": "trading strategy",
+            "limit": 5,
+            "languages": ["en"],
+            "category": "trading",
+            "next_run_at": None,
+            "saved_at": None,
+        }
+    schedule = normalize_schedule(
+        record.data, fallback=default_schedule(enabled=False, run_at="05:00")
+    )
+    upcoming = next_run_at(schedule)
+    return {
+        **record.public(),
+        **schedule,
+        "configured": True,
+        "next_run_at": upcoming.isoformat() if upcoming else None,
+        "saved_at": record.updated_at,
+    }
+
+
+@router.put("/youtube/schedule")
+async def save_youtube_schedule(
+    payload: YouTubeScheduleInput,
+    actor: Annotated[Actor, Depends(require_roles(Role.OWNER, Role.OPERATOR))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    store = ResourceStore(db)
+    existing = next(iter(await store.list("youtube_discovery_schedule", actor.owner_id)), None)
+    data = payload.model_dump(mode="json")
+    if existing is None or existing.state == "DELETED":
+        record = await store.create(
+            "youtube_discovery_schedule",
+            actor.owner_id,
+            data,
+            actor_id=actor.actor_id,
+            event_type="knowledge_youtube_schedule.saved",
+        )
+    else:
+        record = await store.update(
+            existing,
             data,
             state="ACTIVE",
             actor_id=actor.actor_id,
-            event_type="knowledge_youtube_ingestion.completed",
+            event_type="knowledge_youtube_schedule.replaced",
         )
-        created.append(item.public())
-        existing_ids.add(video.video_id)
-        existing_hashes.add(content_hash)
+    schedule = normalize_schedule(data, fallback=default_schedule(enabled=False, run_at="05:00"))
+    upcoming = next_run_at(schedule)
     return {
-        "query": payload.query,
-        "discovered": len(results),
-        "created": len(created),
-        "skipped": skipped,
-        "failed": failed,
-        "sources": [
-            {key: value for key, value in item.items() if key != "segments"} for item in created
-        ],
+        **record.public(),
+        **schedule,
+        "configured": True,
+        "next_run_at": upcoming.isoformat() if upcoming else None,
+        "saved_at": record.updated_at,
     }
+
+
+@router.delete("/youtube/schedule")
+async def delete_youtube_schedule(
+    actor: Annotated[Actor, Depends(require_roles(Role.OWNER, Role.OPERATOR))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    store = ResourceStore(db)
+    record = next(iter(await store.list("youtube_discovery_schedule", actor.owner_id)), None)
+    if record is not None:
+        await store.update(
+            record,
+            {**record.data, "enabled": False, "removed_at": datetime.now(UTC).isoformat()},
+            state="DELETED",
+            actor_id=actor.actor_id,
+            event_type="knowledge_youtube_schedule.removed",
+        )
+    return {
+        "configured": False,
+        **default_schedule(enabled=False, run_at="05:00"),
+        "query": "trading strategy",
+        "limit": 5,
+        "languages": ["en"],
+        "category": "trading",
+        "next_run_at": None,
+        "saved_at": None,
+    }
+
+
+@router.get("/youtube/runs")
+async def list_youtube_runs(
+    actor: Annotated[Actor, Depends(current_actor)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    return [
+        item.public()
+        for item in await ResourceStore(db).list("youtube_discovery_run", actor.owner_id)
+    ][:20]
+
+
+@router.get("/embedding-configuration")
+async def get_embedding_configuration(
+    actor: Annotated[Actor, Depends(current_actor)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    records = await ResourceStore(db).list(
+        "knowledge_embedding_configuration", actor.owner_id
+    )
+    if not records:
+        return {
+            "configured": False,
+            "provider": "LOCAL_FALLBACK",
+            "model": "deterministic-hash-v1",
+            "dimensions": 64,
+            "connection_id": None,
+            "verified_at": None,
+        }
+    return {"configured": True, **records[0].data}
+
+
+@router.put("/embedding-configuration")
+async def save_embedding_configuration(
+    payload: EmbeddingConfigurationInput,
+    actor: Annotated[Actor, Depends(require_roles(Role.OWNER, Role.OPERATOR))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    try:
+        connection = await resolve_connection(db, actor.owner_id, payload.connection_id)
+    except (LookupError, RuntimeError, ValueError) as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+    if connection.profile.provider != ConnectionProvider.OPENAI or not connection.secret:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "select an active OpenAI connection with an encrypted API key",
+        )
+    if payload.model.endswith("small") and payload.dimensions and payload.dimensions > 1536:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "text-embedding-3-small supports at most 1536 dimensions",
+        )
+    try:
+        test_vector = (
+            await openai_embeddings(
+                connection.secret,
+                ["Matrades knowledge embedding verification"],
+                model=payload.model,
+                dimensions=payload.dimensions,
+            )
+        )[0]
+        store = ResourceStore(db)
+        sources = await store.list("knowledge_source", actor.owner_id)
+        reindexed_segments = 0
+        for source in sources:
+            segments = [dict(item) for item in source.data.get("segments", [])]
+            if not segments:
+                continue
+            vectors = await openai_embeddings(
+                connection.secret,
+                [str(item["text"]) for item in segments],
+                model=payload.model,
+                dimensions=payload.dimensions,
+            )
+            for segment, vector in zip(segments, vectors, strict=True):
+                segment["embedding"] = vector
+            await store.update(
+                source,
+                {
+                    **source.data,
+                    "segments": segments,
+                    "embedding_model": payload.model,
+                    "embedding_dimensions": len(vectors[0]),
+                },
+                actor_id=actor.actor_id,
+                event_type="knowledge_embedding.reindexed",
+            )
+            reindexed_segments += len(segments)
+    except (httpx.HTTPError, RuntimeError, ValueError) as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+    configuration = {
+        "provider": "OPENAI",
+        "connection_id": str(payload.connection_id),
+        "model": payload.model,
+        "dimensions": len(test_vector),
+        "verified_at": datetime.now(UTC).isoformat(),
+        "reindexed_segments": reindexed_segments,
+    }
+    records = await store.list("knowledge_embedding_configuration", actor.owner_id)
+    if records:
+        record = await store.update(
+            records[0],
+            configuration,
+            actor_id=actor.actor_id,
+            event_type="knowledge_embedding.configuration_replaced",
+        )
+    else:
+        record = await store.create(
+            "knowledge_embedding_configuration",
+            actor.owner_id,
+            configuration,
+            actor_id=actor.actor_id,
+            event_type="knowledge_embedding.configuration_saved",
+        )
+    return {"configured": True, **record.data}
+
+
+@assistant_router.post("/answers")
+async def assistant_answer(
+    payload: AssistantInput,
+    actor: Annotated[Actor, Depends(current_actor)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Contract-compatible alias for the read-only knowledge answer endpoint."""
+    return await assistant(payload, actor, db)
 
 
 @router.get("/health")
@@ -439,11 +726,27 @@ async def health(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     sources = await ResourceStore(db).list("knowledge_source", actor.owner_id)
+    pgvector_available = bool(
+        await db.scalar(text("SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector')"))
+    )
+    embedding_configurations = await ResourceStore(db).list(
+        "knowledge_embedding_configuration", actor.owner_id
+    )
+    embedding_configuration = (
+        embedding_configurations[0].data if embedding_configurations else None
+    )
     return {
         "state": "HEALTHY",
         "authoritative": False,
         "active_sources": len(sources),
         "indexed_segments": sum(int(item.data.get("segment_count", 0)) for item in sources),
+        "pgvector_available": pgvector_available,
+        "vector_storage": "RESOURCE_JSON",
+        "embedding_model": (
+            embedding_configuration.get("model")
+            if embedding_configuration
+            else "deterministic-hash-v1"
+        ),
         "capabilities": [
             "lexical",
             "vector_hybrid",

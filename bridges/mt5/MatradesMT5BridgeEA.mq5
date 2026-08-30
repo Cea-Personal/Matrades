@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
 //| MatradesMT5BridgeEA.mq5                                          |
-//| Read-only MT5 connector for the Matrades bridge.                 |
+//| Autonomous MT5 connector for the Matrades bridge.               |
 //|                                                                  |
 //| MT5 exposes outbound WebRequest from an EA, but does not expose a  |
 //| native TCP listener.  This EA therefore publishes signed snapshots |
@@ -8,9 +8,9 @@
 //+------------------------------------------------------------------+
 #property copyright "Matrades"
 #property link      "https://github.com/matrades"
-#property version   "1.0.0"
+#property version   "1.000"
 #property strict
-#property description "Read-only MT5 snapshot publisher for Matrades"
+#property description "MT5 snapshot publisher and bounded command executor for Matrades"
 #property description "Add the bridge URL to Tools > Options > Expert Advisors > Allow WebRequest"
 
 input string InpBridgeUrl = "http://127.0.0.1:8765";
@@ -21,6 +21,9 @@ input int    InpPublishSeconds = 5;
 input int    InpRequestTimeoutMs = 5000;
 
 ulong g_sequence = 0;
+string g_processed_command_ids[];
+int g_last_publish_status = 0;
+int g_last_publish_error = 0;
 
 string BaseUrl()
   {
@@ -243,10 +246,285 @@ bool PublishSnapshot()
                          request_data,response_data,response_headers);
    if(status!=200)
      {
-      PrintFormat("Matrades bridge publish failed: HTTP %d, error %d",status,GetLastError());
+      int error=GetLastError();
+      if(status!=g_last_publish_status || error!=g_last_publish_error)
+        {
+         if(status==-1 && error==4014)
+            Print("Matrades bridge WebRequest is disabled (error 4014). Enable Algorithmic Trading, allow this EA to trade, and add InpBridgeUrl under Tools > Options > Expert Advisors > Allow WebRequest.");
+         else
+            PrintFormat("Matrades bridge publish failed: HTTP %d, error %d",status,error);
+        }
+      g_last_publish_status=status;
+      g_last_publish_error=error;
       return(false);
      }
+   if(g_last_publish_status!=200)
+      Print("Matrades bridge snapshot publishing recovered.");
+   g_last_publish_status=200;
+   g_last_publish_error=0;
    return(true);
+  }
+
+string JsonString(string body,string key)
+  {
+   string marker="\""+key+"\":\"";
+   int start=StringFind(body,marker);
+   if(start<0)
+      return("");
+   start+=StringLen(marker);
+   int end=StringFind(body,"\"",start);
+   return(end<0 ? "" : StringSubstr(body,start,end-start));
+  }
+
+double JsonNumber(string body,string key)
+  {
+   string marker="\""+key+"\":";
+   int start=StringFind(body,marker);
+   if(start<0)
+      return(0.0);
+   start+=StringLen(marker);
+   int end=start;
+   while(end<StringLen(body))
+     {
+      string character=StringSubstr(body,end,1);
+      if(character=="," || character=="}" || character=="]")
+         break;
+      end++;
+     }
+   return(StringToDouble(StringSubstr(body,start,end-start)));
+  }
+
+bool WasProcessed(string command_id)
+  {
+   string global_name="MatradesCmd_"+command_id;
+   if(GlobalVariableCheck(global_name))
+      return(true);
+   for(int index=0;index<ArraySize(g_processed_command_ids);index++)
+      if(g_processed_command_ids[index]==command_id)
+         return(true);
+   return(false);
+  }
+
+void RememberProcessed(string command_id)
+  {
+   if(StringLen(command_id)==0 || WasProcessed(command_id))
+      return;
+   int size=ArraySize(g_processed_command_ids);
+   ArrayResize(g_processed_command_ids,size+1);
+   g_processed_command_ids[size]=command_id;
+   GlobalVariableSet("MatradesCmd_"+command_id,(double)TimeCurrent());
+  }
+
+bool PostReceipt(string command_id,string idempotency_key,string state,string certainty,string broker_order_id,string error_code)
+  {
+   string body="{\"command_id\":\""+JsonEscape(command_id)+"\",\"account_id\":\""+
+               JsonEscape(InpMatradesAccountId)+"\",\"idempotency_key\":\""+
+               JsonEscape(idempotency_key)+"\",\"state\":\""+JsonEscape(state)+
+               "\",\"outcome_certainty\":\""+JsonEscape(certainty)+"\",\"broker_order_id\":\""+
+               JsonEscape(broker_order_id)+"\",\"error_code\":\""+JsonEscape(error_code)+"\"}";
+   string timestamp=IntegerToString((long)TimeGMT());
+   string nonce=NewNonce();
+   string signature=HmacSha256(timestamp+"."+nonce+"."+body,InpBridgeSecret);
+   string headers="Content-Type: application/json\r\nX-Timestamp: "+timestamp+
+                  "\r\nX-Nonce: "+nonce+"\r\nX-Signature: "+signature+"\r\n";
+   uchar request_bytes[];
+   char request_data[];
+   char response_data[];
+   StringBytes(body,request_bytes);
+   ArrayResize(request_data,ArraySize(request_bytes));
+   for(int index=0;index<ArraySize(request_bytes);index++)
+      request_data[index]=(char)request_bytes[index];
+   string response_headers="";
+   int status=WebRequest("POST",BaseUrl()+"/commands/receipts",headers,InpRequestTimeoutMs,
+                         request_data,response_data,response_headers);
+   return(status>=200 && status<300);
+  }
+
+bool ExecutePlaceOrder(string command,string &broker_order_id,string &error_code)
+  {
+   string symbol=JsonString(command,"instrument");
+   double volume=JsonNumber(command,"quantity");
+   if(StringLen(symbol)==0 || volume<=0.0)
+     {
+      error_code="invalid_order_payload";
+      return(false);
+     }
+   if(!SymbolSelect(symbol,true))
+     {
+      error_code="symbol_unavailable";
+      return(false);
+     }
+   MqlTradeRequest request={};
+   MqlTradeResult result={};
+   request.action=TRADE_ACTION_DEAL;
+   request.symbol=symbol;
+   request.volume=volume;
+   request.type=JsonString(command,"direction")=="SELL" ? ORDER_TYPE_SELL : ORDER_TYPE_BUY;
+   request.price=request.type==ORDER_TYPE_SELL ? SymbolInfoDouble(symbol,SYMBOL_BID) : SymbolInfoDouble(symbol,SYMBOL_ASK);
+   request.sl=JsonNumber(command,"stop_loss");
+   request.tp=JsonNumber(command,"take_profit");
+   request.deviation=20;
+   request.type_filling=ORDER_FILLING_FOK;
+   if(!OrderSend(request,result) || (result.retcode!=TRADE_RETCODE_DONE && result.retcode!=TRADE_RETCODE_PLACED))
+     {
+      error_code=IntegerToString((long)(result.retcode>0 ? result.retcode : GetLastError()));
+      return(false);
+     }
+   broker_order_id=IntegerToString((long)result.order);
+   return(true);
+  }
+
+bool SelectCommandPosition(string command,string symbol,ulong &ticket)
+  {
+   long supplied=(long)JsonNumber(command,"position_id");
+   if(supplied>0 && PositionSelectByTicket((ulong)supplied))
+     {
+      ticket=(ulong)supplied;
+      return(true);
+     }
+   if(StringLen(symbol)>0 && PositionSelect(symbol))
+     {
+      ticket=(ulong)PositionGetInteger(POSITION_TICKET);
+      return(true);
+     }
+   return(false);
+  }
+
+bool ExecuteClose(string command,string &broker_order_id,string &error_code)
+  {
+   string symbol=JsonString(command,"instrument");
+   ulong ticket=0;
+   if(!SelectCommandPosition(command,symbol,ticket))
+     {
+      error_code="position_unavailable";
+      return(false);
+     }
+   double current_volume=PositionGetDouble(POSITION_VOLUME);
+   double volume=JsonNumber(command,"quantity");
+   if(volume<=0.0 || volume>current_volume)
+      volume=current_volume;
+   long position_type=PositionGetInteger(POSITION_TYPE);
+   MqlTradeRequest request={};
+   MqlTradeResult result={};
+   request.action=TRADE_ACTION_DEAL;
+   request.position=ticket;
+   request.symbol=PositionGetString(POSITION_SYMBOL);
+   request.volume=volume;
+   request.type=position_type==POSITION_TYPE_BUY ? ORDER_TYPE_SELL : ORDER_TYPE_BUY;
+   request.price=request.type==ORDER_TYPE_SELL ? SymbolInfoDouble(request.symbol,SYMBOL_BID) : SymbolInfoDouble(request.symbol,SYMBOL_ASK);
+   request.deviation=20;
+   request.type_filling=ORDER_FILLING_FOK;
+   if(!OrderSend(request,result) || (result.retcode!=TRADE_RETCODE_DONE && result.retcode!=TRADE_RETCODE_PLACED))
+     {
+      error_code=IntegerToString((long)(result.retcode>0 ? result.retcode : GetLastError()));
+      return(false);
+     }
+   broker_order_id=IntegerToString((long)result.order);
+   return(true);
+  }
+
+bool ExecuteProtection(string command,string &broker_order_id,string &error_code)
+  {
+   string symbol=JsonString(command,"instrument");
+   ulong ticket=0;
+   if(!SelectCommandPosition(command,symbol,ticket))
+     {
+      error_code="position_unavailable";
+      return(false);
+     }
+   MqlTradeRequest request={};
+   MqlTradeResult result={};
+   request.action=TRADE_ACTION_SLTP;
+   request.position=ticket;
+   request.symbol=PositionGetString(POSITION_SYMBOL);
+   request.sl=JsonNumber(command,"stop_loss");
+   request.tp=JsonNumber(command,"take_profit");
+   if(!OrderSend(request,result) || result.retcode!=TRADE_RETCODE_DONE)
+     {
+      error_code=IntegerToString((long)(result.retcode>0 ? result.retcode : GetLastError()));
+      return(false);
+     }
+   broker_order_id=IntegerToString((long)result.order);
+   return(true);
+  }
+
+bool ExecuteCancel(string command,string &broker_order_id,string &error_code)
+  {
+   ulong order=(ulong)JsonNumber(command,"order_id");
+   if(order==0)
+     {
+      error_code="order_id_required";
+      return(false);
+     }
+   MqlTradeRequest request={};
+   MqlTradeResult result={};
+   request.action=TRADE_ACTION_REMOVE;
+   request.order=order;
+   if(!OrderSend(request,result) || result.retcode!=TRADE_RETCODE_DONE)
+     {
+      error_code=IntegerToString((long)(result.retcode>0 ? result.retcode : GetLastError()));
+      return(false);
+     }
+   broker_order_id=IntegerToString((long)order);
+   return(true);
+  }
+
+void PollCommands()
+  {
+   string timestamp=IntegerToString((long)TimeGMT());
+   string nonce=NewNonce();
+   string signature=HmacSha256(timestamp+"."+nonce+".",InpBridgeSecret);
+   string headers="X-Timestamp: "+timestamp+"\r\nX-Nonce: "+nonce+"\r\nX-Signature: "+signature+"\r\n";
+   char empty_request[];
+   char response_data[];
+   string response_headers="";
+   string url=BaseUrl()+"/commands/poll?account_id="+InpMatradesAccountId+"&limit=10";
+   int status=WebRequest("GET",url,headers,InpRequestTimeoutMs,empty_request,response_data,response_headers);
+   if(status!=200)
+      return;
+   string response=CharArrayToString(response_data);
+   int cursor=0;
+   while((cursor=StringFind(response,"\"command_id\":\"",cursor))>=0)
+     {
+      int object_end=StringFind(response,"}",cursor);
+      if(object_end<0)
+         break;
+      string command=StringSubstr(response,cursor,object_end-cursor+1);
+      string command_id=JsonString(command,"command_id");
+      string key=JsonString(command,"idempotency_key");
+      string action=JsonString(command,"action");
+      string order_id="";
+      string error_code="";
+      bool success=false;
+      if(JsonString(command,"account_id")!=InpMatradesAccountId ||
+         StringLen(JsonString(command,"authorization_digest"))==0)
+        {
+         PostReceipt(command_id,key,"REJECTED","NONE","","invalid_safety_scope");
+         RememberProcessed(command_id);
+         cursor=object_end+1;
+         continue;
+        }
+      if(WasProcessed(command_id))
+        {
+         PostReceipt(command_id,key,"OUTCOME_UNKNOWN","UNCERTAIN","","duplicate_after_restart");
+         cursor=object_end+1;
+         continue;
+        }
+      if(action=="PLACE_ORDER")
+         success=ExecutePlaceOrder(command,order_id,error_code);
+      else if(action=="PARTIAL_CLOSE" || action=="FULL_EXIT")
+         success=ExecuteClose(command,order_id,error_code);
+      else if(action=="SET_OR_CHANGE_STOP_LOSS" || action=="SET_OR_CHANGE_TAKE_PROFIT")
+         success=ExecuteProtection(command,order_id,error_code);
+      else if(action=="CANCEL_ORDER")
+         success=ExecuteCancel(command,order_id,error_code);
+      else
+         error_code="unsupported_action";
+      RememberProcessed(command_id);
+      PostReceipt(command_id,key,success ? "ACKNOWLEDGED" : "REJECTED",
+                  success ? "CONFIRMED" : "NONE",order_id,error_code);
+      cursor=object_end+1;
+     }
   }
 
 int OnInit()
@@ -270,9 +548,12 @@ int OnInit()
      }
    if(InpPublishSeconds<1)
       return(INIT_PARAMETERS_INCORRECT);
+   if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) || !MQLInfoInteger(MQL_TRADE_ALLOWED))
+      Print("Matrades bridge warning: Algorithmic Trading is disabled for the terminal or this EA; WebRequest and authorized command execution will remain unavailable.");
    MathSrand((int)GetTickCount());
    EventSetTimer(InpPublishSeconds);
    PublishSnapshot();
+   PollCommands();
    PrintFormat("Matrades MT5 bridge EA started for account %s",InpMatradesAccountId);
    return(INIT_SUCCEEDED);
   }
@@ -287,6 +568,7 @@ void OnTimer()
    if(!TerminalInfoInteger(TERMINAL_CONNECTED))
       return;
    PublishSnapshot();
+   PollCommands();
   }
 
 void OnTick()

@@ -41,6 +41,37 @@ class BrokerPosition(BaseModel):
     financing: Decimal | None = None
 
 
+class BrokerOrder(BaseModel):
+    order_id: str
+    account_id: UUID
+    command_id: UUID | None = None
+    client_order_id: str | None = None
+    symbol: str
+    direction: BrokerDirection
+    requested_volume: Decimal
+    filled_volume: Decimal = Decimal("0")
+    average_fill_price: Decimal | None = None
+    state: str
+    version: int = Field(default=1, ge=1)
+    observed_at: AwareDateTime
+    asset_class: AssetClass | None = None
+    instrument_type: InstrumentType | None = None
+    venue_instrument_id: UUID | None = None
+    futures_contract_id: UUID | None = None
+    specification_version_id: UUID | None = None
+    quantity_unit: QuantityUnit | None = None
+
+
+class BrokerFill(BaseModel):
+    fill_id: str
+    account_id: UUID
+    order_id: str
+    quantity: Decimal = Field(gt=0)
+    price: Decimal = Field(gt=0)
+    revision: int = Field(default=1, ge=1)
+    observed_at: AwareDateTime
+
+
 class BrokerSnapshot(BaseModel):
     message_id: UUID = Field(default_factory=uuid4)
     account_id: UUID
@@ -50,6 +81,8 @@ class BrokerSnapshot(BaseModel):
     equity: Decimal
     realized_daily_pnl: Decimal
     positions: list[BrokerPosition]
+    orders: list[BrokerOrder] = Field(default_factory=list)
+    fills: list[BrokerFill] = Field(default_factory=list)
     signature: str
 
 

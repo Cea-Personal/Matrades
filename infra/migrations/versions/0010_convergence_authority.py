@@ -9,8 +9,13 @@ branch_labels = None
 depends_on = None
 
 
+def _create_table_if_missing(name: str, *columns) -> None:
+    if name not in sa.inspect(op.get_bind()).get_table_names():
+        op.create_table(name, *columns)
+
+
 def upgrade():
-    op.create_table(
+    _create_table_if_missing(
         "auth_users",
         sa.Column("id", sa.Uuid(), primary_key=True),
         sa.Column("owner_id", sa.Uuid(), nullable=False, index=True),
@@ -23,7 +28,7 @@ def upgrade():
         sa.Column("recovery_code_hashes", sa.JSON(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
     )
-    op.create_table(
+    _create_table_if_missing(
         "auth_sessions",
         sa.Column("id", sa.Uuid(), primary_key=True),
         sa.Column("user_id", sa.Uuid(), nullable=False, index=True),
@@ -35,7 +40,7 @@ def upgrade():
         sa.Column("step_up_at", sa.DateTime(timezone=True)),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
     )
-    op.create_table(
+    _create_table_if_missing(
         "auth_tokens",
         sa.Column("id", sa.Uuid(), primary_key=True),
         sa.Column("user_id", sa.Uuid(), nullable=False, index=True),
@@ -46,7 +51,7 @@ def upgrade():
         sa.Column("used_at", sa.DateTime(timezone=True)),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
     )
-    op.create_table(
+    _create_table_if_missing(
         "resource_records",
         sa.Column("id", sa.Uuid(), primary_key=True),
         sa.Column("owner_id", sa.Uuid(), nullable=False, index=True),
@@ -57,7 +62,7 @@ def upgrade():
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
     )
-    op.create_table(
+    _create_table_if_missing(
         "audit_records",
         sa.Column("id", sa.Uuid(), primary_key=True),
         sa.Column("owner_id", sa.Uuid(), nullable=False, index=True),
@@ -69,7 +74,7 @@ def upgrade():
         sa.Column("evidence", sa.JSON(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
     )
-    op.create_table(
+    _create_table_if_missing(
         "idempotency_records",
         sa.Column("owner_id", sa.Uuid(), primary_key=True),
         sa.Column("key", sa.String(160), primary_key=True),
@@ -77,7 +82,7 @@ def upgrade():
         sa.Column("response", sa.JSON(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
     )
-    op.create_table(
+    _create_table_if_missing(
         "outbox_events",
         sa.Column("event_id", sa.Uuid(), primary_key=True),
         sa.Column("owner_id", sa.Uuid(), nullable=False, index=True),

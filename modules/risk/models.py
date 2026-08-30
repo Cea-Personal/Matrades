@@ -66,6 +66,7 @@ class RiskContext(BaseModel):
     include_unrealized_profit: bool = False
     instrument_specifications: dict[str, dict[str, Decimal | str]] = {}
     current_source_cut_id: str | None = None
+    active_reservations: list[Decimal] = []
 
 
 class RiskDecision(StrEnum):

@@ -1,0 +1,395 @@
+- generic [active] [ref=f4e1]:
+  - alert [ref=f4e3]
+  - generic [ref=f4e4]:
+    - complementary [ref=f4e5]:
+      - link "MATRADES" [ref=f4e6] [cursor=pointer]:
+        - /url: /
+      - paragraph [ref=f4e7]: Evidence, automation, and accountable execution.
+      - navigation "Primary" [ref=f4e8]:
+        - link "Overview" [ref=f4e9] [cursor=pointer]:
+          - /url: /
+        - link "Trade desk" [ref=f4e10] [cursor=pointer]:
+          - /url: /trading
+        - link "Research" [ref=f4e11] [cursor=pointer]:
+          - /url: /research
+        - link "Strategies" [ref=f4e12] [cursor=pointer]:
+          - /url: /strategies
+        - link "Connections" [ref=f4e13] [cursor=pointer]:
+          - /url: /connections
+        - link "Configuration" [ref=f4e14] [cursor=pointer]:
+          - /url: /configuration
+        - link "Agents" [ref=f4e15] [cursor=pointer]:
+          - /url: /agents
+        - link "Knowledge" [ref=f4e16] [cursor=pointer]:
+          - /url: /knowledge
+        - link "Operations" [ref=f4e17] [cursor=pointer]:
+          - /url: /operations
+        - generic [ref=f4e18]:
+          - link "Extras" [ref=f4e19] [cursor=pointer]:
+            - /url: /extras
+          - link "Market research" [ref=f4e20] [cursor=pointer]:
+            - /url: /extras?folder=market-research
+          - link "Strategy research" [ref=f4e21] [cursor=pointer]:
+            - /url: /extras?folder=strategy-research
+          - link "Trade recommendations" [ref=f4e22] [cursor=pointer]:
+            - /url: /extras?folder=trade-recommendations
+          - link "Generated code" [ref=f4e23] [cursor=pointer]:
+            - /url: /extras?folder=generated-code
+          - link "MT5 bridge EA" [ref=f4e24] [cursor=pointer]:
+            - /url: /extras?folder=mt5-bridge-ea
+      - generic [ref=f4e25]:
+        - generic [ref=f4e26]: ogbonna.basil3@gmail.com
+        - generic [ref=f4e27]: OWNER
+        - button "Sign out" [ref=f4e28] [cursor=pointer]
+    - main [ref=f4e29]:
+      - generic [ref=f4e30]:
+        - generic [ref=f4e31]:
+          - paragraph [ref=f4e32]: Runtime authority
+          - heading "Agent runtimes & model profiles" [level=1] [ref=f4e33]
+          - paragraph [ref=f4e34]: Codex App Server is the default. LiteLLM is an explicit, independently configurable alternative.
+        - generic [ref=f4e35]:
+          - article [ref=f4e36]:
+            - heading "CODEX APP SERVER" [level=2] [ref=f4e37]
+            - generic [ref=f4e38]: Enabled
+            - paragraph [ref=f4e39]: Platform default · explicit assignment
+          - article [ref=f4e40]:
+            - heading "LITELLM GATEWAY" [level=2] [ref=f4e41]
+            - generic [ref=f4e42]: Disabled
+            - paragraph [ref=f4e43]: Explicit opt-in only · explicit assignment
+            - generic [ref=f4e44]: API key not configured · http://localhost:4000
+        - generic [ref=f4e45]:
+          - heading "Platform runtime controls" [level=2] [ref=f4e46]
+          - paragraph [ref=f4e47]:
+            - text: Enable LiteLLM here, save, then restart the agent-worker. For Docker, start the optional gateway with
+            - code [ref=f4e48]: docker compose --profile litellm up -d litellm
+            - text: . Use
+            - code [ref=f4e49]: http://litellm:4000
+            - text: from the worker container or
+            - code [ref=f4e50]: http://localhost:4000
+            - text: from a local worker.
+          - generic [ref=f4e51]:
+            - checkbox "Codex App Server enabled" [checked] [ref=f4e52]
+            - text: Codex App Server enabled
+          - generic [ref=f4e53]:
+            - checkbox "LiteLLM gateway enabled" [ref=f4e54]
+            - text: LiteLLM gateway enabled
+          - generic [ref=f4e55]:
+            - text: LiteLLM URL
+            - textbox "LiteLLM URL" [ref=f4e56]: http://localhost:4000
+          - generic [ref=f4e57]:
+            - text: LiteLLM API key
+            - textbox "LiteLLM API key" [ref=f4e58]:
+              - /placeholder: Gateway key
+          - generic [ref=f4e59]:
+            - text: Default Codex model
+            - textbox "Default Codex model" [ref=f4e60]: gpt-5.6-terra
+          - generic [ref=f4e61]:
+            - button "Save runtime settings" [ref=f4e62] [cursor=pointer]
+            - button "Test LiteLLM gateway" [ref=f4e63] [cursor=pointer]
+          - paragraph [ref=f4e64]: Runtime settings are persisted encrypted. Restart agent-worker to apply them.
+        - generic [ref=f4e65]:
+          - heading "Create immutable model profile" [level=2] [ref=f4e66]
+          - generic [ref=f4e67]:
+            - text: Name
+            - textbox "Name" [ref=f4e68]
+          - generic [ref=f4e69]:
+            - text: Runtime
+            - combobox "Runtime" [ref=f4e70]:
+              - option "CODEX_APP_SERVER" [selected]
+              - option "LITELLM_GATEWAY"
+          - generic [ref=f4e71]:
+            - text: Provider
+            - textbox "Provider" [ref=f4e72]: openai
+          - generic [ref=f4e73]:
+            - text: Model
+            - textbox "Model" [ref=f4e74]:
+              - /placeholder: Configured runtime model
+          - generic [ref=f4e75]:
+            - text: Same-runtime fallback
+            - listbox "Same-runtime fallback" [ref=f4e76]:
+              - option "Matrades Codex default · gpt-5.6-terra" [ref=f4e77]
+          - button "Save profile version" [ref=f4e78] [cursor=pointer]
+        - article [ref=f4e79]:
+          - heading "Profile catalog" [level=2] [ref=f4e80]
+          - table [ref=f4e82]:
+            - rowgroup [ref=f4e83]:
+              - row [ref=f4e84]:
+                - columnheader "Name" [ref=f4e85]
+                - columnheader "Runtime" [ref=f4e86]
+                - columnheader "Provider / model" [ref=f4e87]
+                - columnheader "Fallbacks" [ref=f4e88]
+            - rowgroup [ref=f4e89]:
+              - row [ref=f4e90]:
+                - cell "Matrades Codex default" [ref=f4e91]
+                - cell "CODEX_APP_SERVER" [ref=f4e92]
+                - cell "openai / gpt-5.6-terra" [ref=f4e93]
+                - cell "0" [ref=f4e94]
+      - article [ref=f4e96]:
+        - generic [ref=f4e97]:
+          - generic [ref=f4e98]:
+            - heading "Logical agent registry" [level=2] [ref=f4e99]
+            - paragraph [ref=f4e100]: Configured runtime is intent; Actual runtime, model, execution ID, and timestamp below come from persisted execution evidence.
+          - button "Test all logical agents" [ref=f4e101] [cursor=pointer]
+        - paragraph [ref=f4e102]: "Codex App Server worker heartbeat: healthy · authentication: HOST_MOUNTED_AUTH_JSON"
+        - paragraph [ref=f4e103]: You do not sign into Codex through this web app. The isolated agent-worker uses the host Codex authentication mounted into the container. A successful Test creates the proof record shown below.
+        - table [ref=f4e105]:
+          - rowgroup [ref=f4e106]:
+            - row [ref=f4e107]:
+              - columnheader "Agent" [ref=f4e108]
+              - columnheader "Configured" [ref=f4e109]
+              - columnheader "Actual runtime / model" [ref=f4e110]
+              - columnheader "Last execution evidence" [ref=f4e111]
+              - columnheader "Model profile" [ref=f4e112]
+              - columnheader "Tools" [ref=f4e113]
+              - columnheader [ref=f4e114]
+          - rowgroup [ref=f4e115]:
+            - row [ref=f4e116]:
+              - cell [ref=f4e117]:
+                - strong [ref=f4e118]: orchestrator
+                - text: protected
+              - cell "CODEX_APP_SERVER" [ref=f4e119]
+              - cell "CODEX_APP_SERVERgpt-5.6-terra" [ref=f4e120]
+              - cell "SUCCEEDED0b2b8a69-62d · 25/08/2026, 13:00:37 · 17203 ms" [ref=f4e121]:
+                - text: SUCCEEDED
+                - generic [ref=f4e122]: 0b2b8a69-62d · 25/08/2026, 13:00:37 · 17203 ms
+              - cell "Platform Codex default" [ref=f4e123]
+              - cell "v1" [ref=f4e124]
+              - cell [ref=f4e125]:
+                - button "Configure" [ref=f4e126] [cursor=pointer]
+                - button "Test" [disabled] [ref=f4e127]
+            - row [ref=f4e128]:
+              - cell [ref=f4e129]:
+                - strong [ref=f4e130]: forex_research
+                - text: protected
+              - cell "CODEX_APP_SERVER" [ref=f4e131]
+              - cell "CODEX_APP_SERVERgpt-5.6-terra" [ref=f4e132]
+              - cell "SUCCEEDED2fda7b06-726 · 25/08/2026, 13:01:00 · 41058 ms" [ref=f4e133]:
+                - text: SUCCEEDED
+                - generic [ref=f4e134]: 2fda7b06-726 · 25/08/2026, 13:01:00 · 41058 ms
+              - cell "Platform Codex default" [ref=f4e135]
+              - cell "v1" [ref=f4e136]
+              - cell [ref=f4e137]:
+                - button "Configure" [ref=f4e138] [cursor=pointer]
+                - button "Test" [disabled] [ref=f4e139]
+            - row [ref=f4e140]:
+              - cell [ref=f4e141]:
+                - strong [ref=f4e142]: metals_research
+                - text: protected
+              - cell "CODEX_APP_SERVER" [ref=f4e143]
+              - cell "CODEX_APP_SERVERgpt-5.6-terra" [ref=f4e144]
+              - cell "SUCCEEDEDdc7b377a-ff6 · 25/08/2026, 13:00:30 · 11094 ms" [ref=f4e145]:
+                - text: SUCCEEDED
+                - generic [ref=f4e146]: dc7b377a-ff6 · 25/08/2026, 13:00:30 · 11094 ms
+              - cell "Platform Codex default" [ref=f4e147]
+              - cell "v1" [ref=f4e148]
+              - cell [ref=f4e149]:
+                - button "Configure" [ref=f4e150] [cursor=pointer]
+                - button "Test" [disabled] [ref=f4e151]
+            - row [ref=f4e152]:
+              - cell [ref=f4e153]:
+                - strong [ref=f4e154]: crypto_research
+                - text: protected
+              - cell "CODEX_APP_SERVER" [ref=f4e155]
+              - cell "CODEX_APP_SERVERgpt-5.6-terra" [ref=f4e156]
+              - cell "SUCCEEDED02eb5568-308 · 25/08/2026, 13:01:06 · 47014 ms" [ref=f4e157]:
+                - text: SUCCEEDED
+                - generic [ref=f4e158]: 02eb5568-308 · 25/08/2026, 13:01:06 · 47014 ms
+              - cell "Platform Codex default" [ref=f4e159]
+              - cell "v1" [ref=f4e160]
+              - cell [ref=f4e161]:
+                - button "Configure" [ref=f4e162] [cursor=pointer]
+                - button "Test" [disabled] [ref=f4e163]
+            - row [ref=f4e164]:
+              - cell [ref=f4e165]:
+                - strong [ref=f4e166]: stocks_research
+                - text: protected
+              - cell "CODEX_APP_SERVER" [ref=f4e167]
+              - cell "Not testedNo model evidence yet" [ref=f4e168]
+              - cell "Not tested" [ref=f4e169]
+              - cell "Platform Codex default" [ref=f4e170]
+              - cell "v1" [ref=f4e171]
+              - cell [ref=f4e172]:
+                - button "Configure" [ref=f4e173] [cursor=pointer]
+                - button "Test" [disabled] [ref=f4e174]
+            - row [ref=f4e175]:
+              - cell [ref=f4e176]:
+                - strong [ref=f4e177]: technical_analyst
+                - text: protected
+              - cell "CODEX_APP_SERVER" [ref=f4e178]
+              - cell "CODEX_APP_SERVERgpt-5.6-terra" [ref=f4e179]
+              - cell "SUCCEEDED5ab69851-0ed · 25/08/2026, 13:01:18 · 47212 ms" [ref=f4e180]:
+                - text: SUCCEEDED
+                - generic [ref=f4e181]: 5ab69851-0ed · 25/08/2026, 13:01:18 · 47212 ms
+              - cell "Platform Codex default" [ref=f4e182]
+              - cell "v1" [ref=f4e183]
+              - cell [ref=f4e184]:
+                - button "Configure" [ref=f4e185] [cursor=pointer]
+                - button "Test" [disabled] [ref=f4e186]
+            - row [ref=f4e187]:
+              - cell [ref=f4e188]:
+                - strong [ref=f4e189]: fundamental_analyst
+                - text: protected
+              - cell "CODEX_APP_SERVER" [ref=f4e190]
+              - cell "CODEX_APP_SERVERgpt-5.6-terra" [ref=f4e191]
+              - cell "SUCCEEDED5a3720d0-a4e · 25/08/2026, 13:00:25 · 5330 ms" [ref=f4e192]:
+                - text: SUCCEEDED
+                - generic [ref=f4e193]: 5a3720d0-a4e · 25/08/2026, 13:00:25 · 5330 ms
+              - cell "Platform Codex default" [ref=f4e194]
+              - cell "v1" [ref=f4e195]
+              - cell [ref=f4e196]:
+                - button "Configure" [ref=f4e197] [cursor=pointer]
+                - button "Test" [disabled] [ref=f4e198]
+            - row [ref=f4e199]:
+              - cell [ref=f4e200]:
+                - strong [ref=f4e201]: sentiment_analyst
+                - text: protected
+              - cell "CODEX_APP_SERVER" [ref=f4e202]
+              - cell "CODEX_APP_SERVERgpt-5.6-terra" [ref=f4e203]
+              - cell "SUCCEEDED026289a5-f75 · 25/08/2026, 13:01:12 · 47187 ms" [ref=f4e204]:
+                - text: SUCCEEDED
+                - generic [ref=f4e205]: 026289a5-f75 · 25/08/2026, 13:01:12 · 47187 ms
+              - cell "Platform Codex default" [ref=f4e206]
+              - cell "v1" [ref=f4e207]
+              - cell [ref=f4e208]:
+                - button "Configure" [ref=f4e209] [cursor=pointer]
+                - button "Test" [disabled] [ref=f4e210]
+            - row [ref=f4e211]:
+              - cell [ref=f4e212]:
+                - strong [ref=f4e213]: regime_analyst
+                - text: protected
+              - cell "CODEX_APP_SERVER" [ref=f4e214]
+              - cell "CODEX_APP_SERVERgpt-5.6-terra" [ref=f4e215]
+              - cell "SUCCEEDED9174d599-49f · 25/08/2026, 13:01:24 · 47437 ms" [ref=f4e216]:
+                - text: SUCCEEDED
+                - generic [ref=f4e217]: 9174d599-49f · 25/08/2026, 13:01:24 · 47437 ms
+              - cell "Platform Codex default" [ref=f4e218]
+              - cell "v1" [ref=f4e219]
+              - cell [ref=f4e220]:
+                - button "Configure" [ref=f4e221] [cursor=pointer]
+                - button "Test" [disabled] [ref=f4e222]
+            - row [ref=f4e223]:
+              - cell [ref=f4e224]:
+                - strong [ref=f4e225]: strategy_selector
+                - text: protected
+              - cell "CODEX_APP_SERVER" [ref=f4e226]
+              - cell "CODEX_APP_SERVERgpt-5.6-terra" [ref=f4e227]
+              - cell "SUCCEEDEDed729bb6-9b0 · 25/08/2026, 13:01:48 · 55578 ms" [ref=f4e228]:
+                - text: SUCCEEDED
+                - generic [ref=f4e229]: ed729bb6-9b0 · 25/08/2026, 13:01:48 · 55578 ms
+              - cell "Platform Codex default" [ref=f4e230]
+              - cell "v1" [ref=f4e231]
+              - cell [ref=f4e232]:
+                - button "Configure" [ref=f4e233] [cursor=pointer]
+                - button "Test" [disabled] [ref=f4e234]
+            - row [ref=f4e235]:
+              - cell [ref=f4e236]:
+                - strong [ref=f4e237]: strategy_researcher
+                - text: protected
+              - cell "CODEX_APP_SERVER" [ref=f4e238]
+              - cell "CODEX_APP_SERVERgpt-5.6-terra" [ref=f4e239]
+              - cell "SUCCEEDED66ab544e-deb · 25/08/2026, 13:01:29 · 37032 ms" [ref=f4e240]:
+                - text: SUCCEEDED
+                - generic [ref=f4e241]: 66ab544e-deb · 25/08/2026, 13:01:29 · 37032 ms
+              - cell "Platform Codex default" [ref=f4e242]
+              - cell "v1" [ref=f4e243]
+              - cell [ref=f4e244]:
+                - button "Configure" [ref=f4e245] [cursor=pointer]
+                - button "Test" [disabled] [ref=f4e246]
+            - row [ref=f4e247]:
+              - cell [ref=f4e248]:
+                - strong [ref=f4e249]: strategy_assistant
+                - text: protected
+              - cell "CODEX_APP_SERVER" [ref=f4e250]
+              - cell "CODEX_APP_SERVERgpt-5.6-terra" [ref=f4e251]
+              - cell "SUCCEEDEDb1b6c966-f19 · 25/08/2026, 13:01:35 · 42719 ms" [ref=f4e252]:
+                - text: SUCCEEDED
+                - generic [ref=f4e253]: b1b6c966-f19 · 25/08/2026, 13:01:35 · 42719 ms
+              - cell "Platform Codex default" [ref=f4e254]
+              - cell "v1" [ref=f4e255]
+              - cell [ref=f4e256]:
+                - button "Configure" [ref=f4e257] [cursor=pointer]
+                - button "Test" [disabled] [ref=f4e258]
+            - row [ref=f4e259]:
+              - cell [ref=f4e260]:
+                - strong [ref=f4e261]: critic
+                - text: protected
+              - cell "CODEX_APP_SERVER" [ref=f4e262]
+              - cell "CODEX_APP_SERVERgpt-5.6-terra" [ref=f4e263]
+              - cell "SUCCEEDED11ee322e-58a · 25/08/2026, 13:01:53 · 60536 ms" [ref=f4e264]:
+                - text: SUCCEEDED
+                - generic [ref=f4e265]: 11ee322e-58a · 25/08/2026, 13:01:53 · 60536 ms
+              - cell "Platform Codex default" [ref=f4e266]
+              - cell "v1" [ref=f4e267]
+              - cell [ref=f4e268]:
+                - button "Configure" [ref=f4e269] [cursor=pointer]
+                - button "Test" [disabled] [ref=f4e270]
+            - row [ref=f4e271]:
+              - cell [ref=f4e272]:
+                - strong [ref=f4e273]: trade_monitor
+                - text: protected
+              - cell "CODEX_APP_SERVER" [ref=f4e274]
+              - cell "CODEX_APP_SERVERgpt-5.6-terra" [ref=f4e275]
+              - cell "SUCCEEDEDa781cbf6-bbd · 25/08/2026, 13:02:04 · 72097 ms" [ref=f4e276]:
+                - text: SUCCEEDED
+                - generic [ref=f4e277]: a781cbf6-bbd · 25/08/2026, 13:02:04 · 72097 ms
+              - cell "Platform Codex default" [ref=f4e278]
+              - cell "v1" [ref=f4e279]
+              - cell [ref=f4e280]:
+                - button "Configure" [ref=f4e281] [cursor=pointer]
+                - button "Test" [disabled] [ref=f4e282]
+            - row [ref=f4e283]:
+              - cell [ref=f4e284]:
+                - strong [ref=f4e285]: journal
+                - text: protected
+              - cell "CODEX_APP_SERVER" [ref=f4e286]
+              - cell "CODEX_APP_SERVERgpt-5.6-terra" [ref=f4e287]
+              - cell "SUCCEEDEDb914c118-932 · 25/08/2026, 13:01:42 · 49604 ms" [ref=f4e288]:
+                - text: SUCCEEDED
+                - generic [ref=f4e289]: b914c118-932 · 25/08/2026, 13:01:42 · 49604 ms
+              - cell "Platform Codex default" [ref=f4e290]
+              - cell "v1" [ref=f4e291]
+              - cell [ref=f4e292]:
+                - button "Configure" [ref=f4e293] [cursor=pointer]
+                - button "Test" [disabled] [ref=f4e294]
+            - row [ref=f4e295]:
+              - cell [ref=f4e296]:
+                - strong [ref=f4e297]: performance
+                - text: protected
+              - cell "CODEX_APP_SERVER" [ref=f4e298]
+              - cell "CODEX_APP_SERVERgpt-5.6-terra" [ref=f4e299]
+              - cell "SUCCEEDEDd3531934-6a2 · 25/08/2026, 13:01:59 · 66783 ms" [ref=f4e300]:
+                - text: SUCCEEDED
+                - generic [ref=f4e301]: d3531934-6a2 · 25/08/2026, 13:01:59 · 66783 ms
+              - cell "Platform Codex default" [ref=f4e302]
+              - cell "v1" [ref=f4e303]
+              - cell [ref=f4e304]:
+                - button "Configure" [ref=f4e305] [cursor=pointer]
+                - button "Test" [disabled] [ref=f4e306]
+            - row [ref=f4e307]:
+              - cell [ref=f4e308]:
+                - strong [ref=f4e309]: knowledge_assistant
+                - text: protected
+              - cell "CODEX_APP_SERVER" [ref=f4e310]
+              - cell "Not testedNo model evidence yet" [ref=f4e311]
+              - cell "Not tested" [ref=f4e312]
+              - cell "Platform Codex default" [ref=f4e313]
+              - cell "v1" [ref=f4e314]
+              - cell [ref=f4e315]:
+                - button "Configure" [ref=f4e316] [cursor=pointer]
+                - button "Test" [disabled] [ref=f4e317]
+      - article [ref=f4e318]:
+        - heading "Prompt resolution preview" [level=2] [ref=f4e319]
+        - generic [ref=f4e320]:
+          - generic [ref=f4e321]:
+            - text: Agent system override
+            - textbox "Agent system override" [ref=f4e322]
+          - generic [ref=f4e323]:
+            - text: Agent user override
+            - textbox "Agent user override" [ref=f4e324]
+          - generic [ref=f4e325]:
+            - text: Orchestrator system
+            - textbox "Orchestrator system" [ref=f4e326]
+          - generic [ref=f4e327]:
+            - text: Orchestrator user
+            - textbox "Orchestrator user" [ref=f4e328]
+        - button "Preview independent chains" [ref=f4e329] [cursor=pointer]

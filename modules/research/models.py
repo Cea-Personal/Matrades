@@ -141,6 +141,7 @@ class ResearchLaneResult(BaseModel):
     lane: ResearchLaneKey
     status: LaneStatus
     candidate: TypedResearchCandidate | None = None
+    ranked_candidates: list[TypedResearchCandidate] = Field(default_factory=list)
     exclusions: list[str] = Field(default_factory=list)
     binding_id: UUID | None = None
     source_cut_refs: list[str] = Field(default_factory=list)
@@ -154,8 +155,15 @@ class ResearchLaneResult(BaseModel):
                 raise ValueError("READY lane requires a candidate")
             if self.candidate.lane != self.lane:
                 raise ValueError("candidate lane does not match result lane")
+            if (
+                self.ranked_candidates
+                and self.ranked_candidates[0].candidate_id != self.candidate.candidate_id
+            ):
+                raise ValueError("first ranked candidate must be the selected candidate")
         elif self.candidate is not None:
             raise ValueError("non-ready lane cannot contain a candidate")
+        elif self.ranked_candidates:
+            raise ValueError("non-ready lane cannot contain ranked candidates")
         return self
 
 

@@ -7,6 +7,7 @@ from modules.risk.engine import RiskEngine
 from modules.risk.models import CandidateTrade, RiskContext, RiskDecision
 from modules.risk.reservations import ReservationBook
 from modules.trading.critic import CriticResult
+from modules.trading.legacy_compatibility import reject_new_write
 from modules.trading.models import TradeProposal
 
 
@@ -27,6 +28,7 @@ class ProposalService:
         invalidation: str,
         critic: CriticResult,
     ) -> TradeProposal:
+        reject_new_write("manual Trade Proposals")
         if not critic.accepted:
             raise ValueError(critic.explanation)
         result = self.engine.evaluate(context, candidate)

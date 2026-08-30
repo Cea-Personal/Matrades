@@ -1,6 +1,7 @@
 from enum import StrEnum
 
 from modules.trading.broker_models import ManagementRecommendation, RecommendationAction
+from modules.trading.legacy_compatibility import reject_new_write
 
 
 class Hil3Action(StrEnum):
@@ -15,6 +16,7 @@ def decide(
     policy_valid: bool,
     lifecycle_valid: bool = True,
 ) -> dict[str, object]:
+    reject_new_write("HIL-3 decisions")
     if (
         recommendation.action != RecommendationAction.HOLD
         and action == Hil3Action.APPROVE

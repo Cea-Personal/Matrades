@@ -17,10 +17,13 @@ class ConnectionProvider(StrEnum):
     COINBASE = "COINBASE"
     COINGECKO = "COINGECKO"
     FRED = "FRED"
+    CFTC = "CFTC"
+    FUTURES_REFERENCE = "FUTURES_REFERENCE"
     CALENDAR = "CALENDAR"
     NEWS = "NEWS"
     FOREX_FACTORY = "FOREX_FACTORY"
     SERPAPI = "SERPAPI"
+    OPENAI = "OPENAI"
     MT5_BRIDGE = "MT5_BRIDGE"
 
 
@@ -29,10 +32,13 @@ PROVIDER_LABELS = {
     ConnectionProvider.COINBASE: "Coinbase",
     ConnectionProvider.COINGECKO: "CoinGecko",
     ConnectionProvider.FRED: "FRED",
+    ConnectionProvider.CFTC: "CFTC Commitments of Traders",
+    ConnectionProvider.FUTURES_REFERENCE: "Futures reference / contract chain",
     ConnectionProvider.CALENDAR: "Calendar",
     ConnectionProvider.NEWS: "News",
     ConnectionProvider.FOREX_FACTORY: "Forex Factory calendar scraper",
     ConnectionProvider.SERPAPI: "SerpApi YouTube/search discovery",
+    ConnectionProvider.OPENAI: "OpenAI",
     ConnectionProvider.MT5_BRIDGE: "MT5 Bridge",
 }
 
@@ -73,6 +79,7 @@ class ConnectionProfile(BaseModel):
                 ConnectionProvider.TWELVE_DATA,
                 ConnectionProvider.FRED,
                 ConnectionProvider.SERPAPI,
+                ConnectionProvider.OPENAI,
                 ConnectionProvider.MT5_BRIDGE,
             }
             and self.credential_id is None

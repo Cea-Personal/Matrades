@@ -1,7 +1,8 @@
 # Agent Contracts
 
 **Contract family**: `matrades.agent.v1`
-**Authority**: Agents advise; deterministic application services validate and mutate state.
+**Authority**: Agents research, interpret, monitor, journal, or explain; deterministic application
+services alone validate transitions, authorize execution, and mutate state.
 
 ## Invocation Envelope
 
@@ -74,9 +75,10 @@ critical workflows block or degrade according to role policy.
 | `strategy_researcher` | Propose hypotheses | Research/knowledge context | Non-canonical hypothesis |
 | `strategy_assistant` | Assist a user draft | Draft revision and permitted knowledge | Suggestions/change proposals only |
 | `critic` | Adversarially challenge eligible setup | Policy/risk-passed candidate | PASS, REJECT, or REASSESS |
-| `trade_monitor` | Interpret active-position evidence | Reconciled broker/market/policy state | HOLD or proposed management action |
-| `journal` | Produce narrative summary | Immutable trade/journal facts | Non-authoritative commentary |
+| `trade_monitor` | Interpret active-position evidence | Reconciled broker/market/policy state | HOLD or proposed management action; never a command |
+| `journal` | Produce live observations and terminal summary | Immutable trade/journal facts | Evidence-linked non-authoritative narrative |
 | `performance` | Interpret structured metrics | Calculated performance records | Findings/research triggers; no rule mutation |
+| `knowledge_assistant` | Answer authorized questions with citations | Knowledge/journal retrieval plus read-only structured refresh | Claim-grounded answer or refusal; no Trade Plan or command |
 
 Required definitions cannot be deleted. Registry evolution requires an approved constitution or
 product-specification change.
@@ -123,7 +125,7 @@ Default prohibitions for all agents:
 - no direct credential read;
 - no strategy activation or lifecycle bypass;
 - no direct canonical draft mutation;
-- no approval resolution on behalf of a user.
+- no execution-command creation, dispatch, permission change, or kill-switch operation.
 
 `strategy_assistant` may read a permitted draft/repository/knowledge/backtest summary and propose a
 suggestion. Only the suggestion decision application service can accept/edit/reject and create an
@@ -135,20 +137,30 @@ Knowledge results include source/document/segment IDs, version/date, owner scope
 and retrieval audit ID. Agent results must distinguish retrieved context from user-authored rules and
 structured facts. Risk and Policy engines are not agents and never consume semantic results.
 
+The `knowledge_assistant` may use only `knowledge.search`, `journal.read`, `strategy.read`,
+`research_artifact.read`, `trade_plan.read`, and freshness-labeled structured snapshot reads. Each
+material `EVIDENCE` claim references at least one authorized citation returned by the recorded
+retrieval; unsupported output becomes `PARTIAL` or `INSUFFICIENT`. A request to enter, cancel,
+modify, partially close, or fully exit returns `REFUSED` and cannot create a plan, command, outbox
+message, notification, or broker call.
+
 ## Critical Failure Policy
 
-- Risk, policy, and effective-limit services unavailable: no actionable HIL-2.
-- Required Critic unavailable or invalid: no actionable HIL-2.
+- Risk, policy, effective-limit, permission, kill-switch, or required broker-state services
+  unavailable: no ExecutionAuthorization.
+- Required Critic unavailable or invalid: no ExecutionAuthorization.
 - Codex runtime unavailable without explicit LiteLLM assignment: required role is unavailable and
   its workflow becomes DEGRADED or BLOCKED; no automatic cross-runtime retry occurs.
 - Research specialist unavailable: research run becomes DEGRADED or fails according to required-role
   policy; no fabricated result.
 - Strategy Assistant unavailable: draft editing continues manually; assistance is DEGRADED.
-- Journal/performance narrative unavailable: structured trade and metric records continue.
+- Journal/performance narrative unavailable: structured trade, journal fact, and metric records continue.
+- Knowledge Assistant unavailable or index degraded: deterministic trading continues; Q&A reports
+  `DEGRADED` or `INSUFFICIENT` and never fabricates citations.
 
 ## Contract Tests
 
-- Validate all 16 IDs, required capabilities, and protected status.
+- Validate all 17 IDs, required capabilities, and protected status.
 - Validate that each of the four asset-class specialists returns one terminal result for each of its
   three instrument-type lanes and cannot cross-substitute lanes.
 - Reject missing/stale venue mappings, specification versions, dated futures contracts, or source
@@ -159,6 +171,11 @@ structured facts. Risk and Policy engines are not agents and never consume seman
 - Reject incompatible primary/fallback models and mixed-runtime fallback chains.
 - Prove model/prompt changes leave tool permissions unchanged.
 - Reject malformed, wrong-version, out-of-scope, or stale-context output.
-- Prove no agent output can directly mutate policy, risk, broker, approval, or canonical strategy state.
+- Prove no agent output can directly mutate policy, risk, broker, execution permission, kill switch,
+  ExecutionCommand, or canonical strategy state.
+- Prove the Orchestrator and trade monitor can propose structured next actions but cannot create an
+  authorization, choose a command identity, invoke a mutating BrokerAdapter, or claim execution success.
+- Prove `knowledge_assistant` citations are owner/account scoped and trading prompts are refused with
+  zero Trade Plans, commands, or broker calls.
 - Record selected/actual runtime, runtime source, actual model/fallback/prompts/tools/code for
   successful and failed executions.

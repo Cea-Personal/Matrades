@@ -12,6 +12,7 @@ from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from adapters.agent_runtime.litellm.client import LiteLLMClient
 from apps.api.app.dependencies import current_actor, get_db, require_roles
 from modules.agents.models import (
     AgentDefinition,
@@ -215,6 +216,68 @@ async def test_runtime_settings(
     }
 
 
+@router.post("/models/sync")
+async def sync_litellm_models(
+    actor: Annotated[Actor, Depends(require_roles(Role.OWNER, Role.OPERATOR))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Synchronize the explicit LiteLLM catalog without changing any agent assignment."""
+    store = ResourceStore(db)
+    saved_record = next(iter(await store.list("agent_runtime_settings", actor.owner_id)), None)
+    config = await _saved_runtime_settings(store, actor.owner_id)
+    if not config["litellm_enabled"] or saved_record is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "LiteLLM gateway is not enabled")
+    envelope = saved_record.data.get("litellm_api_key_envelope")
+    if not envelope:
+        raise HTTPException(status.HTTP_409_CONFLICT, "LiteLLM API key is not configured")
+    secret = _runtime_cipher().decrypt(actor.owner_id, envelope)
+    client = LiteLLMClient(str(config["litellm_url"]), secret)
+    try:
+        models = await client.models()
+    except (httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, f"LiteLLM model sync failed: {exc}"
+        ) from exc
+    finally:
+        await client.close()
+    existing = next(iter(await store.list("litellm_model_catalog", actor.owner_id)), None)
+    data = {
+        "runtime": RuntimeType.LITELLM_GATEWAY.value,
+        "models": models,
+        "synchronized_at": datetime.now(UTC).isoformat(),
+        "assignment_changes": False,
+    }
+    if existing is None:
+        item = await store.create(
+            "litellm_model_catalog",
+            actor.owner_id,
+            data,
+            actor_id=actor.actor_id,
+            event_type="litellm.models_synchronized",
+        )
+    else:
+        item = await store.update(
+            existing,
+            data,
+            actor_id=actor.actor_id,
+            event_type="litellm.models_synchronized",
+        )
+    return item.public()
+
+
+@router.get("/models")
+async def list_runtime_models(
+    actor: Annotated[Actor, Depends(current_actor)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    records = await ResourceStore(db).list("litellm_model_catalog", actor.owner_id)
+    return (
+        records[0].public()
+        if records
+        else {"runtime": RuntimeType.LITELLM_GATEWAY, "models": []}
+    )
+
+
 @router.get("/status")
 async def agent_status(
     actor: Annotated[Actor, Depends(current_actor)],
@@ -249,11 +312,16 @@ async def agent_status(
                 "last_status": data.get("status"),
                 "last_error": data.get("error"),
                 "last_tested_at": execution.updated_at if execution else None,
+                "execution_id": str(execution.id) if execution else None,
+                "actual_model": data.get("actual_model"),
+                "duration_ms": data.get("duration_ms"),
+                "selection_source": data.get("selection_source"),
                 "evidence": "agent_execution" if execution else "not_tested",
             }
         )
     return {
         "codex_worker_heartbeat": heartbeat,
+        "codex_auth_mode": "HOST_MOUNTED_AUTH_JSON",
         "runtime_settings": await _saved_runtime_settings(store, actor.owner_id),
         "agents": rows,
     }
@@ -402,6 +470,7 @@ async def test_run(
                 logical_id,
                 {**payload.input, "purpose": "configuration_test"},
                 output_schema,
+                owner_id=actor.owner_id,
             )
             execution_status = ExecutionStatus.SUCCEEDED
         except (TimeoutError, RuntimeError, ValueError) as exc:

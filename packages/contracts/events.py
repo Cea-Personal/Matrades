@@ -34,6 +34,57 @@ class LaneLifecyclePayload(BaseModel):
     source_cut_refs: tuple[str, ...] = ()
 
 
+class TradePlanPayload(BaseModel):
+    trade_plan_id: UUID
+    account_id: UUID
+    state: str
+    risk_decision: str
+    evidence_refs: tuple[str, ...] = ()
+
+
+class ExecutionCommandPayload(BaseModel):
+    command_id: UUID
+    account_id: UUID
+    action: str
+    state: str
+    idempotency_key: str
+    outcome_certainty: str
+
+
+class KillSwitchPayload(BaseModel):
+    scope: str
+    active: bool
+    safety_epoch: int
+    account_id: UUID | None = None
+    reason: str = ""
+
+
+class JournalIndexPayload(BaseModel):
+    journal_entry_id: UUID
+    knowledge_source_id: UUID | None = None
+    indexing_state: str
+
+
+class ChartContextPayload(BaseModel):
+    trade_id: UUID
+    instrument: str
+    freshness: str
+    read_only: bool = True
+
+
+class AnalyticsPayload(BaseModel):
+    evidence_class: str
+    sample_size: int
+    metric_digest: str
+
+
+class NotificationPayload(BaseModel):
+    notification_id: UUID
+    channel: str
+    state: str
+    idempotency_key: str
+
+
 class EventEnvelope(BaseModel):
     model_config = ConfigDict(frozen=True)
     event_id: UUID = Field(default_factory=uuid4)

@@ -18,6 +18,44 @@ class LiteLLMClient:
         )
 
     async def invoke(self, payload: dict[str, Any]) -> dict[str, Any]:
-        response = await self.client.post("/v1/chat/completions", json=payload)
+        schema = payload.get("output_schema")
+        request = {
+            "model": payload.get("model"),
+            "messages": [
+                {"role": "system", "content": str(payload.get("system", ""))},
+                {
+                    "role": "user",
+                    "content": (
+                        f"{payload.get('user', '')}\n\n"
+                        f"STRUCTURED INPUT:\n{payload.get('input', {})}"
+                    ),
+                },
+            ],
+            "temperature": 0,
+        }
+        if schema:
+            request["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {"name": "matrades_agent_response", "schema": schema},
+            }
+        response = await self.client.post("/v1/chat/completions", json=request)
         response.raise_for_status()
-        return response.json()
+        data = response.json()
+        content = data.get("choices", [{}])[0].get("message", {}).get("content")
+        if isinstance(content, str):
+            import json
+
+            parsed = json.loads(content)
+            if isinstance(parsed, dict):
+                return parsed
+        if isinstance(content, dict):
+            return content
+        raise ValueError("LiteLLM response did not contain a structured JSON object")
+
+    async def models(self) -> list[dict[str, Any]]:
+        response = await self.client.get("/v1/models")
+        response.raise_for_status()
+        return list(response.json().get("data", []))
+
+    async def close(self) -> None:
+        await self.client.aclose()

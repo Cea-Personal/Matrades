@@ -51,10 +51,15 @@ services:
       - path: ../../.env
         required: false
     environment:
-      MATRADES_MT5_BRIDGE_SECRET: ${MATRADES_MT5_BRIDGE_SECRET:-development-mt5-secret}
+      MATRADES_MT5_AUTHORITY_URL: http://api:8000/api/v1/internal/mt5/authenticate
+      MATRADES_MT5_AUTHORITY_TOKEN: ${MATRADES_MT5_AUTHORITY_TOKEN:-development-mt5-authority-token}
+      MATRADES_MT5_COMMAND_QUEUE_PATH: /app/data/mt5-commands/commands.json
     command: ["uvicorn", "bridges.mt5.app:app", "--host", "0.0.0.0", "--port", "8765"]
     ports: ["8765:8765"]
+    volumes: ["mt5-command-data:/app/data/mt5-commands"]
     restart: unless-stopped
+    depends_on:
+      api: { condition: service_started }
 
   worker:
     build:
@@ -128,3 +133,4 @@ volumes:
   postgres-data:
   redis-data:
   research-artifacts:
+  mt5-command-data:

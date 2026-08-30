@@ -1,10 +1,16 @@
 "use client";
 
-import { RiskSnapshot, type Snapshot } from "@/features/risk/RiskSnapshot";
+import { RiskSnapshot } from "@/features/risk/RiskSnapshot";
 
-export type Proposal = { id: string; instrument: string; direction: string; entry: string; stop_loss: string; targets: string[]; approved_size: string; invalidation: string; critic_result: string; instrument_type?: string; venue_instrument_id?: string; specification_version_id?: string; futures_contract_id?: string; risk: { decision: "PASS" | "REDUCE_SIZE" | "HARD_BLOCK"; reasons: string[]; limiting_constraints: string[]; snapshot: Snapshot } };
+type Plan = {
+  id: string;
+  instrument: string;
+  state: string;
+  construction?: { direction?: string; entry?: string; stop_loss?: string; approved_size?: string };
+  risk: { decision: string; reasons: string[]; snapshot: Parameters<typeof RiskSnapshot>[0]["snapshot"] };
+};
 
-export function TradeProposalPanel({ proposal, onDecision }: { proposal: Proposal; onDecision?: (action: "TAKE" | "WAIT" | "REJECT") => void }) {
-  const tone = proposal.risk.decision === "PASS" ? "good" : proposal.risk.decision === "REDUCE_SIZE" ? "warn" : "bad";
-  return <article><header className="card"><p className="muted">HIL-2 proposal</p><h1>{proposal.instrument} {proposal.direction}</h1><strong className={tone}>{proposal.risk.decision.replace("_", " ")}</strong><p>Entry {proposal.entry} · Stop {proposal.stop_loss} · Size {proposal.approved_size}</p>{proposal.instrument_type && <p>Exact {proposal.instrument_type} listing {proposal.venue_instrument_id ?? "missing"} · specification {proposal.specification_version_id ?? "missing"}{proposal.futures_contract_id ? ` · contract ${proposal.futures_contract_id}` : ""}</p>}<p className="muted">{proposal.risk.reasons.join(" ")}</p><p>Critic: {proposal.critic_result}</p></header><RiskSnapshot snapshot={proposal.risk.snapshot}/>{proposal.risk.decision !== "HARD_BLOCK" && <div className="actions" aria-label="Human decision"><button className="btn primary" onClick={() => onDecision?.("TAKE")}>Take manually</button><button className="btn" onClick={() => onDecision?.("WAIT")}>Wait</button><button className="btn" onClick={() => onDecision?.("REJECT")}>Reject</button></div>}</article>;
+/** Compatibility filename retained for imports; the panel is now read-only Trade Plan evidence. */
+export function TradeProposalPanel({ plan }: { plan: Plan }) {
+  return <article><header className="card"><p className="muted">Autonomous Trade Plan</p><h1>{plan.instrument} {plan.construction?.direction ?? ""}</h1><strong>{plan.state} · {plan.risk.decision.replace("_", " ")}</strong><p>Entry {plan.construction?.entry ?? "—"} · Stop {plan.construction?.stop_loss ?? "—"} · Size {plan.construction?.approved_size ?? "—"}</p><p className="muted">{plan.risk.reasons.join(" ")}</p></header><RiskSnapshot snapshot={plan.risk.snapshot} /></article>;
 }

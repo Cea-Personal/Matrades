@@ -4,7 +4,7 @@ import { CONTRACT_VERSION, type RuntimeType } from "../../../../packages/contrac
 describe("generated contract", () => {
   it("pins the V1 contract and supported runtime names", () => {
     const runtimes: RuntimeType[] = ["CODEX_APP_SERVER", "LITELLM_GATEWAY"];
-    expect(CONTRACT_VERSION).toBe("matrades.openapi.v1");
+    expect(CONTRACT_VERSION).toBe("matrades.openapi.v2");
     expect(runtimes).toHaveLength(2);
   });
 });

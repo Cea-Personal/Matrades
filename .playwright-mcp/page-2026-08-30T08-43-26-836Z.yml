@@ -1,0 +1,338 @@
+- generic [active] [ref=e1]:
+  - alert [ref=e3]
+  - generic [ref=e4]:
+    - complementary [ref=e5]:
+      - link "MATRADES" [ref=e6] [cursor=pointer]:
+        - /url: /
+      - paragraph [ref=e7]: Evidence, automation, and accountable execution.
+      - navigation "Primary" [ref=e8]:
+        - link "Overview" [ref=e9] [cursor=pointer]:
+          - /url: /
+        - link "Trade desk" [ref=e10] [cursor=pointer]:
+          - /url: /trading
+        - link "Research" [ref=e11] [cursor=pointer]:
+          - /url: /research
+        - link "Strategies" [ref=e12] [cursor=pointer]:
+          - /url: /strategies
+        - link "Connections" [ref=e13] [cursor=pointer]:
+          - /url: /connections
+        - link "Configuration" [ref=e14] [cursor=pointer]:
+          - /url: /configuration
+        - link "Agents" [ref=e15] [cursor=pointer]:
+          - /url: /agents
+        - link "Knowledge" [ref=e16] [cursor=pointer]:
+          - /url: /knowledge
+        - link "Operations" [ref=e17] [cursor=pointer]:
+          - /url: /operations
+        - generic [ref=e18]:
+          - link "Extras" [ref=e19] [cursor=pointer]:
+            - /url: /extras
+          - link "Market research" [ref=e20] [cursor=pointer]:
+            - /url: /extras?folder=market-research
+          - link "Strategy research" [ref=e21] [cursor=pointer]:
+            - /url: /extras?folder=strategy-research
+          - link "Trade recommendations" [ref=e22] [cursor=pointer]:
+            - /url: /extras?folder=trade-recommendations
+          - link "Generated code" [ref=e23] [cursor=pointer]:
+            - /url: /extras?folder=generated-code
+          - link "MT5 bridge EA" [ref=e24] [cursor=pointer]:
+            - /url: /extras?folder=mt5-bridge-ea
+      - generic [ref=e25]:
+        - generic [ref=e26]: ogbonna.basil3@gmail.com
+        - generic [ref=e27]: OWNER
+        - button "Sign out" [ref=e28] [cursor=pointer]
+    - main [ref=e29]:
+      - generic [ref=e30]:
+        - generic [ref=e31]:
+          - paragraph [ref=e32]: Provider boundary
+          - heading "Connections & data sources" [level=1] [ref=e33]
+          - paragraph [ref=e34]: Configure the authoritative sources used by research, backtesting, macro context, and read-only broker reconciliation. Secrets remain encrypted and replacement requires MFA step-up.
+        - generic [ref=e35]:
+          - generic [ref=e36]:
+            - heading "1. Store a credential" [level=2] [ref=e37]
+            - generic [ref=e38]:
+              - text: Provider
+              - combobox "Provider" [ref=e39]:
+                - option "Twelve Data" [selected]
+                - option "FRED"
+                - option "SerpApi (YouTube discovery)"
+                - option "MT5 Bridge"
+            - generic [ref=e40]:
+              - text: Credential name
+              - textbox "Credential name" [ref=e41]
+            - generic [ref=e42]:
+              - text: Secret / API key
+              - textbox "Secret / API key" [ref=e43]
+            - button "Encrypt credential" [ref=e44] [cursor=pointer]
+          - generic [ref=e45]:
+            - heading "2. Add connection" [level=2] [ref=e46]
+            - generic [ref=e47]:
+              - text: Data source
+              - combobox "Data source" [ref=e48]:
+                - option "Twelve Data" [selected]
+                - option "Coinbase"
+                - option "CoinGecko"
+                - option "FRED"
+                - option "CFTC Commitments of Traders"
+                - option "Futures reference / contract chain"
+                - option "Calendar"
+                - option "News"
+                - option "Forex Factory"
+                - option "SerpApi (YouTube discovery)"
+                - option "MT5 Bridge"
+            - generic [ref=e49]:
+              - text: Connection name
+              - textbox "Connection name" [ref=e50]
+            - generic [ref=e51]:
+              - text: Encrypted credential
+              - combobox "Encrypted credential" [ref=e52]:
+                - option "Select credential" [selected]
+                - option "TwelveData_Key · ••••faf4"
+            - paragraph [ref=e53]: Connection testing validates the API key only and does not require a pair. Autonomous market research discovers and approves the instrument; only that selected pair is then requested from Twelve Data. Discovery universes are managed by the server configuration.
+            - button "Save connection" [ref=e54] [cursor=pointer]
+        - paragraph [ref=e268]: MT5 connection is HEALTHY.
+        - article [ref=e55]:
+          - heading "Forex Factory scraper schedule" [level=2] [ref=e56]
+          - paragraph [ref=e57]: The scheduler checks every minute and runs the scraper independently for each trading account. A period already archived is skipped without another provider request.
+          - generic [ref=e58]:
+            - text: Trading account
+            - combobox "Trading account" [ref=e59]:
+              - option "Select an account"
+              - option "OctaFx" [selected]
+          - generic [ref=e60]:
+            - generic [ref=e61]:
+              - text: Run time
+              - textbox "Run time" [ref=e62]: 05:00
+            - generic [ref=e63]:
+              - text: Timezone
+              - textbox "Timezone" [ref=e64]:
+                - /placeholder: Africa/Kigali
+                - text: UTC
+          - generic [ref=e65]:
+            - checkbox "Enable scheduled scraper" [checked] [ref=e66]
+            - text: Enable scheduled scraper
+          - group "Run on" [ref=e67]:
+            - generic [ref=e69]:
+              - generic [ref=e70]:
+                - checkbox "Mon" [checked] [ref=e71]
+                - text: Mon
+              - generic [ref=e72]:
+                - checkbox "Tue" [checked] [ref=e73]
+                - text: Tue
+              - generic [ref=e74]:
+                - checkbox "Wed" [checked] [ref=e75]
+                - text: Wed
+              - generic [ref=e76]:
+                - checkbox "Thu" [checked] [ref=e77]
+                - text: Thu
+              - generic [ref=e78]:
+                - checkbox "Fri" [checked] [ref=e79]
+                - text: Fri
+              - generic [ref=e80]:
+                - checkbox "Sat" [checked] [ref=e81]
+                - text: Sat
+              - generic [ref=e82]:
+                - checkbox "Sun" [checked] [ref=e83]
+                - text: Sun
+          - button "Save scraper schedule" [ref=e84] [cursor=pointer]
+          - paragraph [ref=e85]: "Next run: 31/08/2026, 07:00:00"
+        - article [ref=e86]:
+          - generic [ref=e87]:
+            - generic [ref=e88]:
+              - heading "Forex Factory scraper" [level=2] [ref=e89]
+              - paragraph [ref=e90]: Run the calendar scraper directly to retrieve normalized scheduled events. Autonomous scheduled runs use the same period archive and skip periods already saved.
+            - button "Scrape FF EconomiC Calender" [ref=e92] [cursor=pointer]
+          - paragraph [ref=e93]: Choose Forex Factory above and save a connection, then run the scraper here.
+        - article [ref=e94]:
+          - heading "Stored credentials" [level=2] [ref=e95]
+          - paragraph [ref=e96]: Secrets remain •••• masked after entry. Testing a connection also updates its linked credential status. Replacing a key keeps linked connections; deleting a key permanently discards its encrypted secret and disables linked connections.
+          - list [ref=e97]:
+            - listitem [ref=e106]:
+              - strong [ref=e107]: MT5 Secret
+              - generic [ref=e108]: MT5_BRIDGE · ••••2025
+              - generic [ref=e109]: ACTIVE · tested 30/08/2026, 10:43:25
+              - generic [ref=e110]:
+                - button "Test credential" [ref=e111] [cursor=pointer]
+                - button "Replace" [ref=e112] [cursor=pointer]
+                - button "Delete" [ref=e113] [cursor=pointer]
+            - listitem [ref=e98]:
+              - strong [ref=e99]: SERP API
+              - generic [ref=e100]: SERPAPI · ••••bdf9
+              - generic [ref=e101]: ACTIVE · tested 30/08/2026, 10:38:29
+              - generic [ref=e102]:
+                - button "Test credential" [ref=e103] [cursor=pointer]
+                - button "Replace" [ref=e104] [cursor=pointer]
+                - button "Delete" [ref=e105] [cursor=pointer]
+            - listitem [ref=e114]:
+              - strong [ref=e115]: FredApiKey
+              - generic [ref=e116]: FRED · ••••55be
+              - generic [ref=e117]: ACTIVE · tested 30/08/2026, 10:18:27
+              - generic [ref=e118]:
+                - button "Test credential" [ref=e119] [cursor=pointer]
+                - button "Replace" [ref=e120] [cursor=pointer]
+                - button "Delete" [ref=e121] [cursor=pointer]
+            - listitem [ref=e122]:
+              - strong [ref=e123]: TwelveData_Key
+              - generic [ref=e124]: TWELVE_DATA · ••••faf4
+              - generic [ref=e125]: ACTIVE · tested 25/08/2026, 12:53:40
+              - generic [ref=e126]:
+                - button "Test credential" [ref=e127] [cursor=pointer]
+                - button "Replace" [ref=e128] [cursor=pointer]
+                - button "Delete" [ref=e129] [cursor=pointer]
+        - article [ref=e130]:
+          - heading "Configured data sources" [level=2] [ref=e131]
+          - paragraph [ref=e132]: This includes market, economic, knowledge, and broker connections such as MT5 Bridge. Twelve Data health checks are cached for one hour to conserve API quota. Replacing its credential resets the cache and allows an immediate fresh check. Removing a source opens an MFA confirmation dialog.
+          - table [ref=e134]:
+            - rowgroup [ref=e135]:
+              - row [ref=e136]:
+                - columnheader "Name" [ref=e137]
+                - columnheader "Source" [ref=e138]
+                - columnheader "Health" [ref=e139]
+                - columnheader "Last checked" [ref=e140]
+                - columnheader "Capabilities" [ref=e141]
+                - columnheader [ref=e142]
+            - rowgroup [ref=e143]:
+              - row [ref=e269]:
+                - cell "MT5 connection" [ref=e156]
+                - cell "MT5 Bridge" [ref=e157]
+                - cell "HEALTHY" [ref=e270]
+                - cell "30/08/2026, 10:43:25" [ref=e271]
+                - cell "accounts.read, positions.read, history.read, commands.poll, commands.receipt" [ref=e272]
+                - cell [ref=e162]:
+                  - generic [ref=e163]:
+                    - button "Test" [ref=e164] [cursor=pointer]
+                    - button "Remove" [ref=e165] [cursor=pointer]
+              - row [ref=e144]:
+                - cell "Youtube Scrapper" [ref=e145]
+                - cell "SerpApi (YouTube discovery)" [ref=e146]
+                - cell "HEALTHY" [ref=e147]
+                - cell "30/08/2026, 10:38:29" [ref=e149]
+                - cell "search.read, youtube.discovery, transcript.read" [ref=e150]
+                - cell [ref=e151]:
+                  - generic [ref=e152]:
+                    - button "Test" [ref=e153] [cursor=pointer]
+                    - button "Remove" [ref=e154] [cursor=pointer]
+              - row [ref=e166]:
+                - cell "Coinbase Crypto Connection" [ref=e167]
+                - cell "Coinbase" [ref=e168]
+                - cell "HEALTHY" [ref=e169]
+                - cell "30/08/2026, 10:18:29" [ref=e171]
+                - cell "crypto.read, candles.read, order_book.read" [ref=e172]
+                - cell [ref=e173]:
+                  - generic [ref=e174]:
+                    - button "Test" [ref=e175] [cursor=pointer]
+                    - button "Remove" [ref=e176] [cursor=pointer]
+              - row [ref=e177]:
+                - cell "Fred Economic Calender" [ref=e178]
+                - cell "FRED" [ref=e179]
+                - cell "HEALTHY" [ref=e180]
+                - cell "30/08/2026, 10:18:27" [ref=e182]
+                - cell "macro.read" [ref=e183]
+                - cell [ref=e184]:
+                  - generic [ref=e185]:
+                    - button "Test" [ref=e186] [cursor=pointer]
+                    - button "Remove" [ref=e187] [cursor=pointer]
+              - row [ref=e188]:
+                - cell "FF EconomiC Calender" [ref=e189]
+                - cell "Forex Factory" [ref=e190]
+                - cell "HEALTHY" [ref=e191]
+                - cell "30/08/2026, 10:18:23" [ref=e193]
+                - cell "news.read, calendar.read, forex_factory.scrape" [ref=e194]
+                - cell [ref=e195]:
+                  - generic [ref=e196]:
+                    - button "Test" [ref=e197] [cursor=pointer]
+                    - button "Remove" [ref=e198] [cursor=pointer]
+              - row [ref=e199]:
+                - cell "CoinGecko Crypto Connection" [ref=e200]
+                - cell "CoinGecko" [ref=e201]
+                - cell "HEALTHY" [ref=e202]
+                - cell "25/08/2026, 09:40:03" [ref=e204]
+                - cell "crypto.discovery, asset_metadata.read" [ref=e205]
+                - cell [ref=e206]:
+                  - generic [ref=e207]:
+                    - button "Test" [ref=e208] [cursor=pointer]
+                    - button "Remove" [ref=e209] [cursor=pointer]
+      - generic [ref=e210]:
+        - generic [ref=e211]:
+          - paragraph [ref=e212]: Connection authority
+          - heading "Provider bindings" [level=2] [ref=e213]
+          - paragraph [ref=e214]: Bind configured data sources to this account’s enabled market lanes or to its economic context. Market lanes always come from the active account research matrix.
+        - article [ref=e215]:
+          - generic [ref=e216]:
+            - text: Trading account
+            - combobox "Trading account" [ref=e217]:
+              - option "OctaFx" [selected]
+          - generic [ref=e218]:
+            - generic [ref=e219]:
+              - text: Binding use
+              - combobox "Binding use" [ref=e220]:
+                - option "Market research" [selected]
+                - option "Economic calendar, news & macro context"
+            - generic [ref=e221]:
+              - text: Matrix lane
+              - combobox "Matrix lane" [ref=e222]:
+                - option "FOREX · CFD" [selected]
+                - option "METALS · CFD"
+                - option "CRYPTOCURRENCY · CFD"
+                - option "STOCKS · CFD"
+          - generic [ref=e223]:
+            - generic [ref=e224]:
+              - text: Capability
+              - combobox "Capability" [ref=e225]:
+                - option "DISCOVERY" [selected]
+                - option "INSTRUMENT_DIRECTORY"
+                - option "QUOTE"
+                - option "CANDLES"
+                - option "FUTURES_CHAIN"
+                - option "CONTRACT_DETAILS"
+                - option "OPEN_INTEREST"
+            - generic [ref=e226]:
+              - text: Priority
+              - spinbutton "Priority" [ref=e227]: "1"
+          - generic [ref=e228]:
+            - text: Configured connection
+            - combobox "Configured connection" [ref=e229]:
+              - option "Select a connection" [selected]
+              - option "MT5 connection · MT5_BRIDGE · HEALTHY"
+              - option "Youtube Scrapper · SERPAPI · HEALTHY"
+              - option "Coinbase Crypto Connection · COINBASE · HEALTHY"
+              - option "Fred Economic Calender · FRED · HEALTHY"
+              - option "FF EconomiC Calender · FOREX_FACTORY · HEALTHY"
+              - option "CoinGecko Crypto Connection · COINGECKO · HEALTHY"
+          - button "Save provider binding" [disabled] [ref=e230]
+        - article [ref=e231]:
+          - heading "Current provider bindings" [level=3] [ref=e232]
+          - table [ref=e234]:
+            - rowgroup [ref=e235]:
+              - row [ref=e236]:
+                - columnheader "Use" [ref=e237]
+                - columnheader "Coverage" [ref=e238]
+                - columnheader "Capability" [ref=e239]
+                - columnheader "Connection" [ref=e240]
+                - columnheader "Status" [ref=e241]
+                - columnheader [ref=e242]
+            - rowgroup [ref=e243]:
+              - row [ref=e244]:
+                - cell "ECONOMIC CONTEXT" [ref=e245]
+                - cell "Economic context" [ref=e246]
+                - cell "ECONOMIC_CALENDAR" [ref=e247]
+                - cell "05b02431-01aa-40b8-a561-867f33f65d39" [ref=e248]
+                - cell "UNVERIFIED" [ref=e249]
+                - cell [ref=e250]:
+                  - button "Test & verify" [ref=e251] [cursor=pointer]
+              - row [ref=e252]:
+                - cell "ECONOMIC CONTEXT" [ref=e253]
+                - cell "Economic context" [ref=e254]
+                - cell "ECONOMIC_CALENDAR" [ref=e255]
+                - cell "576e78f9-b474-493c-ac24-36fb09e1d96c" [ref=e256]
+                - cell "UNVERIFIED" [ref=e257]
+                - cell [ref=e258]:
+                  - button "Test & verify" [ref=e259] [cursor=pointer]
+              - row [ref=e260]:
+                - cell "MARKET RESEARCH" [ref=e261]
+                - cell "CRYPTOCURRENCY · CFD" [ref=e262]
+                - cell "DISCOVERY" [ref=e263]
+                - cell "9709dadb-d264-44f7-9280-bf3a477c7b2a" [ref=e264]
+                - cell "UNVERIFIED" [ref=e265]
+                - cell [ref=e266]:
+                  - button "Test & verify" [ref=e267] [cursor=pointer]

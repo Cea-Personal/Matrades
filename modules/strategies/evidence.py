@@ -73,6 +73,54 @@ def resolve_approved_candidate(
     now: datetime,
     max_age: timedelta,
 ) -> ApprovedCandidate:
+    typed = selection.get("candidate")
+    if isinstance(typed, dict) and selection.get("state") == "ACTIVE_MARKET_ANALYSIS":
+        lane = dict(typed.get("lane", selection.get("lane", {})))
+        listing = dict(typed.get("listing", {}))
+        fingerprint = dict(typed.get("fingerprint", {}))
+        observed_at = datetime.fromisoformat(str(fingerprint["observed_at"]))
+        if observed_at.tzinfo is None or now - observed_at > max_age:
+            raise ValueError("typed market fingerprint is stale; rerun market research")
+        category = {
+            "FOREX": "FOREX",
+            "METALS": "METAL",
+            "CRYPTOCURRENCY": "CRYPTO",
+            "STOCKS": "FOREX",
+        }[str(lane["asset_class"])]
+        market_fingerprint = MarketFingerprint(
+            instrument=str(listing["symbol"]),
+            category=category,
+            observed_at=observed_at,
+            source=str(listing.get("provider", "typed_provider")),
+            source_version=str(fingerprint.get("source_cut_id", "typed-source-cut")),
+            regime=str(fingerprint.get("regime", "UNCLASSIFIED")),
+            trend_score=float(fingerprint.get("trend_score", 0)),
+            volatility_score=float(fingerprint.get("volatility_score", 0)),
+            liquidity_score=float(fingerprint.get("liquidity_score", 0)),
+            spread_score=0.0,
+            fundamental_score=None,
+            sentiment_score=None,
+            event_risk=None,
+            positioning_score=None,
+            correlation_risk=None,
+            data_quality=float(fingerprint.get("data_quality", 0)),
+        )
+        specification = dict(typed.get("specification", {}))
+        return ApprovedCandidate(
+            account_id=str(selection["account_id"]),
+            instrument=str(listing["symbol"]),
+            category=category,
+            score=float(typed.get("score", 0)),
+            fingerprint=market_fingerprint,
+            evidence=[str(item) for item in typed.get("evidence", [])],
+            asset_class=lane.get("asset_class"),
+            instrument_type=lane.get("instrument_type"),
+            venue_instrument_id=str(listing.get("id")) if listing.get("id") else None,
+            specification_version_id=(
+                str(specification.get("id")) if specification.get("id") else None
+            ),
+            quantity_unit=specification.get("quantity_unit"),
+        )
     if selection.get("action") == "NO_TRADE" or not selection.get("selected"):
         raise ValueError("an approved market selection with at least one instrument is required")
     selected = {

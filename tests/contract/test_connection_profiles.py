@@ -15,10 +15,13 @@ def test_visible_connection_catalog_covers_data_sources_and_mt5() -> None:
         ConnectionProvider.COINBASE,
         ConnectionProvider.COINGECKO,
         ConnectionProvider.FRED,
+        ConnectionProvider.CFTC,
+        ConnectionProvider.FUTURES_REFERENCE,
         ConnectionProvider.CALENDAR,
         ConnectionProvider.NEWS,
         ConnectionProvider.FOREX_FACTORY,
         ConnectionProvider.SERPAPI,
+        ConnectionProvider.OPENAI,
         ConnectionProvider.MT5_BRIDGE,
     }
 
@@ -34,7 +37,7 @@ async def test_mt5_probe_uses_real_health_response_and_reports_capabilities() ->
                 "fresh": True,
                 "bridge_version": "1.2.0",
                 "capabilities": ["accounts.read", "positions.read", "history.read"],
-                "writes": False,
+                "writes": True,
             },
         )
 
@@ -48,8 +51,62 @@ async def test_mt5_probe_uses_real_health_response_and_reports_capabilities() ->
         result = await probe_connection(profile, "bridge-secret", client=client)
 
     assert result.status == "HEALTHY"
-    assert result.writes is False
+    assert result.writes is True
     assert "positions.read" in result.capabilities
+
+
+async def test_mt5_probe_explains_reachable_bridge_without_fresh_ea_snapshot() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "status": "waiting_for_ea",
+                "fresh": False,
+                "bridge_version": "1.2.0",
+                "capabilities": ["accounts.read", "positions.read", "history.read"],
+                "writes": False,
+            },
+        )
+
+    profile = ConnectionProfile(
+        name="Local MT5",
+        provider=ConnectionProvider.MT5_BRIDGE,
+        credential_id=uuid4(),
+        configuration={"bridge_url": "http://127.0.0.1:8765", "account_reference": "demo"},
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await probe_connection(profile, "bridge-secret", client=client)
+
+    assert result.status == "STALE"
+    assert result.safe_message is not None
+    assert "Enable Algorithmic Trading" in result.safe_message
+    assert "WebRequest" in result.safe_message
+
+
+async def test_mt5_stale_probe_warns_when_bridge_advertises_write_capability() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "status": "waiting_for_ea",
+                "fresh": False,
+                "capabilities": ["accounts.read", "positions.read"],
+                "writes": True,
+            },
+        )
+
+    profile = ConnectionProfile(
+        name="Execution MT5",
+        provider=ConnectionProvider.MT5_BRIDGE,
+        credential_id=uuid4(),
+        configuration={"bridge_url": "http://127.0.0.1:8765", "account_reference": "demo"},
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await probe_connection(profile, "bridge-secret", client=client)
+
+    assert result.safe_message is not None
+    assert "broker-write capability" in result.safe_message
+    assert "every attached EA" in result.safe_message
 
 
 async def test_twelve_data_probe_validates_key_without_requesting_a_symbol() -> None:

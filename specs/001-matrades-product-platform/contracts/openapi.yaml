@@ -1,11 +1,12 @@
 openapi: 3.1.0
 info:
   title: Matrades Application API
-  version: 1.1.0
+  version: 2.0.0
   description: >-
-    Contract for authenticated configuration, research, strategy, risk, approval,
-    reconciliation, monitoring, journal, and performance workflows. Broker execution
-    writes are intentionally absent from V1.
+    Contract for authenticated configuration, autonomous research, strategy, risk,
+    deterministic execution, reconciliation, monitoring, journal, knowledge, chart,
+    notification, and performance workflows. The public API exposes bounded automation
+    controls and read models, not an arbitrary broker-command endpoint.
 servers:
   - url: /api/v1
 security:
@@ -19,6 +20,7 @@ tags:
   - name: Strategies
   - name: Knowledge
   - name: Trading
+  - name: Notifications
   - name: Operations
 paths:
   /auth/signup:
@@ -387,10 +389,148 @@ paths:
             schema: { $ref: '#/components/schemas/TradingAccountInput' }
       responses:
         '201':
-          description: Trading account created in manual mode
+          description: Trading account created read-only with all execution actions disabled
           content:
             application/json:
               schema: { $ref: '#/components/schemas/TradingAccount' }
+        default: { $ref: '#/components/responses/Error' }
+  /accounts/{account_id}/execution-permissions:
+    get:
+      tags: [Accounts]
+      operationId: getExecutionPermissions
+      parameters:
+        - $ref: '#/components/parameters/AccountId'
+      responses:
+        '200':
+          description: Active version and effective account action permissions
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExecutionPermissionProfile' }
+        default: { $ref: '#/components/responses/Error' }
+    put:
+      tags: [Accounts]
+      operationId: replaceExecutionPermissions
+      parameters:
+        - $ref: '#/components/parameters/AccountId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/StepUpGrant'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExecutionPermissionInput' }
+      responses:
+        '200':
+          description: New immutable permission version activated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExecutionPermissionProfile' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        default: { $ref: '#/components/responses/Error' }
+  /accounts/{account_id}/kill-switch:
+    get:
+      tags: [Operations]
+      operationId: getAccountKillSwitch
+      parameters:
+        - $ref: '#/components/parameters/AccountId'
+      responses:
+        '200':
+          description: Durable account kill-switch state and effective platform state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KillSwitchState' }
+        default: { $ref: '#/components/responses/Error' }
+  /accounts/{account_id}/kill-switch/activate:
+    post:
+      tags: [Operations]
+      operationId: activateAccountKillSwitch
+      parameters:
+        - $ref: '#/components/parameters/AccountId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/KillSwitchChange' }
+      responses:
+        '200':
+          description: Account kill switch durably activated and safety epoch incremented
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KillSwitchState' }
+        default: { $ref: '#/components/responses/Error' }
+  /accounts/{account_id}/kill-switch/deactivate:
+    post:
+      tags: [Operations]
+      operationId: deactivateAccountKillSwitch
+      parameters:
+        - $ref: '#/components/parameters/AccountId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/StepUpGrant'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/KillSwitchChange' }
+      responses:
+        '200':
+          description: Account kill switch deactivated after fresh broker/account validation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KillSwitchState' }
+        default: { $ref: '#/components/responses/Error' }
+  /automation/kill-switch:
+    get:
+      tags: [Operations]
+      operationId: getPlatformKillSwitch
+      responses:
+        '200':
+          description: Durable platform kill-switch state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KillSwitchState' }
+        default: { $ref: '#/components/responses/Error' }
+  /automation/kill-switch/activate:
+    post:
+      tags: [Operations]
+      operationId: activatePlatformKillSwitch
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/KillSwitchChange' }
+      responses:
+        '200':
+          description: Platform kill switch durably activated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KillSwitchState' }
+        default: { $ref: '#/components/responses/Error' }
+  /automation/kill-switch/deactivate:
+    post:
+      tags: [Operations]
+      operationId: deactivatePlatformKillSwitch
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/StepUpGrant'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/KillSwitchChange' }
+      responses:
+        '200':
+          description: Platform kill switch deactivated after safety validation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KillSwitchState' }
         default: { $ref: '#/components/responses/Error' }
   /accounts/{account_id}/snapshots/current:
     get:
@@ -639,34 +779,26 @@ paths:
           schema: { type: string, format: uuid }
       responses:
         '200':
-          description: Ranked candidates, evidence, health, and HIL-1 state
+          description: Ranked candidates, evidence, health, and autonomous lane-selection state
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ResearchRun' }
         default: { $ref: '#/components/responses/Error' }
-  /market-selections/{selection_id}/decisions:
-    post:
+  /market-selections/{selection_id}:
+    get:
       tags: [Research]
-      operationId: decideMarketSelection
+      operationId: getMarketSelection
       parameters:
         - name: selection_id
           in: path
           required: true
           schema: { type: string, format: uuid }
-        - $ref: '#/components/parameters/IdempotencyKey'
-        - $ref: '#/components/parameters/IfMatch'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/Hil1Decision' }
       responses:
         '200':
-          description: New market-selection or research-run state
+          description: Autonomous selection, invalidation, and fallback lineage for one lane
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ApprovalDecision' }
-        '409': { $ref: '#/components/responses/Conflict' }
+              schema: { $ref: '#/components/schemas/MarketSelection' }
         default: { $ref: '#/components/responses/Error' }
   /strategy-drafts:
     post:
@@ -895,49 +1027,100 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/KnowledgeSearchResult' }
         default: { $ref: '#/components/responses/Error' }
-  /trade-proposals/{proposal_id}:
-    get:
-      tags: [Trading]
-      operationId: getTradeProposal
-      parameters:
-        - $ref: '#/components/parameters/ProposalId'
-      responses:
-        '200':
-          description: Proposal with complete equity snapshot and validation evidence
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/TradeProposal' }
-        default: { $ref: '#/components/responses/Error' }
-  /trade-proposals/{proposal_id}/decisions:
+  /knowledge-assistant/answers:
     post:
-      tags: [Trading]
-      operationId: decideTradeProposal
+      tags: [Knowledge]
+      operationId: answerKnowledgeQuestion
       parameters:
-        - $ref: '#/components/parameters/ProposalId'
         - $ref: '#/components/parameters/IdempotencyKey'
-        - $ref: '#/components/parameters/IfMatch'
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/Hil2Decision' }
+            schema: { $ref: '#/components/schemas/KnowledgeAssistantQuery' }
       responses:
         '200':
-          description: TAKE, WAIT, or REJECT recorded; no broker write
+          description: Citation-grounded read-only answer, insufficiency, degradation, or trading refusal
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ApprovalDecision' }
-        '409': { $ref: '#/components/responses/Conflict' }
-        '410':
-          description: Proposal expired or requires revalidation
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Problem' }
+              schema: { $ref: '#/components/schemas/KnowledgeAssistantAnswer' }
         default: { $ref: '#/components/responses/Error' }
-  /reconciliations/{reconciliation_id}/decisions:
+  /trade-plans:
+    get:
+      tags: [Trading]
+      operationId: listTradePlans
+      parameters:
+        - name: account_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: state
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Authorized Trade Plans and blocked plans with complete validation evidence
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/TradePlan' }
+        default: { $ref: '#/components/responses/Error' }
+  /trade-plans/{trade_plan_id}:
+    get:
+      tags: [Trading]
+      operationId: getTradePlan
+      parameters:
+        - name: trade_plan_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Immutable plan, deterministic authorization, and execution state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TradePlan' }
+        default: { $ref: '#/components/responses/Error' }
+  /execution-commands:
+    get:
+      tags: [Operations]
+      operationId: listExecutionCommands
+      parameters:
+        - name: account_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: state
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Read-only command timeline; arbitrary command submission is not exposed
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ExecutionCommand' }
+        default: { $ref: '#/components/responses/Error' }
+  /execution-commands/{command_id}:
+    get:
+      tags: [Trading]
+      operationId: getExecutionCommand
+      parameters:
+        - name: command_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Command authorization, attempts, broker outcome, and reconciliation state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExecutionCommand' }
+        default: { $ref: '#/components/responses/Error' }
+  /reconciliations/{reconciliation_id}/resolve:
     post:
       tags: [Trading]
-      operationId: decideAmbiguousReconciliation
+      operationId: resolveAmbiguousReconciliation
       parameters:
         - name: reconciliation_id
           in: path
@@ -945,46 +1128,71 @@ paths:
           schema: { type: string, format: uuid }
         - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/StepUpGrant'
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [action]
+              required: [classification, reason]
               properties:
-                action: { enum: [CONFIRM_MATCH, REJECT_MATCH] }
+                classification: { enum: [CONFIRM_MATCH, CONFIRM_NO_MATCH, EXTERNAL_ACTIVITY] }
+                reason: { type: string, minLength: 1, maxLength: 2000 }
       responses:
         '200':
-          description: Reconciliation decision and resulting trade state
+          description: Evidence classification recorded; this endpoint cannot dispatch a broker command
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Reconciliation' }
         '409': { $ref: '#/components/responses/Conflict' }
         default: { $ref: '#/components/responses/Error' }
-  /trade-recommendations/{recommendation_id}/decisions:
-    post:
+  /broker-orders/{broker_order_id}:
+    get:
       tags: [Trading]
-      operationId: decideTradeManagement
+      operationId: getBrokerOrder
       parameters:
-        - name: recommendation_id
+        - name: broker_order_id
           in: path
           required: true
           schema: { type: string, format: uuid }
-        - $ref: '#/components/parameters/IdempotencyKey'
-        - $ref: '#/components/parameters/IfMatch'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/Hil3Decision' }
       responses:
         '200':
-          description: HIL-3 decision recorded; user performs any change manually
+          description: Reconciled broker order and fill timeline
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ApprovalDecision' }
-        '409': { $ref: '#/components/responses/Conflict' }
+              schema: { $ref: '#/components/schemas/BrokerOrder' }
+        default: { $ref: '#/components/responses/Error' }
+  /broker-positions/{broker_position_id}:
+    get:
+      tags: [Trading]
+      operationId: getBrokerPosition
+      parameters:
+        - name: broker_position_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Current authoritative broker position projection
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BrokerPosition' }
+        default: { $ref: '#/components/responses/Error' }
+  /automation/operations:
+    get:
+      tags: [Operations]
+      operationId: getAutomationOperations
+      parameters:
+        - name: account_id
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Account-grouped plans, commands, orders, positions, blocks, and kill state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AutomationOperations' }
         default: { $ref: '#/components/responses/Error' }
   /trades/{trade_id}/journal:
     get:
@@ -997,44 +1205,131 @@ paths:
           schema: { type: string, format: uuid }
       responses:
         '200':
-          description: Reconstructable append-oriented trade timeline
+          description: Structured timeline, live observations, indexing health, and terminal summary
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TradeJournal' }
+        default: { $ref: '#/components/responses/Error' }
+  /trades/{trade_id}/chart-context:
+    get:
+      tags: [Trading]
+      operationId: getTradeChartContext
+      parameters:
+        - name: trade_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: timeframe
+          in: query
+          required: true
+          schema: { type: string }
+        - name: from
+          in: query
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          schema: { type: string, format: date-time }
+        - name: indicators
+          in: query
+          schema: { type: array, items: { type: string } }
+      responses:
+        '200':
+          description: Read-only candles, freshness, mapping, Trade Plan, position, and overlays
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChartContext' }
+        default: { $ref: '#/components/responses/Error' }
+  /trades/{trade_id}/chart-events:
+    get:
+      tags: [Trading]
+      operationId: streamTradeChartEvents
+      parameters:
+        - name: trade_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: Last-Event-ID
+          in: header
+          schema: { type: string }
+      responses:
+        '200':
+          description: Read-only SSE overlay and source-health projection
+          content:
+            text/event-stream:
+              schema: { type: string }
+        default: { $ref: '#/components/responses/Error' }
+  /performance:
+    get:
+      tags: [Trading]
+      operationId: getPerformanceAnalytics
+      parameters:
+        - name: evidence_class
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/EvidenceClass', default: LIVE }
+        - name: compare
+          in: query
+          schema: { type: array, items: { $ref: '#/components/schemas/EvidenceClass' } }
+        - name: strategy_version_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: account_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: instrument_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: asset_class
+          in: query
+          schema: { $ref: '#/components/schemas/AssetClass' }
+        - name: instrument_type
+          in: query
+          schema: { $ref: '#/components/schemas/InstrumentType' }
+        - name: period
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Separate evidence-class metrics, deterministic edge, comparisons, and drill-down
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PerformanceAnalytics' }
+        default: { $ref: '#/components/responses/Error' }
+  /notifications:
+    get:
+      tags: [Notifications]
+      operationId: listNotifications
+      parameters:
+        - name: account_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: status
+          in: query
+          schema: { enum: [PENDING_ORDER, PARTIALLY_FILLED, FILLED] }
+      responses:
+        '200':
+          description: Owner-scoped logical notifications with per-channel delivery state
           content:
             application/json:
               schema:
                 type: array
-                items: { $ref: '#/components/schemas/JournalEvent' }
+                items: { $ref: '#/components/schemas/TradeEntryNotification' }
         default: { $ref: '#/components/responses/Error' }
-  /performance/strategies/{strategy_version_id}:
+  /notifications/{notification_id}:
     get:
-      tags: [Trading]
-      operationId: getStrategyPerformance
+      tags: [Notifications]
+      operationId: getNotification
       parameters:
-        - name: strategy_version_id
+        - name: notification_id
           in: path
           required: true
           schema: { type: string, format: uuid }
-        - name: account_id
-          in: query
-          required: false
-          schema: { type: string, format: uuid }
-        - name: instrument_id
-          in: query
-          required: false
-          schema: { type: string, format: uuid }
       responses:
         '200':
-          description: Structured performance metrics and evidence population
+          description: Notification evidence and idempotent delivery-attempt timeline
           content:
             application/json:
-              schema:
-                type: object
-                required: [strategy_version_id, population, metrics, calculated_at]
-                properties:
-                  strategy_version_id: { type: string, format: uuid }
-                  population: { type: integer, minimum: 0 }
-                  metrics: { type: object, additionalProperties: true }
-                  dimensions: { type: object, additionalProperties: true }
-                  calculated_at: { type: string, format: date-time }
+              schema: { $ref: '#/components/schemas/TradeEntryNotification' }
         default: { $ref: '#/components/responses/Error' }
   /events:
     get:
@@ -1098,11 +1393,12 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
-    ProposalId:
-      name: proposal_id
-      in: path
+    StepUpGrant:
+      name: X-Step-Up-Grant
+      in: header
       required: true
-      schema: { type: string, format: uuid }
+      description: Single-use action-scoped grant returned by the step-up flow
+      schema: { type: string, minLength: 16, maxLength: 512 }
   responses:
     Error:
       description: Structured safe error
@@ -1263,9 +1559,50 @@ components:
           required: [id, execution_mode, status, version]
           properties:
             id: { type: string, format: uuid }
-            execution_mode: { const: MANUAL }
+            execution_mode: { enum: [READ_ONLY, AUTOMATED] }
             status: { enum: [ACTIVE, DEGRADED, DISCONNECTED, DISABLED] }
             version: { type: integer }
+    ExecutionPermissionInput:
+      type: object
+      required: [new_entry, order_cancellation, stop_loss_change, take_profit_change,
+        partial_close, full_exit, reason]
+      properties:
+        new_entry: { type: boolean, default: false }
+        order_cancellation: { type: boolean, default: false }
+        stop_loss_change: { type: boolean, default: false }
+        take_profit_change: { type: boolean, default: false }
+        partial_close: { type: boolean, default: false }
+        full_exit: { type: boolean, default: false }
+        reason: { type: string, minLength: 1, maxLength: 2000 }
+    ExecutionPermissionProfile:
+      allOf:
+        - $ref: '#/components/schemas/ExecutionPermissionInput'
+        - type: object
+          required: [id, account_id, version, effective_at]
+          properties:
+            id: { type: string, format: uuid }
+            account_id: { type: string, format: uuid }
+            version: { type: integer, minimum: 1 }
+            effective_at: { type: string, format: date-time }
+    KillSwitchChange:
+      type: object
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 1, maxLength: 2000 }
+    KillSwitchState:
+      type: object
+      required: [id, scope, active, safety_epoch, activated_at, version]
+      properties:
+        id: { type: string, format: uuid }
+        scope: { enum: [PLATFORM, ACCOUNT] }
+        account_id: { type: [string, 'null'], format: uuid }
+        active: { type: boolean }
+        effective_active: { type: boolean }
+        safety_epoch: { type: integer, minimum: 0 }
+        reason: { type: string }
+        activated_at: { type: string, format: date-time }
+        deactivated_at: { type: [string, 'null'], format: date-time }
+        version: { type: integer, minimum: 1 }
     Money:
       type: object
       required: [amount, currency]
@@ -1464,7 +1801,7 @@ components:
         id: { type: string, format: uuid }
         account_id: { type: string, format: uuid }
         matrix_version: { type: integer, minimum: 1 }
-        status: { enum: [QUEUED, RESEARCHING, MARKETS_PENDING_APPROVAL, MARKETS_APPROVED,
+        status: { enum: [QUEUED, RESEARCHING, ANALYZING, COMPLETE,
           DEGRADED, NO_TRADE, FAILED, EXPIRED] }
         lane_results:
           type: array
@@ -1472,19 +1809,20 @@ components:
           maxItems: 12
           items: { $ref: '#/components/schemas/ResearchLaneResult' }
         version: { type: integer }
-    Hil1Decision:
+    MarketSelection:
       type: object
-      required: [action]
+      required: [id, run_id, lane, candidate_id, state, selected_at, version]
       properties:
-        action: { enum: [APPROVE, REPLACE, RERUN_RESEARCH] }
-        replacements:
-          type: array
-          items:
-            type: object
-            required: [lane, candidate_id]
-            properties:
-              lane: { $ref: '#/components/schemas/ResearchLaneKey' }
-              candidate_id: { type: string, format: uuid }
+        id: { type: string, format: uuid }
+        run_id: { type: string, format: uuid }
+        lane: { $ref: '#/components/schemas/ResearchLaneKey' }
+        candidate_id: { type: string, format: uuid }
+        state: { enum: [SELECTED, ANALYZING, INVALIDATED, FALLBACK_SELECTED, NO_TRADE, EXPIRED] }
+        selection_reason: { type: string }
+        invalidation_reason: { type: string }
+        previous_selection_id: { type: string, format: uuid }
+        selected_at: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
     StrategyDraftInput:
       type: object
       required: [origin_type]
@@ -1630,16 +1968,17 @@ components:
         requested_size: { type: string }
         quantity_unit: { enum: [UNITS, SHARES, LOTS, CONTRACTS] }
         invalidation: { type: object, additionalProperties: true }
-    TradeProposal:
+    TradePlan:
       type: object
       required: [id, account_id, state, construction, strategy_version_id,
         market_fingerprint_id, account_snapshot, risk_result, policy_status,
-        guardrail_status, critic_status, expires_at, version]
+        guardrail_status, critic_status, execution_permissions, kill_switch_state,
+        expires_at, version]
       properties:
         id: { type: string, format: uuid }
         account_id: { type: string, format: uuid }
-        state: { enum: [TRADE_PENDING_APPROVAL, AWAITING_MANUAL_ENTRY, WAITING,
-          REJECTED, EXPIRED, REVALIDATION_REQUIRED] }
+        state: { enum: [CONSTRUCTED, VALIDATING, BLOCKED, READY, AUTHORIZED,
+          EXECUTION_PENDING, EXECUTING, ACTIVE, EXPIRED, CANCELLED, REVALIDATION_REQUIRED] }
         construction: { $ref: '#/components/schemas/TradeConstruction' }
         strategy_version_id: { type: string, format: uuid }
         market_fingerprint_id: { type: string, format: uuid }
@@ -1649,38 +1988,124 @@ components:
         policy_status: { enum: [PASS, WARNING] }
         guardrail_status: { enum: [PASS, WARNING] }
         critic_status: { enum: [PASS] }
+        execution_permissions: { $ref: '#/components/schemas/ExecutionPermissionProfile' }
+        kill_switch_state: { $ref: '#/components/schemas/KillSwitchState' }
+        authorization: { $ref: '#/components/schemas/ExecutionAuthorization' }
         expires_at: { type: string, format: date-time }
         version: { type: integer }
-    Hil2Decision:
+    ExecutionAuthorization:
       type: object
-      required: [action]
-      properties:
-        action: { enum: [TAKE, WAIT, REJECT] }
-        rationale: { type: string, maxLength: 2000 }
-    Hil3Decision:
-      type: object
-      required: [action]
-      properties:
-        action: { enum: [APPROVE, WAIT, REJECT] }
-        rationale: { type: string, maxLength: 2000 }
-    ApprovalDecision:
-      type: object
-      required: [id, approval_type, action, resolved_at, resulting_subject_version]
+      required: [id, action, permission_version, platform_safety_epoch,
+        account_safety_epoch, authorization_digest, issued_at, expires_at]
       properties:
         id: { type: string, format: uuid }
-        approval_type: { enum: [MARKET_SELECTION, TRADE_ENTRY, TRADE_MANAGEMENT] }
-        action: { type: string }
-        resolved_at: { type: string, format: date-time }
-        resulting_subject_version: { type: integer }
+        action: { $ref: '#/components/schemas/ExecutionAction' }
+        permission_version: { type: integer, minimum: 1 }
+        platform_safety_epoch: { type: integer, minimum: 0 }
+        account_safety_epoch: { type: integer, minimum: 0 }
+        account_snapshot_id: { type: string, format: uuid }
+        risk_result_id: { type: string, format: uuid }
+        authorization_digest: { type: string }
+        issued_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+    ExecutionAction:
+      enum: [PLACE_ORDER, CANCEL_ORDER, SET_OR_CHANGE_STOP_LOSS,
+        SET_OR_CHANGE_TAKE_PROFIT, PARTIAL_CLOSE, FULL_EXIT]
+    ExecutionCommand:
+      type: object
+      required: [id, account_id, action, state, idempotency_key, authorization_id,
+        outcome_certainty, attempts, created_at, version]
+      properties:
+        id: { type: string, format: uuid }
+        account_id: { type: string, format: uuid }
+        trade_plan_id: { type: string, format: uuid }
+        management_action_id: { type: string, format: uuid }
+        authorization_id: { type: string, format: uuid }
+        action: { $ref: '#/components/schemas/ExecutionAction' }
+        target_order_id: { type: string }
+        target_position_id: { type: string }
+        expected_broker_version: { type: string }
+        requested_postcondition: { type: object, additionalProperties: true }
+        idempotency_key: { type: string }
+        state: { enum: [CREATED, VALIDATING, BLOCKED, AUTHORIZED, QUEUED, DISPATCHING,
+          ACKNOWLEDGED, PARTIALLY_APPLIED, APPLIED, REJECTED, SUPERSEDED,
+          OUTCOME_UNKNOWN, RECONCILING, NO_EFFECT_CONFIRMED, BLOCKED_AMBIGUOUS, EXPIRED] }
+        outcome_certainty: { enum: [NONE, UNCERTAIN, CONFIRMED] }
+        attempts:
+          type: array
+          items: { $ref: '#/components/schemas/ExecutionAttempt' }
+        broker_order_id: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+    ExecutionAttempt:
+      type: object
+      required: [attempt, dispatched_at, request_digest, state]
+      properties:
+        attempt: { type: integer, minimum: 1 }
+        state: { enum: [DISPATCHING, ACKNOWLEDGED, REJECTED, OUTCOME_UNKNOWN] }
+        dispatched_at: { type: string, format: date-time }
+        acknowledged_at: { type: [string, 'null'], format: date-time }
+        request_digest: { type: string }
+        response_digest: { type: string }
+        error_code: { type: string }
+    BrokerFill:
+      type: object
+      required: [id, broker_execution_id, quantity, price, broker_time]
+      properties:
+        id: { type: string, format: uuid }
+        broker_execution_id: { type: string }
+        quantity: { type: string }
+        cumulative_quantity: { type: string }
+        price: { type: string }
+        fees: { $ref: '#/components/schemas/Money' }
+        broker_time: { type: string, format: date-time }
+    BrokerOrder:
+      type: object
+      required: [id, account_id, broker_order_id, status, requested_quantity,
+        cumulative_filled_quantity, fills, broker_version]
+      properties:
+        id: { type: string, format: uuid }
+        account_id: { type: string, format: uuid }
+        command_id: { type: string, format: uuid }
+        broker_order_id: { type: string }
+        status: { enum: [PENDING, ACCEPTED, PARTIALLY_FILLED, FILLED, CANCELLED, REJECTED, EXPIRED] }
+        requested_quantity: { type: string }
+        cumulative_filled_quantity: { type: string }
+        average_fill_price: { type: string }
+        broker_version: { type: string }
+        fills: { type: array, items: { $ref: '#/components/schemas/BrokerFill' } }
+    BrokerPosition:
+      type: object
+      required: [id, account_id, broker_position_id, origin, instrument_id,
+        quantity, entry_price, status, broker_version, source_time]
+      properties:
+        id: { type: string, format: uuid }
+        account_id: { type: string, format: uuid }
+        broker_position_id: { type: string }
+        origin: { enum: [MATRADES, EXTERNAL] }
+        instrument_id: { type: string, format: uuid }
+        venue_instrument_id: { type: string, format: uuid }
+        futures_contract_id: { type: [string, 'null'], format: uuid }
+        quantity: { type: string }
+        entry_price: { type: string }
+        stop_loss: { type: [string, 'null'] }
+        take_profit: { type: [string, 'null'] }
+        pnl: { $ref: '#/components/schemas/Money' }
+        status: { enum: [ACTIVE, CLOSED, STALE, BLOCKED_RECONCILIATION] }
+        broker_version: { type: string }
+        source_time: { type: string, format: date-time }
     Reconciliation:
       type: object
-      required: [id, proposal_id, broker_position_id, status, version]
+      required: [id, account_id, status, certainty, version]
       properties:
         id: { type: string, format: uuid }
-        proposal_id: { type: string, format: uuid }
+        account_id: { type: string, format: uuid }
+        command_id: { type: string, format: uuid }
+        trade_plan_id: { type: string, format: uuid }
+        broker_order_id: { type: string, format: uuid }
         broker_position_id: { type: string }
-        status: { enum: [CANDIDATE, AUTO_MATCHED, USER_CONFIRMATION_REQUIRED,
-          CONFIRMED, REJECTED, SUPERSEDED] }
+        status: { enum: [RUNNING, CONFIRMED, NO_EFFECT_CONFIRMED, BLOCKED_AMBIGUOUS, FAILED] }
+        certainty: { enum: [UNKNOWN, UNIQUE, AMBIGUOUS, NO_EFFECT] }
         actual_values: { type: object, additionalProperties: true }
         version: { type: integer }
     JournalEvent:
@@ -1693,6 +2118,221 @@ components:
         occurred_at: { type: string, format: date-time }
         evidence_refs: { type: array, items: { type: string } }
         payload: { type: object, additionalProperties: true }
+    LiveJournalObservation:
+      type: object
+      required: [id, trade_id, observed_at, text, evidence_refs, model_run_id]
+      properties:
+        id: { type: string, format: uuid }
+        trade_id: { type: string, format: uuid }
+        observed_at: { type: string, format: date-time }
+        text: { type: string }
+        evidence_refs: { type: array, minItems: 1, items: { type: string } }
+        model_run_id: { type: string, format: uuid }
+        prompt_snapshot_id: { type: string, format: uuid }
+    PostTradeSummary:
+      type: object
+      required: [id, trade_id, generated_at, summary, evidence_refs]
+      properties:
+        id: { type: string, format: uuid }
+        trade_id: { type: string, format: uuid }
+        generated_at: { type: string, format: date-time }
+        summary: { type: string }
+        evidence_refs: { type: array, minItems: 1, items: { type: string } }
+        lessons: { type: array, items: { type: string } }
+    TradeJournal:
+      type: object
+      required: [trade_id, events, observations, indexing_status]
+      properties:
+        trade_id: { type: string, format: uuid }
+        events: { type: array, items: { $ref: '#/components/schemas/JournalEvent' } }
+        observations:
+          type: array
+          items: { $ref: '#/components/schemas/LiveJournalObservation' }
+        terminal_summary: { $ref: '#/components/schemas/PostTradeSummary' }
+        indexing_status: { enum: [CURRENT, PENDING, DEGRADED, FAILED] }
+        indexed_through_event_id: { type: string, format: uuid }
+        indexing_lag_seconds: { type: integer, minimum: 0 }
+    KnowledgeAssistantQuery:
+      type: object
+      required: [question]
+      properties:
+        question: { type: string, minLength: 1, maxLength: 4000 }
+        account_id: { type: string, format: uuid }
+        trade_id: { type: string, format: uuid }
+        source_types: { type: array, items: { type: string } }
+        filters: { type: object, additionalProperties: true }
+    KnowledgeCitation:
+      type: object
+      required: [source_id, document_id, segment_id, version, excerpt]
+      properties:
+        source_id: { type: string, format: uuid }
+        document_id: { type: string, format: uuid }
+        segment_id: { type: string }
+        version: { type: string }
+        excerpt: { type: string }
+        source_time: { type: string, format: date-time }
+        freshness: { enum: [FRESH, STALE, UNKNOWN] }
+    KnowledgeClaim:
+      type: object
+      required: [text, citation_indexes]
+      properties:
+        text: { type: string }
+        citation_indexes:
+          type: array
+          minItems: 1
+          items: { type: integer, minimum: 0 }
+    KnowledgeAssistantAnswer:
+      type: object
+      required: [id, status, answer, claims, citations, retrieval_audit_id, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        status: { enum: [ANSWERED, PARTIAL, INSUFFICIENT, DEGRADED, REFUSED] }
+        answer: { type: string }
+        refusal_reason: { type: string }
+        claims: { type: array, items: { $ref: '#/components/schemas/KnowledgeClaim' } }
+        citations: { type: array, items: { $ref: '#/components/schemas/KnowledgeCitation' } }
+        retrieval_audit_id: { type: string, format: uuid }
+        source_health: { type: object, additionalProperties: true }
+        created_at: { type: string, format: date-time }
+    ChartCandle:
+      type: object
+      required: [time, open, high, low, close]
+      properties:
+        time: { type: string, format: date-time }
+        open: { type: string }
+        high: { type: string }
+        low: { type: string }
+        close: { type: string }
+        volume: { type: string }
+    ChartOverlay:
+      type: object
+      required: [id, type, occurred_at, payload]
+      properties:
+        id: { type: string }
+        type: { enum: [PLANNED_ENTRY, STOP_LOSS, TAKE_PROFIT, FILL, MANAGEMENT_ACTION,
+          JOURNAL_EVENT, POSITION_UPDATE] }
+        occurred_at: { type: string, format: date-time }
+        payload: { type: object, additionalProperties: true }
+    ChartContext:
+      type: object
+      required: [trade_id, venue_instrument_id, timeframe, source_time, freshness,
+        candles, overlays, read_only]
+      properties:
+        trade_id: { type: string, format: uuid }
+        venue_instrument_id: { type: string, format: uuid }
+        futures_contract_id: { type: [string, 'null'], format: uuid }
+        timeframe: { type: string }
+        source_time: { type: string, format: date-time }
+        freshness: { enum: [FRESH, STALE, UNAVAILABLE] }
+        mapping: { type: object, additionalProperties: true }
+        candles: { type: array, items: { $ref: '#/components/schemas/ChartCandle' } }
+        indicators: { type: object, additionalProperties: true }
+        overlays: { type: array, items: { $ref: '#/components/schemas/ChartOverlay' } }
+        read_only: { type: boolean, const: true }
+    EvidenceClass:
+      enum: [BACKTEST, PAPER, LIVE, VALIDATION, PROJECTION]
+    PerformanceMetricSet:
+      type: object
+      required: [evidence_class, sample_size, win_rate, net_profit, gross_profit,
+        gross_loss, profit_factor, expectancy, maximum_drawdown, payoff_ratio]
+      properties:
+        evidence_class: { $ref: '#/components/schemas/EvidenceClass' }
+        sample_size: { type: integer, minimum: 0 }
+        win_rate: { type: string }
+        net_profit: { $ref: '#/components/schemas/Money' }
+        gross_profit: { $ref: '#/components/schemas/Money' }
+        gross_loss: { $ref: '#/components/schemas/Money' }
+        profit_factor: { type: string }
+        expectancy: { type: string }
+        maximum_drawdown: { type: string }
+        payoff_ratio: { type: string }
+        return_on_risk: { type: string }
+    EdgeAssessment:
+      type: object
+      required: [status, method, sample_size, value, confidence, inputs_digest]
+      properties:
+        status: { enum: [POSITIVE, NEGATIVE, INCONCLUSIVE, INSUFFICIENT_SAMPLE] }
+        method: { type: string }
+        sample_size: { type: integer, minimum: 0 }
+        value: { type: string }
+        confidence: { type: string }
+        inputs_digest: { type: string }
+    PerformanceAnalytics:
+      type: object
+      required: [filters, metric_sets, edge_assessments, generated_at]
+      properties:
+        filters: { type: object, additionalProperties: true }
+        metric_sets:
+          type: array
+          items: { $ref: '#/components/schemas/PerformanceMetricSet' }
+        edge_assessments:
+          type: array
+          items: { $ref: '#/components/schemas/EdgeAssessment' }
+        drill_down_refs: { type: array, items: { type: string } }
+        generated_at: { type: string, format: date-time }
+    NotificationDelivery:
+      type: object
+      required: [id, channel, notification_version, state, idempotency_key, attempts]
+      properties:
+        id: { type: string, format: uuid }
+        channel: { enum: [IN_PRODUCT, TELEGRAM, PUSHOVER] }
+        notification_version: { type: integer, minimum: 1 }
+        state: { enum: [QUEUED, SENDING, DELIVERED, RETRY, FAILED, UNKNOWN_DELIVERY] }
+        idempotency_key: { type: string }
+        provider_message_id: { type: string }
+        attempts:
+          type: array
+          items:
+            type: object
+            required: [attempt, requested_at, state]
+            properties:
+              attempt: { type: integer, minimum: 1 }
+              requested_at: { type: string, format: date-time }
+              completed_at: { type: [string, 'null'], format: date-time }
+              state: { enum: [SENDING, DELIVERED, RETRY, FAILED, UNKNOWN_DELIVERY] }
+              safe_error_code: { type: string }
+    TradeEntryNotification:
+      type: object
+      required: [id, account_id, broker_order_id, trade_plan_id, status, version,
+        confirmed_broker_event_id, deliveries, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        account_id: { type: string, format: uuid }
+        broker_order_id: { type: string, format: uuid }
+        trade_plan_id: { type: string, format: uuid }
+        status: { enum: [PENDING_ORDER, PARTIALLY_FILLED, FILLED] }
+        side: { enum: [BUY, SELL] }
+        cumulative_quantity: { type: string }
+        average_fill_price: { type: string }
+        stop_loss: { type: [string, 'null'] }
+        take_profit: { type: [string, 'null'] }
+        confirmed_broker_event_id: { type: string, format: uuid }
+        version: { type: integer, minimum: 1 }
+        deliveries:
+          type: array
+          items: { $ref: '#/components/schemas/NotificationDelivery' }
+        updated_at: { type: string, format: date-time }
+    AutomationOperations:
+      type: object
+      required: [platform_kill_switch, accounts, generated_at]
+      properties:
+        platform_kill_switch: { $ref: '#/components/schemas/KillSwitchState' }
+        accounts:
+          type: array
+          items:
+            type: object
+            required: [account_id, execution_permissions, kill_switch, plans, commands,
+              orders, positions, blocks]
+            properties:
+              account_id: { type: string, format: uuid }
+              execution_permissions: { $ref: '#/components/schemas/ExecutionPermissionProfile' }
+              kill_switch: { $ref: '#/components/schemas/KillSwitchState' }
+              plans: { type: array, items: { $ref: '#/components/schemas/TradePlan' } }
+              commands: { type: array, items: { $ref: '#/components/schemas/ExecutionCommand' } }
+              orders: { type: array, items: { $ref: '#/components/schemas/BrokerOrder' } }
+              positions: { type: array, items: { $ref: '#/components/schemas/BrokerPosition' } }
+              blocks: { type: array, items: { type: object, additionalProperties: true } }
+        generated_at: { type: string, format: date-time }
     Job:
       type: object
       required: [id, type, status]

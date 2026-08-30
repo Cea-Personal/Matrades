@@ -210,7 +210,7 @@ class AutonomousResearchWorkflow:
             selected.append(best)
 
         unique_missing = list(dict.fromkeys(missing))
-        state = "MARKETS_PENDING_APPROVAL" if not unique_missing and not degraded else "DEGRADED"
+        state = "COMPLETED" if not unique_missing and not degraded else "DEGRADED"
         return ResearchCycleResult(
             state=state,
             candidates=selected,
@@ -249,7 +249,7 @@ class AutonomousResearchWorkflow:
                     ResearchLaneResult(
                         run_id=run.id,
                         lane=lane,
-                        status=LaneStatus.UNAVAILABLE,
+                        status=getattr(exc, "lane_status", LaneStatus.UNAVAILABLE),
                         reason_code=f"PROVIDER_ERROR:{type(exc).__name__}",
                         completed_at=datetime.now(UTC),
                     )
@@ -267,13 +267,75 @@ class AutonomousResearchWorkflow:
                     )
                 )
                 continue
-            role = ASSET_CLASS_ROLES[lane.asset_class]
+            reviews: list[AgentReview] = []
+            adjusted_scores = {item.listing.symbol: min(100.0, item.volume) for item in typed}
+            analyst_failed = False
+            for role in (*ANALYST_ROLES, ASSET_CLASS_ROLES[lane.asset_class]):
+                try:
+                    response = await self.agents.invoke(
+                        role,
+                        {
+                            "lane": lane.model_dump(mode="json"),
+                            "candidates": [item.model_dump(mode="json") for item in typed],
+                        },
+                        AGENT_OUTPUT_SCHEMA,
+                    )
+                    evidence = [str(item) for item in response.get("evidence", [])]
+                    reviews.append(
+                        AgentReview(
+                            logical_id=role,
+                            status=str(response.get("decision", "REASSESS")).upper(),
+                            evidence=evidence,
+                        )
+                    )
+                    if str(response.get("decision", "REASSESS")).upper() != "PASS":
+                        analyst_failed = True
+                        break
+                    for symbol, adjustment in _bounded_adjustments(response).items():
+                        if symbol in adjusted_scores:
+                            adjusted_scores[symbol] = max(
+                                0.0, min(100.0, adjusted_scores[symbol] + adjustment)
+                            )
+                except Exception as exc:
+                    results.append(
+                        ResearchLaneResult(
+                            run_id=run.id,
+                            lane=lane,
+                            status=LaneStatus.UNAVAILABLE,
+                            reason_code=f"AGENT_ERROR:{role}:{type(exc).__name__}",
+                            exclusions=[f"agent={role}"],
+                            completed_at=datetime.now(UTC),
+                        )
+                    )
+                    analyst_failed = True
+                    break
+            if analyst_failed:
+                if not results or results[-1].lane != lane:
+                    results.append(
+                        ResearchLaneResult(
+                            run_id=run.id,
+                            lane=lane,
+                            status=LaneStatus.NO_TRADE,
+                            reason_code="ANALYST_REASSESS",
+                            exclusions=[
+                                review.logical_id
+                                for review in reviews
+                                if review.status != "PASS"
+                            ],
+                            completed_at=datetime.now(UTC),
+                        )
+                    )
+                continue
+            ranked_snapshots = sorted(
+                typed,
+                key=lambda item: (-adjusted_scores[item.listing.symbol], item.listing.symbol),
+            )
             try:
                 response = await self.agents.invoke(
-                    role,
+                    "critic",
                     {
                         "lane": lane.model_dump(mode="json"),
-                        "candidates": [item.model_dump(mode="json") for item in typed],
+                        "candidates": [item.model_dump(mode="json") for item in ranked_snapshots],
                     },
                     AGENT_OUTPUT_SCHEMA,
                 )
@@ -283,7 +345,8 @@ class AutonomousResearchWorkflow:
                             run_id=run.id,
                             lane=lane,
                             status=LaneStatus.NO_TRADE,
-                            reason_code="SPECIALIST_REASSESS",
+                            reason_code="CRITIC_REASSESS",
+                            exclusions=[item.listing.symbol for item in ranked_snapshots],
                             completed_at=datetime.now(UTC),
                         )
                     )
@@ -294,39 +357,49 @@ class AutonomousResearchWorkflow:
                         run_id=run.id,
                         lane=lane,
                         status=LaneStatus.UNAVAILABLE,
-                        reason_code=f"SPECIALIST_ERROR:{type(exc).__name__}",
+                        reason_code=f"CRITIC_ERROR:{type(exc).__name__}",
                         completed_at=datetime.now(UTC),
                     )
                 )
                 continue
-            selected = max(typed, key=lambda item: (item.volume, item.listing.symbol))
-            fingerprint = TypedMarketFingerprint(
-                listing_id=selected.listing.id,
-                asset_class=lane.asset_class,
-                instrument_type=lane.instrument_type,
-                observed_at=selected.observed_at,
-                source_cut_id=selected.source_cut_id,
-                regime="UNCLASSIFIED",
-                trend_score=0.0,
-                volatility_score=0.0,
-                liquidity_score=selected.volume,
-                data_quality=1.0,
-            )
-            candidate = TypedResearchCandidate(
-                lane=lane,
-                listing=selected.listing,
-                specification=selected.specification,
-                score=min(100.0, selected.volume),
-                fingerprint=fingerprint,
-                evidence=[f"source_cut={selected.source_cut_id}"],
-            )
+            candidates: list[TypedResearchCandidate] = []
+            for rank, snapshot in enumerate(ranked_snapshots, start=1):
+                fingerprint = TypedMarketFingerprint(
+                    listing_id=snapshot.listing.id,
+                    asset_class=lane.asset_class,
+                    instrument_type=lane.instrument_type,
+                    observed_at=snapshot.observed_at,
+                    source_cut_id=snapshot.source_cut_id,
+                    regime="UNCLASSIFIED",
+                    trend_score=0.0,
+                    volatility_score=0.0,
+                    liquidity_score=snapshot.volume,
+                    data_quality=1.0,
+                )
+                candidates.append(
+                    TypedResearchCandidate(
+                        lane=lane,
+                        listing=snapshot.listing,
+                        specification=snapshot.specification,
+                        rank=rank,
+                        score=round(adjusted_scores[snapshot.listing.symbol], 4),
+                        fingerprint=fingerprint,
+                        evidence=[f"source_cut={snapshot.source_cut_id}"] + [
+                            evidence
+                            for review in reviews
+                            for evidence in review.evidence
+                        ],
+                    )
+                )
             results.append(
                 ResearchLaneResult(
                     run_id=run.id,
                     lane=lane,
                     status=LaneStatus.READY,
-                    candidate=candidate,
-                    source_cut_refs=[selected.source_cut_id],
+                    candidate=candidates[0],
+                    ranked_candidates=candidates,
+                    exclusions=[item.listing.symbol for item in ranked_snapshots[1:]],
+                    source_cut_refs=[item.source_cut_id for item in ranked_snapshots],
                     completed_at=datetime.now(UTC),
                 )
             )

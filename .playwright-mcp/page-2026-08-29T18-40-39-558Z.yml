@@ -1,0 +1,164 @@
+- generic [active] [ref=e1]:
+  - alert [ref=e3]: Matrades
+  - generic [ref=e4]:
+    - complementary [ref=e5]:
+      - link "MATRADES" [ref=e6] [cursor=pointer]:
+        - /url: /
+      - paragraph [ref=e7]: Evidence, automation, and accountable execution.
+      - navigation "Primary" [ref=e8]:
+        - link "Overview" [ref=e9] [cursor=pointer]:
+          - /url: /
+        - link "Trade desk" [ref=e10] [cursor=pointer]:
+          - /url: /trading
+        - link "Research" [ref=e11] [cursor=pointer]:
+          - /url: /research
+        - link "Strategies" [ref=e12] [cursor=pointer]:
+          - /url: /strategies
+        - link "Connections" [ref=e13] [cursor=pointer]:
+          - /url: /connections
+        - link "Configuration" [ref=e14] [cursor=pointer]:
+          - /url: /configuration
+        - link "Agents" [ref=e15] [cursor=pointer]:
+          - /url: /agents
+        - link "Knowledge" [ref=e16] [cursor=pointer]:
+          - /url: /knowledge
+        - link "Operations" [ref=e17] [cursor=pointer]:
+          - /url: /operations
+        - generic [ref=e18]:
+          - link "Extras" [ref=e19] [cursor=pointer]:
+            - /url: /extras
+          - link "Market research" [ref=e20] [cursor=pointer]:
+            - /url: /extras?folder=market-research
+          - link "Strategy research" [ref=e21] [cursor=pointer]:
+            - /url: /extras?folder=strategy-research
+          - link "Trade recommendations" [ref=e22] [cursor=pointer]:
+            - /url: /extras?folder=trade-recommendations
+          - link "Generated code" [ref=e23] [cursor=pointer]:
+            - /url: /extras?folder=generated-code
+          - link "MT5 bridge EA" [ref=e24] [cursor=pointer]:
+            - /url: /extras?folder=mt5-bridge-ea
+      - generic [ref=e58]:
+        - generic [ref=e59]: codex.mt5.20260829@example.com
+        - generic [ref=e60]: OWNER
+        - button "Sign out" [ref=e61] [cursor=pointer]
+    - main [ref=e25]:
+      - generic [ref=e85]:
+        - generic [ref=e86]:
+          - paragraph [ref=e87]: Provider boundary
+          - heading "Connections & data sources" [level=1] [ref=e88]
+          - paragraph [ref=e89]: Configure the authoritative sources used by research, backtesting, macro context, and read-only broker reconciliation. Secrets remain encrypted and replacement requires MFA step-up.
+        - generic [ref=e90]:
+          - generic [ref=e91]:
+            - heading "1. Store a credential" [level=2] [ref=e92]
+            - generic [ref=e93]:
+              - text: Provider
+              - combobox "Provider" [ref=e94]:
+                - option "Twelve Data"
+                - option "FRED"
+                - option "SerpApi (YouTube discovery)"
+                - option "MT5 Bridge" [selected]
+            - generic [ref=e95]:
+              - text: Credential name
+              - textbox "Credential name" [ref=e96]
+            - generic [ref=e97]:
+              - text: Secret / API key
+              - textbox "Secret / API key" [ref=e98]
+            - button "Encrypt credential" [ref=e99] [cursor=pointer]
+          - generic [ref=e100]:
+            - heading "2. Add connection" [level=2] [ref=e101]
+            - generic [ref=e102]:
+              - text: Data source
+              - combobox "Data source" [ref=e103]:
+                - option "Twelve Data"
+                - option "Coinbase"
+                - option "CoinGecko"
+                - option "FRED"
+                - option "CFTC Commitments of Traders"
+                - option "Futures reference / contract chain"
+                - option "Calendar"
+                - option "News"
+                - option "Forex Factory"
+                - option "SerpApi (YouTube discovery)"
+                - option "MT5 Bridge" [selected]
+            - generic [ref=e104]:
+              - text: Connection name
+              - textbox "Connection name" [ref=e105]
+            - generic [ref=e106]:
+              - text: Encrypted credential
+              - combobox "Encrypted credential" [ref=e107]:
+                - option "Select credential" [selected]
+                - option "Local MT5 bridge · ••••cret"
+            - generic [ref=e163]:
+              - text: Bridge URL
+              - textbox "Bridge URL" [ref=e164]: http://host.docker.internal:8765
+            - generic [ref=e165]:
+              - text: Account reference
+              - textbox "Account reference" [ref=e166]
+            - button "Save connection" [ref=e109] [cursor=pointer]
+        - paragraph [ref=e153]: Encrypted credential saved. Select it when creating the connection.
+        - article [ref=e110]:
+          - heading "Forex Factory scraper schedule" [level=2] [ref=e111]
+          - paragraph [ref=e112]: The scheduler checks every minute and runs the scraper independently for each trading account. A period already archived is skipped without another provider request.
+          - paragraph [ref=e113]: Configure a trading account first.
+        - article [ref=e114]:
+          - generic [ref=e116]:
+            - heading "Forex Factory scraper" [level=2] [ref=e117]
+            - paragraph [ref=e118]: Run the calendar scraper directly to retrieve normalized scheduled events. Autonomous scheduled runs use the same period archive and skip periods already saved.
+          - paragraph [ref=e119]: No Forex Factory scraper configured.
+        - article [ref=e120]:
+          - heading "Stored credentials" [level=2] [ref=e121]
+          - paragraph [ref=e122]: Secrets remain •••• masked after entry. Testing a connection also updates its linked credential status. Replacing a key keeps linked connections; deleting a key permanently discards its encrypted secret and disables linked connections.
+          - list [ref=e154]:
+            - listitem [ref=e155]:
+              - strong [ref=e156]: Local MT5 bridge
+              - generic [ref=e157]: MT5_BRIDGE · ••••cret
+              - generic [ref=e158]: UNTESTED
+              - generic [ref=e159]:
+                - button "Test credential" [ref=e160] [cursor=pointer]
+                - button "Replace" [ref=e161] [cursor=pointer]
+                - button "Delete" [ref=e162] [cursor=pointer]
+        - article [ref=e124]:
+          - heading "Configured data sources" [level=2] [ref=e125]
+          - paragraph [ref=e126]: This includes market, economic, knowledge, and broker connections such as MT5 Bridge. Twelve Data health checks are cached for one hour to conserve API quota. Replacing its credential resets the cache and allows an immediate fresh check. Removing a source opens an MFA confirmation dialog.
+          - paragraph [ref=e127]: No data-source connections configured.
+      - generic [ref=e128]:
+        - generic [ref=e129]:
+          - paragraph [ref=e130]: Connection authority
+          - heading "Provider bindings" [level=2] [ref=e131]
+          - paragraph [ref=e132]: Bind configured data sources to this account’s enabled market lanes or to its economic context. Market lanes always come from the active account research matrix.
+        - article [ref=e133]:
+          - generic [ref=e134]:
+            - text: Trading account
+            - combobox "Trading account" [ref=e135]
+          - generic [ref=e136]:
+            - generic [ref=e137]:
+              - text: Binding use
+              - combobox "Binding use" [ref=e138]:
+                - option "Market research" [selected]
+                - option "Economic calendar, news & macro context"
+            - generic [ref=e139]:
+              - text: Matrix lane
+              - combobox "Matrix lane" [ref=e140]
+          - paragraph [ref=e141]: This account has no enabled research lanes. Update its matrix in Research first.
+          - generic [ref=e142]:
+            - generic [ref=e143]:
+              - text: Capability
+              - combobox "Capability" [ref=e144]:
+                - option "DISCOVERY" [selected]
+                - option "INSTRUMENT_DIRECTORY"
+                - option "QUOTE"
+                - option "CANDLES"
+                - option "FUTURES_CHAIN"
+                - option "CONTRACT_DETAILS"
+                - option "OPEN_INTEREST"
+            - generic [ref=e145]:
+              - text: Priority
+              - spinbutton "Priority" [ref=e146]: "1"
+          - generic [ref=e147]:
+            - text: Configured connection
+            - combobox "Configured connection" [ref=e148]:
+              - option "Select a connection" [selected]
+          - button "Save provider binding" [disabled] [ref=e149]
+        - article [ref=e150]:
+          - heading "Current provider bindings" [level=3] [ref=e151]
+          - paragraph [ref=e152]: No provider bindings for this account.

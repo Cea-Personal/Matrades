@@ -4,12 +4,14 @@ import pytest
 
 from modules.trading.broker_models import ManagementRecommendation, RecommendationAction
 from modules.trading.hil3 import Hil3Action, decide
+from modules.trading.legacy_compatibility import LegacyWorkflowDisabled
 
 
-def test_approval_revalidates_policy_and_never_mutates_broker():
+def test_hil3_write_is_disabled_for_autonomous_execution():
     item = ManagementRecommendation(
         trade_id=uuid4(), action=RecommendationAction.MOVE_SL, reason="protect"
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(LegacyWorkflowDisabled):
         decide(item, Hil3Action.APPROVE, False)
-    assert decide(item, Hil3Action.APPROVE, True)["broker_mutated"] is False
+    with pytest.raises(LegacyWorkflowDisabled):
+        decide(item, Hil3Action.APPROVE, True)

@@ -1,4 +1,4 @@
-"""Generated boundary models for the V1 decision endpoints.
+"""Generated boundary models for the V2 autonomous execution endpoints.
 
 Source: specs/001-matrades-product-platform/contracts/openapi.yaml
 """
@@ -7,7 +7,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
-CONTRACT_VERSION = "matrades.openapi.v1"
+CONTRACT_VERSION = "matrades.openapi.v2"
 
 
 class AssetClass(StrEnum):

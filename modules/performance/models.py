@@ -6,7 +6,13 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
-from packages.shared.domain_types import AssetClass, InstrumentType, QuantityUnit
+from packages.shared.domain_types import (
+    AssetClass,
+    AwareDateTime,
+    EvidenceClass,
+    InstrumentType,
+    QuantityUnit,
+)
 
 
 class PerformanceRecord(BaseModel):
@@ -28,6 +34,15 @@ class PerformanceRecord(BaseModel):
     quantity_unit: QuantityUnit | None = None
     financing: Decimal = Decimal("0")
     funding: Decimal = Decimal("0")
+    commissions: Decimal = Decimal("0")
+    slippage: Decimal = Decimal("0")
+    spread_cost: Decimal = Decimal("0")
+    status: str = "COMPLETED"
+    closed_at: AwareDateTime | None = None
+    source_refs: tuple[str, ...] = ()
+    conversion_metadata: dict[str, str] = {}
+    evaluator_version: str = "performance-v1"
+    evidence_class: EvidenceClass = EvidenceClass.LIVE
 
 
 class HealthAction(StrEnum):

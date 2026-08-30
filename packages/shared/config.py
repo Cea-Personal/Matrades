@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./matrades.db"
     redis_url: str = "redis://localhost:6379/0"
     secret_key: SecretStr = Field(default=SecretStr("development-only-secret-key-change-me"))
+    mt5_authority_token: SecretStr = Field(
+        default=SecretStr("development-mt5-authority-token")
+    )
     blob_root: Path = Path("data/blobs")
     codex_enabled: bool = True
     codex_binary: str = "codex"
@@ -33,6 +36,7 @@ class Settings(BaseSettings):
     research_forex_universe: str = "EUR/USD,GBP/USD,USD/JPY,AUD/USD,USD/CAD"
     research_metals_universe: str = "XAU/USD,XAG/USD"
     research_crypto_universe: str = "BTC-USD,ETH-USD,SOL-USD"
+    research_stocks_universe: str = "AAPL,MSFT,NVDA,SPY"
     research_candle_count: int = Field(default=100, ge=20, le=500)
     research_schedule_enabled: bool = True
     research_schedule_hour_utc: int = Field(default=5, ge=0, le=23)

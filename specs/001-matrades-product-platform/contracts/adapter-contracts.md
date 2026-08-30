@@ -10,7 +10,8 @@ times, health/freshness, provenance, correlation ID, and structured error detail
 
 - Inputs and outputs are typed, versioned, and secret free.
 - Calls enforce owner/account scope and bounded timeout/retry/rate-limit policy.
-- Mutating adapter calls require an idempotency key; V1 BrokerAdapter exposes no mutating calls.
+- Mutating broker calls require a valid ExecutionAuthorization, stable command/idempotency identity,
+  expected broker object version, current safety epoch, and account scope.
 - Streams detect duplicates, gaps, out-of-order messages, schema changes, and stale heartbeats.
 - Recovery uses bounded exponential backoff with jitter and exposes DEGRADED/STALE/OFFLINE state.
 - Provider symbols map to immutable internal instrument, exact venue-listing, instrument-type, and
@@ -95,30 +96,58 @@ health, and never runs inside an agent.
 
 ## BrokerAdapter
 
-V1 read-only surface:
+Read, capability, reconciliation, and bounded write surface:
 
 ```text
 health(account_connection)
+capabilities(account_connection)
 get_account(account_connection)
 get_positions(account_connection)
 get_orders(account_connection)
-get_history(account_connection, interval)
+get_deals_or_fills(account_connection, interval, watermark)
+get_history(account_connection, interval, watermark)
 list_instruments(account_connection, asset_class, instrument_type)
 get_quote(account_connection, venue_instrument, as_of)
 get_symbol_info(account_connection, venue_instrument, as_of)
+get_command_status(account_connection, command_id)
 subscribe_events(account_connection, resume_token)
+
+submit_order(command_id, authorization, order, expected_account_version)
+cancel_order(command_id, authorization, broker_order_id, expected_order_version)
+set_or_modify_stop_loss(command_id, authorization, position_id, value, expected_position_version)
+set_or_modify_take_profit(command_id, authorization, position_id, value, expected_position_version)
+partial_close(command_id, authorization, position_id, quantity, expected_position_version)
+close_position(command_id, authorization, position_id, expected_position_version)
 ```
 
 Broker snapshots include a provider cut/sequence so equity, positions and orders can be validated for
-consistency. Events include POSITION_OPENED, POSITION_CHANGED, POSITION_CLOSED, SL_CHANGED,
-TP_CHANGED, PROTECTION_EXECUTED, and ACCOUNT_CHANGED. Actual reconciled values supersede proposal
-values. No method opens, changes, or closes a position in V1.
+consistency. Events include ORDER_ACCEPTED, ORDER_REJECTED, ORDER_CANCELLED, PARTIAL_FILL,
+FILL_COMPLETED, FILL_CORRECTED, POSITION_OPENED, POSITION_CHANGED, POSITION_CLOSED, SL_CHANGED,
+TP_CHANGED, PROTECTION_EXECUTED, and ACCOUNT_CHANGED. Actual reconciled values supersede planned
+values. A successful transport response never implies order acceptance or fill unless broker evidence
+is included and later reconcilable.
+
+Mutating methods reject expired authorization, wrong account/action, disabled permission, active or
+stale kill-switch epoch, missing capability, stale expected broker version, mismatched symbol/
+contract, unsafe normalized values, or a repeated command ID with a different payload. The same
+command ID and payload returns the recorded outcome. Timeout after possible submission returns
+`OUTCOME_UNKNOWN`; the application reconciles orders, fills, positions, and history before retry.
 
 The MT5 bridge adapter authenticates the bridge, verifies heartbeat, deduplicates/resumes events,
 normalizes broker symbols and times, and publishes effective-dated symbol properties including
-contract size, tick size/value, volume bounds/step, currencies, margin mode, swap/financing, and
-expiry when supplied by the broker. Missing critical properties block construction or sizing for
-that listing. Remote deployments use mTLS; loopback-only deployments use a rotating scoped token.
+contract size, tick size/value, volume bounds/step, currencies, margin mode, swap/financing, fill
+mode, netting/hedging mode, trading permissions, freeze/stops levels, and expiry. Matrades writes a
+signed command to the Python bridge's durable queue; the MQL5 EA polls through outbound `WebRequest`,
+validates account/authorization/expiry/nonce/safety epoch and requested bounds, calls MT5, and posts
+receipts, results, and events. The bridge uses transactional leasing and a restart-safe local command/
+event ledger. Missing critical properties block construction or sizing. Remote deployments use mTLS;
+loopback/private deployments use scoped HMAC credentials with timestamp, nonce, method, path, and
+body digest. Broker credentials never enter an agent process.
+
+Contract tests cover command replay with same/conflicting payload, bridge/EA restart during dispatch,
+lost response, partial and out-of-order fills, cancel/fill and protection races, expected-version
+conflicts, permission denial, kill-switch fencing, expiry, wrong account/type/contract, raw credential
+isolation, and reconciliation-before-retry.
 
 ## EmbeddingProvider and SemanticIndex
 
@@ -156,8 +185,10 @@ status(provider_message_id)
 health(connection)
 ```
 
-In-product notifications are authoritative for the UI. Browser, email, Telegram and future channels
-are delivery adapters; delivery or acknowledgment never resolves an approval.
+In-product notifications are authoritative for the UI. Telegram and Pushover are required V1
+delivery adapters; browser, email, and future channels use the same replaceable contract. Delivery
+or acknowledgment never changes execution state. A provider timeout may produce `UNKNOWN_DELIVERY`;
+retries reuse the same delivery identity and do not create a new logical notification.
 
 ## Health and Error Contract
 

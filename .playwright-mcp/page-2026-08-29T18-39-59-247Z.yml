@@ -1,0 +1,67 @@
+- generic [active] [ref=e1]:
+  - alert [ref=e3]: Matrades
+  - generic [ref=e4]:
+    - complementary [ref=e5]:
+      - link "MATRADES" [ref=e6] [cursor=pointer]:
+        - /url: /
+      - paragraph [ref=e7]: Evidence, automation, and accountable execution.
+      - navigation "Primary" [ref=e8]:
+        - link "Overview" [ref=e9] [cursor=pointer]:
+          - /url: /
+        - link "Trade desk" [ref=e10] [cursor=pointer]:
+          - /url: /trading
+        - link "Research" [ref=e11] [cursor=pointer]:
+          - /url: /research
+        - link "Strategies" [ref=e12] [cursor=pointer]:
+          - /url: /strategies
+        - link "Connections" [ref=e13] [cursor=pointer]:
+          - /url: /connections
+        - link "Configuration" [ref=e14] [cursor=pointer]:
+          - /url: /configuration
+        - link "Agents" [ref=e15] [cursor=pointer]:
+          - /url: /agents
+        - link "Knowledge" [ref=e16] [cursor=pointer]:
+          - /url: /knowledge
+        - link "Operations" [ref=e17] [cursor=pointer]:
+          - /url: /operations
+        - generic [ref=e18]:
+          - link "Extras" [ref=e19] [cursor=pointer]:
+            - /url: /extras
+          - link "Market research" [ref=e20] [cursor=pointer]:
+            - /url: /extras?folder=market-research
+          - link "Strategy research" [ref=e21] [cursor=pointer]:
+            - /url: /extras?folder=strategy-research
+          - link "Trade recommendations" [ref=e22] [cursor=pointer]:
+            - /url: /extras?folder=trade-recommendations
+          - link "Generated code" [ref=e23] [cursor=pointer]:
+            - /url: /extras?folder=generated-code
+          - link "MT5 bridge EA" [ref=e24] [cursor=pointer]:
+            - /url: /extras?folder=mt5-bridge-ea
+      - generic [ref=e58]:
+        - generic [ref=e59]: codex.mt5.20260829@example.com
+        - generic [ref=e60]: OWNER
+        - button "Sign out" [ref=e61] [cursor=pointer]
+    - main [ref=e25]:
+      - generic [ref=e62]:
+        - generic [ref=e63]:
+          - paragraph [ref=e64]: Operations / Overview
+          - heading "Autonomous trading command center" [level=1] [ref=e65]
+          - paragraph [ref=e66]: Evidence, live account equity, policy constraints, and broker execution state in one owner-scoped view.
+        - region "Account summary" [ref=e67]:
+          - article [ref=e68]:
+            - generic [ref=e69]: Trading accounts
+            - generic [ref=e70]: "0"
+          - article [ref=e71]:
+            - generic [ref=e72]: Active broker trades
+            - generic [ref=e73]: "0"
+          - article [ref=e74]:
+            - generic [ref=e75]: Trade Plans
+            - generic [ref=e76]: "0"
+          - article [ref=e77]:
+            - generic [ref=e78]: Execution commands
+            - generic [ref=e79]: "0"
+        - generic [ref=e80]:
+          - heading "Safety state" [level=2] [ref=e81]
+          - paragraph [ref=e82]: HEALTHY
+          - paragraph [ref=e83]: "database: HEALTHY · codex_app_server: HEALTHY"
+          - paragraph [ref=e84]: "Execution mode: AUTONOMOUS. Trade commands remain subject to permission profiles, risk revalidation, and kill switches."

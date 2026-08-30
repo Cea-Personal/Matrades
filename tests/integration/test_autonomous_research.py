@@ -56,7 +56,7 @@ async def test_cycle_discovers_candidates_and_invokes_required_research_roles() 
     agents = FixtureAgents()
     result = await AutonomousResearchWorkflow(FixtureProvider(), agents).run(list(MarketCategory))
 
-    assert result.state == "MARKETS_PENDING_APPROVAL"
+    assert result.state == "COMPLETED"
     assert {candidate.category for candidate in result.candidates} == set(MarketCategory)
     assert len(result.candidates) == 3
     assert all(candidate.fingerprint and candidate.evidence for candidate in result.candidates)

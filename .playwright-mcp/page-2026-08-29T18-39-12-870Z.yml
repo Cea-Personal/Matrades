@@ -1,0 +1,55 @@
+- generic [active] [ref=e1]:
+  - alert [ref=e3]: Sign in to Matrades
+  - generic [ref=e4]:
+    - complementary [ref=e5]:
+      - link "MATRADES" [ref=e6] [cursor=pointer]:
+        - /url: /
+      - paragraph [ref=e7]: Evidence, automation, and accountable execution.
+      - navigation "Primary" [ref=e8]:
+        - link "Overview" [ref=e9] [cursor=pointer]:
+          - /url: /
+        - link "Trade desk" [ref=e10] [cursor=pointer]:
+          - /url: /trading
+        - link "Research" [ref=e11] [cursor=pointer]:
+          - /url: /research
+        - link "Strategies" [ref=e12] [cursor=pointer]:
+          - /url: /strategies
+        - link "Connections" [ref=e13] [cursor=pointer]:
+          - /url: /connections
+        - link "Configuration" [ref=e14] [cursor=pointer]:
+          - /url: /configuration
+        - link "Agents" [ref=e15] [cursor=pointer]:
+          - /url: /agents
+        - link "Knowledge" [ref=e16] [cursor=pointer]:
+          - /url: /knowledge
+        - link "Operations" [ref=e17] [cursor=pointer]:
+          - /url: /operations
+        - generic [ref=e18]:
+          - link "Extras" [ref=e19] [cursor=pointer]:
+            - /url: /extras
+          - link "Market research" [ref=e20] [cursor=pointer]:
+            - /url: /extras?folder=market-research
+          - link "Strategy research" [ref=e21] [cursor=pointer]:
+            - /url: /extras?folder=strategy-research
+          - link "Trade recommendations" [ref=e22] [cursor=pointer]:
+            - /url: /extras?folder=trade-recommendations
+          - link "Generated code" [ref=e23] [cursor=pointer]:
+            - /url: /extras?folder=generated-code
+          - link "MT5 bridge EA" [ref=e24] [cursor=pointer]:
+            - /url: /extras?folder=mt5-bridge-ea
+    - main [ref=e25]:
+      - generic [ref=e27]:
+        - paragraph [ref=e28]: Secure workspace
+        - heading "Create your Matrades account" [level=1] [ref=e40]
+        - paragraph [ref=e30]: Verified email and an authenticator challenge protect trading configuration.
+        - generic [ref=e48]:
+          - generic [ref=e49]:
+            - strong [ref=e50]: Save these recovery codes once.
+            - code [ref=e51]: nbIVE9ckwyEkGg SVeDSVeIAiANLA 9LwJgv3lnuLC9Q 1qmFVyHTV1ZtVw mz1xV_jZ8YHyxg blnhujmpxe_aOw ZOmOmDtZi2vmLg F-OjE6pecyOy9g
+          - generic [ref=e52]:
+            - text: Authenticator secret
+            - textbox "Authenticator secret" [ref=e53]: GJB2U64XUKPBR6ULYLY7LQK27COIZORT
+          - generic [ref=e54]:
+            - text: 6-digit authenticator code
+            - textbox "6-digit authenticator code" [ref=e55]
+          - button "Activate MFA" [disabled] [ref=e56]

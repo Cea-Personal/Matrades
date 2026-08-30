@@ -1,5 +1,5 @@
 /** Generated contract marker. Regenerate from contracts/openapi.yaml. */
-export const CONTRACT_VERSION = "matrades.openapi.v1" as const;
+export const CONTRACT_VERSION = "matrades.openapi.v2" as const;
 export type AssetClass = "FOREX" | "METALS" | "CRYPTOCURRENCY" | "STOCKS";
 export type InstrumentType = "SPOT" | "CFD" | "FUTURES";
 export type QuantityUnit = "UNITS" | "SHARES" | "LOTS" | "CONTRACTS";

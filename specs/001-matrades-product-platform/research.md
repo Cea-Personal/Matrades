@@ -13,7 +13,7 @@ reconstructability, and the smallest viable V1 operational footprint.
 processes, a Next.js web process, shared PostgreSQL/Redis infrastructure, and an independent MT5
 bridge. Enforce domain boundaries in packages; extract network services only after measured need.
 
-**Rationale**: Risk, policy, reservations, approvals, and reconciliation benefit from transactional
+**Rationale**: Risk, policy, reservations, permissions, execution commands, and reconciliation benefit from transactional
 consistency. API and workers need different scaling but can compose the same modules. The bridge must
 run where MT5 runs, which is the only necessary early network boundary.
 
@@ -56,7 +56,7 @@ bidirectional or high-rate behavior.
 - GraphQL: rejected because explicit financial command/state contracts and generated audit-friendly
   schemas are a better V1 fit.
 - WebSocket for every UI interaction: rejected as unnecessary operational complexity.
-- Polling only: rejected because approvals, disconnects, and live monitoring need prompt updates.
+- Polling only: rejected because executions, disconnects, and live monitoring need prompt updates.
 
 ## 4. Persistent data architecture
 
@@ -74,7 +74,8 @@ selected TimescaleDB hosting matrix certifies the newer major; pgvector supports
 - PostgreSQL 18 immediately: current upstream, but extension/hosting compatibility takes priority.
 - Dedicated time-series and vector databases: deferred until volume, latency, or isolation evidence
   justifies their operational cost.
-- Redis workflow state: rejected because eviction or restart cannot erase approvals or reservations.
+- Redis workflow state: rejected because eviction or restart cannot erase permissions, kill switches,
+  execution commands, or reservations.
 
 ## 5. Background and scheduled work
 
@@ -95,8 +96,9 @@ scaling. Database job records preserve user-visible truth independently of the q
 ## 6. Agent orchestration and workflow ownership
 
 **Decision**: Use LangGraph for bounded, checkpointable AI subflows, with per-invocation specialist
-state by default. Application-owned database state machines control research, HIL, trading, and
-strategy promotion. An agent step cannot perform or skip a domain transition.
+state by default. Application-owned database state machines control research, autonomous trading,
+execution, and strategy promotion. An agent step cannot perform or skip a domain transition or call
+a broker-write adapter.
 
 **Rationale**: LangGraph persistence supports interrupt/resume and fault tolerance, but the
 constitution requires deterministic services and durable application records to own authority.
@@ -105,7 +107,7 @@ Keeping these roles separate avoids making framework checkpoints the financial l
 **Alternatives considered**:
 
 - Hand-coded agent loops: simpler initially but weaker for resumable multi-step reasoning and audit.
-- LangGraph as the sole workflow engine: rejected because HIL, risk, and broker state require explicit
+- LangGraph as the sole workflow engine: rejected because permissions, risk, execution, and broker state require explicit
   domain transactions independent of an AI framework.
 - Autonomous agent-to-agent delegation: rejected; the Orchestrator invokes fixed roles through contracts.
 
@@ -155,7 +157,7 @@ bridge, but does not infer that any one provider covers every lane.
 
 For CFDs, the account broker's quote and effective-dated contract terms are authoritative; an
 underlying spot or futures feed is reference evidence only. For futures, chain-capable providers may
-support discovery and history, but HIL-1 and later stages reference a concrete dated contract.
+support discovery and history, but autonomous selection and later stages reference a concrete dated contract.
 Priority fallback is permitted only among explicitly configured bindings that preserve the same
 asset class, instrument type, venue semantics, and required capability.
 
@@ -194,21 +196,22 @@ semantics. Conservative rounding and explicit policy metadata prevent accidental
 ## 10. Reserved risk, concurrency, and dynamic capacity
 
 **Decision**: Treat a position without a valid protective bound as unbounded risk and block new
-proposals. Sum remaining Stop Loss loss across open positions. Atomically reserve candidate risk when
-an actionable HIL-2 proposal is created; WAIT, REJECT, cancellation, or expiry releases it, TAKE
-carries it into awaiting manual entry, and reconciliation replaces it with broker-position risk.
-Re-evaluate whenever an input version/freshness status changes.
+Trade Plans. Sum remaining Stop Loss loss across open positions. Atomically reserve candidate risk
+when an executable Trade Plan is authorized. Block, invalidation, expiry, command rejection, or
+cancellation releases it; broker acceptance retains it, partial fill divides it between open-position
+and unfilled-command risk, and reconciliation replaces filled quantity with broker-position risk.
+Re-evaluate whenever an input version, freshness status, permission, or kill-switch state changes.
 
 Dynamic count is computed for a named candidate. Dashboards show remaining risk plus an estimated
 count based on a clearly labeled configured standard risk unit; they never present an unconditional
 slot entitlement.
 
-**Rationale**: Concurrent proposals can otherwise overcommit the same capacity. Candidate size,
+**Rationale**: Concurrent Trade Plans can otherwise overcommit the same capacity. Candidate size,
 Stop Loss, correlation, and account state determine real capacity, so a raw position count is unsafe.
 
 **Alternatives considered**:
 
-- Reserve only after broker entry: rejected because multiple approved proposals could exceed limits.
+- Reserve only after broker entry: rejected because concurrent authorized plans could exceed limits.
 - Static concurrent-trade count: retained only as a ceiling.
 - Count-only dashboard: rejected because it hides the candidate-risk assumption.
 
@@ -259,6 +262,11 @@ vector similarity. Persist source/document/segment/version/embedding provenance 
 Disabling/deleting a source removes it from retrieval and purges authorized content/embeddings while
 retaining a minimal immutable tombstone and non-content decision references required for audit.
 
+Committed live journal events are indexed through a transactional outbox. The structured journal is
+authoritative and indexing failure cannot roll it back. The protected `knowledge_assistant` may search
+only owner/account-authorized records, must cite material factual claims, label inference and
+insufficiency, and refuse all trading actions through both output schema and tool permissions.
+
 **Rationale**: Retrieval can improve research without becoming current financial truth. Explicit
 routing is more reliable than asking an AI to choose its own source of authority.
 
@@ -284,7 +292,8 @@ rotation, and scoped retrieval protect every provider and broker credential.
 - Plain environment variables for all user credentials: rejected because users configure multiple
   rotating credentials through the UI.
 - A database encryption key stored beside ciphertext: rejected as ineffective separation.
-- Broker write scopes: excluded from V1.
+- Agent-held broker write scopes: rejected; scoped broker credentials belong only to the deterministic
+  execution adapter and bridge.
 
 ## 15. Contracts, concurrency, and audit
 
@@ -295,7 +304,8 @@ material evaluation references immutable input snapshots and exact code, strateg
 guardrail, configuration, prompt, provider/model, and tool versions.
 
 **Rationale**: Optimistic concurrency prevents stale UI or worker writes, while idempotency prevents
-replayed messages from duplicating approvals, risk reservations, or broker events.
+replayed messages from duplicating execution commands, risk reservations, journal projections,
+notifications, or broker events.
 
 **Alternatives considered**:
 
@@ -309,7 +319,7 @@ replayed messages from duplicating approvals, risk reservations, or broker event
 **Decision**: Combine unit, property, integration, adapter contract, replay, security, failure, and
 browser E2E suites. Property tests enforce monotonic safety: tighter limits or added exposure cannot
 increase size/capacity. Replays enforce point-in-time data and one evaluator across backtest, paper,
-and live. SC-001 through SC-015 are executable release gates.
+and live. SC-001 through SC-024 are executable release gates.
 
 **Rationale**: Example tests miss rounding, boundary, concurrency, and time-ordering failures that
 cause the most serious trading defects.
@@ -323,7 +333,8 @@ cause the most serious trading defects.
 
 ## 17. Operations, retention, and recovery
 
-**Decision**: Keep material trade, approval, policy, risk, strategy, agent execution, and audit
+**Decision**: Keep material Trade Plan, execution, permission, kill-switch, policy, risk, strategy,
+agent execution, journal, and audit
 evidence for seven years by default, subject to a stricter applicable rule. Use shorter configurable
 tiers for raw high-frequency market data while preserving derived decision snapshots. Encrypt and
 test backups; target a 15-minute RPO and four-hour RTO for authoritative V1 data. Every critical
@@ -363,22 +374,24 @@ shared-underlying exposure aggregation.
 - One sparse record with every optional product field: rejected because impossible combinations
   become difficult to validate.
 
-## 19. Twelve-lane research orchestration and HIL-1
+## 19. Twelve-lane autonomous research orchestration
 
 **Decision**: Each scheduled account run creates 12 durable lane results for Forex, metals,
 cryptocurrency, and stocks crossed with spot, CFD, and futures. A lane ends in `READY`, `NO_TRADE`,
 `NOT_CONFIGURED`, `UNAVAILABLE`, `STALE`, or `BLOCKED`; a healthy lane contains at most one top
-candidate. The aggregate becomes `MARKETS_PENDING_APPROVAL` only when required lane policy permits;
-otherwise it is visibly `DEGRADED`, while healthy results remain reviewable and unresolved lanes
-cannot reach HIL-2. HIL-1 replacement keys include both dimensions and cannot switch types silently.
+candidate. Eligible `READY` candidates continue into analysis without an approval state. The aggregate
+is visibly `DEGRADED` when required lanes fail, while healthy results remain usable and unresolved
+lanes cannot reach Trade Plan construction. If a selected candidate becomes invalid, a deterministic
+fallback may select the next eligible ranked candidate in the same lane and records the invalidation.
 
 Add protected `stocks_research` as the fourth asset-class specialist, raising the required registry
-to 16. Each asset-class specialist ranks its three types independently; shared technical,
-fundamental, sentiment, regime, and critic roles retain cross-asset contracts.
+to 17 after also adding the protected read-only `knowledge_assistant`. Each asset-class specialist
+ranks its three types independently; shared technical, fundamental, sentiment, regime, and critic
+roles retain cross-asset contracts.
 
 **Rationale**: Twelve independent terminal records prove coverage and isolate failure without
 fabricating a result or discarding valid evidence. Candidate IDs, not symbols, prevent score and
-approval collisions between wrappers over one underlying.
+execution collisions between wrappers over one underlying.
 
 **Alternatives considered**:
 
@@ -399,7 +412,7 @@ loss remain distinct.
 Sizing calculates loss per minimum quantity increment from entry to Stop Loss, adds spread,
 commission, slippage/gap allowance, financing where applicable, and currency conversion, divides the
 permitted risk budget, rounds down, and recalculates risk, margin, portfolio, category, and correlated
-exposure. Missing or stale loss-critical terms hard-block HIL-2. Exposure groups aggregate the same
+exposure. Missing or stale loss-critical terms hard-block execution. Exposure groups aggregate the same
 underlying across spot, CFD, and futures.
 
 **Rationale**: One share, one coin, one CFD lot, and one futures contract do not represent the same
@@ -414,7 +427,7 @@ diversification.
 
 ## 21. Futures, corporate actions, financing, and deterministic replay
 
-**Decision**: Rank and approve exact executable futures contracts selected from a point-in-time
+**Decision**: Rank and autonomously select exact executable futures contracts from a point-in-time
 chain using configured liquidity, open-interest, first-notice, last-trade, and roll rules.
 Continuous/back-adjusted series may generate analytical signals but are never tradable identities;
 rolls are explicit new decisions and transactions. Persist stock splits, dividends, rights, mergers,
@@ -457,7 +470,8 @@ tradability and policy.
 ## 23. Migration from category-only instrument records
 
 **Decision**: Use an expand/compatibility/contract migration. Preserve existing category-only
-research, selection, proposal, and trade records as immutable `LEGACY_UNTYPED` evidence. Add typed
+research, selection, proposal, approval, and trade records as immutable `LEGACY_UNTYPED` evidence.
+Legacy approval rows become read-only historical records and cannot drive new workflow transitions. Add typed
 lane, venue-listing, specification-version, and dated-contract references without guessing values;
 backfill only mappings proven by historical broker/provider evidence. Dual-read during the migration,
 require typed references for all new actionable writes, regenerate clients together, and retire the
@@ -474,6 +488,149 @@ and could cause unsafe reuse, while deleting it would break reconstructability.
 - Big-bang destructive migration: rejected because mixed worker/UI versions and rollback would be
   unsafe.
 
+## 24. Autonomous execution command and reconciliation model
+
+**Decision**: Make a versioned immutable `TradePlan` the economic intent and an `ExecutionCommand`
+the only broker-write unit. Authorize and enqueue the command in one PostgreSQL transaction after
+re-reading current broker/account state, data freshness, policy, risk, account action permission, and
+account/platform kill switches. Each command carries its plan or management-decision reference,
+action, values, authorization snapshot digest, idempotency key, expected aggregate version, expiry,
+and correlation/causation IDs. Agents cannot access broker credentials or adapters.
+
+Use the command lifecycle `CREATED -> VALIDATING -> BLOCKED|AUTHORIZED -> QUEUED -> DISPATCHING ->
+ACKNOWLEDGED|REJECTED|OUTCOME_UNKNOWN`; acknowledged work advances to `PARTIALLY_APPLIED`, `APPLIED`,
+or `SUPERSEDED` only from reconciled broker evidence. `OUTCOME_UNKNOWN` is not failure; reconcile
+broker order, deal, and position history before retry. Retries reuse the same command identity.
+Protection changes and partial/full exits use the same pipeline.
+
+**Rationale**: Exactly-once network execution cannot be guaranteed, but one durable economic intent,
+transactional authorization, broker idempotency where available, and reconcile-before-retry prevent
+blind duplicate orders and make uncertain outcomes explicit.
+
+**Alternatives considered**:
+
+- Let agents call the broker: rejected because model output cannot own financial authorization.
+- Retry with a new command ID after timeout: rejected because the first order may already exist.
+- Store commands only in Redis: rejected because restart cannot erase or duplicate economic intent.
+
+## 25. Per-account permissions and durable kill switches
+
+**Decision**: Version one `ExecutionPermissionProfile` per account with independent `NEW_ENTRY`,
+`ORDER_CANCELLATION`, `STOP_LOSS_CREATE_OR_MODIFY`, `TAKE_PROFIT_CREATE_OR_MODIFY`,
+`PARTIAL_CLOSE`, and `FULL_EXIT` switches.
+Broker connections start read-only; capability and permission must both allow an action. Permission
+changes require step-up MFA, optimistic concurrency, and an immutable audit event.
+
+Persist platform and account `KillSwitch` aggregates in PostgreSQL and cache only for acceleration.
+Activation is fail-closed, requires no AI, survives restart, immediately blocks new entries and
+discretionary writes, and leaves broker-hosted protections intact. Deactivation requires step-up MFA,
+fresh connection/account health, and an audited command. Execution authorization locks or otherwise
+serializes against the relevant kill-switch and permission versions.
+
+**Rationale**: Full automation needs fine-grained opt-in and an immediate stop path whose truth is
+durable and cannot race with authorization or depend on the model/queue that may be malfunctioning.
+
+**Alternatives considered**:
+
+- One global automation toggle: rejected because accounts and broker capabilities differ.
+- In-memory kill switch: rejected because it disappears on restart and races across workers.
+- Cancel all protections when stopping: rejected because it can increase live risk.
+
+## 26. Execution-capable MT5 bridge boundary
+
+**Decision**: Extend the authenticated MT5/Wine bridge with capability negotiation and bounded
+commands for order entry/cancel, protection changes, partial close, and full exit. Because the MQL5
+EA cannot expose the required inbound HTTP listener, Matrades posts commands to a durable Python-
+bridge queue and the EA polls that queue through outbound `WebRequest` calls. A signed envelope
+contains bridge/account scope, command ID, idempotency key, action, normalized and broker symbols,
+position/order preconditions, requested values, expiry, nonce, and authorization digest. The bridge
+uses a durable local command/event ledger, validates clock/nonce/signature/scope, and returns broker
+ticket/deal IDs and raw result codes without claiming a fill before broker evidence.
+
+The bridge streams or exposes ordered snapshots of accounts, symbols, orders, deals, positions,
+protections, and capabilities. Command leasing is transactional; bridge or EA restart cannot blindly
+reissue a dispatching command. Partial fills and corrections are append-only events. Matrades blocks
+ambiguous mappings and reconciles uncertain responses before resend. A local emergency disable at
+the bridge may make writes unavailable but cannot authorize writes the server denied.
+
+**Rationale**: The cross-platform bridge is the highest-risk network boundary. Explicit capabilities,
+preconditions, signed expiring commands, local deduplication, and authoritative reconciliation limit
+replay, stale-order, wrong-account, and duplicate-execution failures.
+
+**Alternatives considered**:
+
+- Arbitrary remote MQL command execution: rejected as unauditable and unsafe.
+- Infer success from HTTP 200: rejected because transport acceptance is not a broker fill.
+- Symbol-only commands: rejected because aliases can cross instrument types or contracts.
+
+## 27. Live journaling, continuous indexing, and grounded Q&A
+
+**Decision**: Commit immutable structured `JournalEvent` facts before AI narration. The Journal agent
+may append a linked `LiveJournalObservation` labeled `OBSERVATION`, `INFERENCE`, or `MIXED`, with
+claims, evidence references, uncertainty, and agent/model/prompt/tool versions. A terminal trade
+creates one versioned `PostTradeSummary` citing its included event range and digest.
+
+A transactional outbox creates idempotent `JournalIndexWorkItem` records. Active events and terminal
+summaries become owner/account-scoped knowledge segments with stable authoritative references;
+re-embedding creates a new generation and indexing failure leaves the journal intact and visibly
+degrades coverage. `knowledge_assistant` has read-only knowledge, journal, strategy, research,
+Trade Plan, and structured snapshot tools. Each material evidence claim must reference an authorized
+retrieval citation; trading requests return `REFUSED` and produce no plan, command, or broker call.
+
+**Rationale**: Searchable live context is useful only when AI narration and semantic indexing cannot
+rewrite the financial ledger or become a conversational path to execution.
+
+**Alternatives considered**:
+
+- Index agent prose before facts commit: rejected because searchable claims could lack authority.
+- Prompt-only refusal: rejected because tool and schema enforcement are required.
+- Replace live events with the terminal summary: rejected because it destroys chronology and audit.
+
+## 28. Read-only active-trade chart projection
+
+**Decision**: Build `ChartContext` and ordered `ChartOverlay` read models from authoritative market,
+Trade Plan, broker order/fill/position, protection, journal, and automated-action events. The chart
+supports pan, zoom, configured timeframes, and indicators, but the chart bundle receives no execution
+command schema, mutation endpoint, or broker credential. Each context reports normalized instrument,
+exact listing/contract mapping, provider, cutoff, freshness/delay, and source gaps.
+
+**Rationale**: A projection makes automation inspectable without creating an alternate trading path.
+Mapping mismatch, stale data, stream gaps, rolls, or corporate actions can be shown as `DEGRADED`
+while actual broker state remains authoritative.
+
+**Alternatives considered**:
+
+- Direct chart trading: rejected because it bypasses the deterministic execution service.
+- Provider widget with opaque symbols: rejected because overlays could target a different product.
+- Treat chart prices as broker position truth: rejected because the broker is authoritative.
+
+## 29. Evidence-separated analytics and confirmed-entry notifications
+
+**Decision**: Tag every completed outcome exactly `BACKTEST`, `PAPER`, or `LIVE` and never combine
+those populations in a headline metric. Versioned deterministic calculators produce win/loss counts
+and rates, gross/net P&L, return, average/total loss, payoff, after-cost expectancy in money and R,
+Profit Factor, drawdown, recovery, streaks, MAE/MFE, duration, costs, and risk-adjusted return where
+supported. Operational queries default to `LIVE`; empty live data stays empty. Edge reports formula,
+population, period, sample size, deterministic uncertainty method/seed, interval, and
+`POSITIVE|INCONCLUSIVE|NEGATIVE|INSUFFICIENT_SAMPLE`; open unrealized P&L is separate and every
+aggregate drills down.
+
+Create a trade-entry notification intent only after committed broker acceptance or fill evidence.
+One logical aggregate per broker order advances monotonically through `PENDING`, `PARTIAL`, and
+`COMPLETE`; delivery uniqueness is enforced by `(notification_id, version, channel)`. Submitted but
+unconfirmed commands emit no entry notification. External delivery timeouts become
+`UNKNOWN_DELIVERY` rather than blind duplicate resend; in-product delivery remains authoritative and
+one failed channel does not suppress the others.
+
+**Rationale**: Mixing simulations with live results fabricates apparent edge, while in-memory or
+scan-based notification deduplication fails under concurrent broker replay and worker retry.
+
+**Alternatives considered**:
+
+- Aggregate all evidence classes: rejected because simulated and live populations have different bias.
+- Let AI calculate edge: rejected because metrics must be reproducible and versioned.
+- Notify on submission: rejected because submission is not broker-confirmed entry.
+
 ## Primary Sources
 
 - [Python version support](https://devguide.python.org/versions/)
@@ -484,7 +641,7 @@ and could cause unsafe reuse, while deleting it would break reconstructability.
 - [Timescale PostgreSQL extension model](https://docs.timescale.com/use-timescale/latest/extensions/)
 - [pgvector PostgreSQL support](https://github.com/pgvector/pgvector)
 - [Celery stable documentation](https://docs.celeryq.dev/en/stable/)
-- [LangGraph persistence and HIL](https://docs.langchain.com/oss/python/langgraph/persistence)
+- [LangGraph persistence and interrupts](https://docs.langchain.com/oss/python/langgraph/persistence)
 - [Codex SDK](https://learn.chatgpt.com/docs/codex-sdk)
 - [Codex App Server](https://learn.chatgpt.com/docs/app-server)
 - [Codex cloud environments](https://learn.chatgpt.com/docs/environments/cloud-environment)

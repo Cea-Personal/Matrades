@@ -5,35 +5,43 @@
 
 **Input**: Consolidated feature specification from
 `specs/001-matrades-product-platform/spec.md`, informed by the three supplied implementation
-plans and governed by Matrades Constitution 2.1.0.
+plans and governed by Matrades Constitution 3.0.0.
 
 ## Summary
 
-Build Matrades V1 as a browser-based decision-support platform backed by a Python modular
-monolith, durable background workers, a separately deployable read-only MT5 bridge, and a
+Build Matrades V1 as a browser-based autonomous trading platform backed by a Python modular
+monolith, durable background workers, a separately deployable execution-capable MT5 bridge, and a
 TypeScript web application. PostgreSQL is the authority for configuration, workflow, policy,
-risk, strategies, approvals, trades, and audit evidence; TimescaleDB and pgvector extend the
+risk, strategies, Trade Plans, execution commands, trades, and audit evidence; TimescaleDB and pgvector extend the
 same data platform for time-series and contextual knowledge, while Redis remains non-authoritative.
 
-The design enforces hard financial rules in deterministic services, persists all three human
-approval gates as explicit state machines, compiles declarative strategy rules into one shared
-backtest/paper/live evaluator, and bounds AI agents behind versioned contracts, independent prompt
-resolution, least-privilege tools, and a default Codex App Server runtime pool. LiteLLM remains an
-explicit per-agent or per-profile alternative and is never an automatic cross-runtime fallback.
-Coinbase replaces Binance as the required V1 crypto exchange-data provider; `strategy_assistant`
-and the newly required `stocks_research` role complete the 16-agent registry; and contextual
-knowledge is isolated from authoritative market, account, policy, and risk state.
-Named data-source and read-only MT5 Bridge profiles are configured in the UI, every market or
+The design removes HIL-1, HIL-2, and HIL-3 and enforces hard financial rules, per-account action
+permissions, durable account/platform kill switches, broker-write authorization, idempotency, and
+reconciliation in deterministic services. Declarative strategy rules compile into one shared
+backtest/paper/live evaluator, while AI agents remain bounded by versioned contracts, independent
+prompt resolution, least-privilege tools, and a default Codex App Server runtime pool. Agents never
+receive broker credentials; structured Trade Plans and management actions reach brokers only through
+the deterministic execution service. LiteLLM remains an explicit per-agent or per-profile alternative
+and is never an automatic cross-runtime fallback.
+Coinbase replaces Binance as the required V1 crypto exchange-data provider; `strategy_assistant`,
+`stocks_research`, and the read-only `knowledge_assistant` complete the 17-agent registry; contextual
+knowledge is isolated from authoritative market, account, policy, risk, and execution state.
+Named data-source and MT5 Bridge profiles are configured in the UI, every market or
 strategy research cycle is archived under a timestamped evidence folder, and provider-backed
 backtests expose deterministic validation gates in the Strategy Lab.
 
-Daily HIL-1 research fans out across the 12 combinations formed by Forex, metals,
+Daily autonomous research fans out across the 12 combinations formed by Forex, metals,
 cryptocurrency, and stocks crossed with spot, CFD, and futures. Each matrix cell produces one
 ranked exact tradable listing or an explicit `NO_TRADE`, `NOT_CONFIGURED`, `UNAVAILABLE`, `STALE`,
-or `BLOCKED` result.
+or `BLOCKED` result and eligible candidates continue into analysis without approval.
 Provider-neutral economic identities remain separate from broker/venue listings and dated futures
 contracts, while immutable contract-specification versions drive sizing, costs, reconciliation,
 backtesting, and cross-wrapper exposure aggregation.
+
+During execution and monitoring, the UI displays each active Trade Plan beside a read-only live chart;
+the Journal agent appends immutable observations that are indexed continuously for a citation-grounded,
+read-only Knowledge Assistant. Analytics keep `BACKTEST`, `PAPER`, and `LIVE` populations separate,
+and confirmed broker entries generate deduplicated notifications through enabled channels.
 
 ## Technical Context
 
@@ -45,7 +53,7 @@ contract artifacts
 LangGraph for bounded workflow orchestration only; the stable `openai-codex` Python SDK with its
 pinned Codex CLI/App Server runtime; optional LiteLLM Proxy; NumPy, Polars/pandas, SciPy, and
 vectorbt where appropriate for research; Next.js 16 LTS, React, Tailwind CSS, accessible UI
-primitives, and TanStack Query
+primitives, TanStack Query, and a provider-neutral read-only financial chart component
 
 **Storage**: PostgreSQL 17 as system of record with compatible TimescaleDB and pgvector extensions;
 Redis for cache, rate limits, locks, and task transport only; effective-dated instrument
@@ -68,21 +76,26 @@ workers and a separately deployable broker bridge
 
 **Performance Goals**: At least 95% of complete candidate evaluations return a decision or explicit
 safe-failure status within 5 seconds after inputs are available; at least 95% of daily research runs
-produce all 12 HIL-1 matrix-cell results or explicit per-cell safe-failure statuses within 10
-minutes; operational state changes reach the UI within 2 seconds under normal conditions
+produce all 12 matrix-cell results or explicit per-cell safe-failure statuses within 10 minutes;
+operational state and chart-overlay changes reach the UI within 2 seconds under normal conditions;
+at least 99% of committed live journal events become searchable within 60 seconds when indexing is healthy
 
-**Constraints**: Manual execution only; no default broker writes; current account equity and
-consistent snapshots required before HIL-2; strictest applicable constraint wins; hard-blocked
-candidates never enter an actionable approval queue; secrets never enter prompts, logs, or client
-responses; RAG is non-authoritative; every required agent defaults to the Codex App Server runtime;
+**Constraints**: Broker connections start read-only and require explicit per-account action
+permissions before writes; active account/platform kill switches block new entries and discretionary
+writes; current account equity and consistent snapshots are required before every entry or risk-
+increasing action; strictest applicable constraint wins; hard-blocked candidates never reach the
+execution service; broker commands are idempotent and uncertain outcomes reconcile before retry;
+secrets never enter prompts, logs, or client responses; RAG is non-authoritative and the Knowledge
+Assistant is read-only; every required agent defaults to the Codex App Server runtime;
 LiteLLM requires an explicit per-agent or per-profile selection and cannot be an automatic fallback;
-PostgreSQL, not Redis or an agent checkpoint alone, owns durable workflow and approval state; all
+PostgreSQL, not Redis or an agent checkpoint alone, owns durable workflow, permission, kill-switch,
+execution-command, and reconciliation state; all
 timestamps are stored in UTC with source timezone metadata; every actionable instrument has a
 fresh, immutable contract-specification reference; continuous futures are analytical only and
-cannot be approved or reconciled as executable contracts
+cannot be executed or reconciled as tradable contracts
 
 **Scale/Scope**: V1 supports individual authenticated traders with multiple personal or prop-firm
-accounts, 16 required logical agents including `stocks_research`, 12 daily asset-class/instrument-
+accounts, 17 required logical agents including `stocks_research` and `knowledge_assistant`, 12 daily asset-class/instrument-
 type research cells, multiple provider and broker mappings per cell, long-running research/backtest
 jobs, and event-driven monitoring. Module and adapter boundaries permit later multi-user and service
 extraction without adding V1 microservices.
@@ -93,19 +106,20 @@ extraction without adding V1 microservices.
 
 | Constitutional gate | Design evidence | Pre-design | Post-design |
 |---|---|---|---|
-| Ordered authority and deterministic safety | Policy, effective-limit, risk, portfolio, and strategy evaluators are deterministic and precede critic/HIL | PASS | PASS |
-| Three HIL gates and manual execution | Persisted HIL-specific actions; TAKE only reserves and awaits manual entry; broker adapter is read-only | PASS | PASS |
+| Ordered authority and deterministic safety | Kill switches, external rules, internal limits, account permissions, strategy rules, authoritative data, evidence, and bounded AI are evaluated in constitutional order before broker writes | PASS | PASS |
+| Autonomous execution and human safety control | No HIL states remain; account action permissions, durable account/platform kill switches, deterministic execution authorization, idempotency, and reconciliation bound full-lifecycle automation | PASS | PASS |
 | Account-aware risk and prop compliance | Immutable account snapshots, versioned rulesets, reserved risk, candidate reservations, correlated exposure, and type-specific contract/tick/margin/currency calculations | PASS | PASS |
 | Equal strategy validation | AI-generated and AI-assisted proposals require human canonicalization approval and converge on one validation, paper, and promotion pipeline | PASS | PASS |
-| Authoritative data and bounded RAG | Retrieval router prevents knowledge output from supplying current facts; exact listing, contract-specification, futures-chain, and corporate-action versions remain structured authority | PASS | PASS |
-| Safe failure and NO TRADE | Health/freshness states and circuit breakers make BLOCK, DEGRADED, WAIT, and NO TRADE explicit | PASS | PASS |
-| Orchestrated agents and provider independence | Fixed roles, a default Codex runtime adapter, explicit LiteLLM opt-in, same-runtime fallbacks, versioned I/O, and independent prompt resolution | PASS | PASS |
-| Secure UI-first configuration | MFA, step-up, scoped vault references, masked secrets, audit, and configuration APIs/UI | PASS | PASS |
-| Adapter boundaries and reconciliation | Capability-routed data/broker contracts separate economic identity from broker/venue listings; actual reconciled listing and broker state become authoritative | PASS | PASS |
-| Auditability and controlled learning | Immutable version/evidence references, shared evaluator, staged promotion, and reproducibility metadata | PASS | PASS |
+| Authoritative data and bounded RAG | Retrieval cannot supply current facts or commands; live journal indexing points to authoritative immutable events; exact listing, contract, broker, and performance records remain structured authority | PASS | PASS |
+| Safe failure and NO TRADE | Health/freshness states, permission denials, kill switches, uncertain execution reconciliation, and circuit breakers make BLOCK, DEGRADED, WAIT, and NO TRADE explicit | PASS | PASS |
+| Orchestrated agents and provider independence | Fixed roles, no agent broker credentials, deterministic execution boundary, default Codex runtime, explicit LiteLLM opt-in, same-runtime fallbacks, versioned I/O, and independent prompt resolution | PASS | PASS |
+| Secure UI-first configuration | MFA, step-up, scoped vault references, masked secrets, execution-permission UI, visible durable kill switches, audit, and least privilege | PASS | PASS |
+| Adapter boundaries and reconciliation | Capability-routed data/broker contracts separate economic identity from listings; execution commands are idempotent and actual reconciled broker state becomes authoritative | PASS | PASS |
+| Auditability and controlled learning | Immutable Trade Plans, commands, journal events, version/evidence references, separated evidence classes, shared evaluator, staged promotion, and reproducibility metadata | PASS | PASS |
 
 No constitutional exception is required. Phase 1 artifacts preserve every gate; implementation must
-fail CI if contract, state-transition, authority-order, or secret-redaction tests regress them.
+fail CI if contract, state-transition, authority-order, execution-permission, kill-switch,
+idempotency, reconciliation, chart-read-only, evidence-class, or secret-redaction tests regress them.
 
 ## Project Structure
 
@@ -150,9 +164,11 @@ modules/
 ├── knowledge/               # source ingestion, authorization, contextual retrieval
 ├── strategies/              # lab, repository, compiler, similarity, lifecycle
 ├── backtesting/             # replay, costs, validation, paper trading
-├── trading/                 # proposals, HIL state machines, reconciliation, monitoring
-├── journal/                 # append-oriented trade and decision evidence
-├── performance/             # metrics, health, controlled research triggers
+├── trading/                 # Trade Plans, autonomous lifecycle, reconciliation, monitoring
+├── execution/               # permissions, kill switches, commands, broker-write authorization
+├── journal/                 # live append-only observations and post-trade summaries
+├── performance/             # evidence-class metrics, deterministic edge, health triggers
+├── charts/                  # read-only chart queries and overlay projections
 ├── notifications/           # normalized notifications and channel dispatch
 └── observability/           # audit, health, metrics, tracing
 
@@ -169,7 +185,7 @@ adapters/
 └── notifications/
 
 bridges/
-└── mt5/                     # independent authenticated read/event bridge
+└── mt5/                     # authenticated read/event/write bridge with local safety controls
 
 packages/
 ├── contracts/               # versioned schemas and generated clients/types
@@ -206,14 +222,16 @@ LiteLLM is loaded only for explicitly assigned alternative profiles.
 
 ### Authority and state ownership
 
-- PostgreSQL aggregates own configuration versions, workflow states, approvals, risk reservations,
-  strategy lifecycle, reconciliation, and audit evidence.
+- PostgreSQL aggregates own configuration versions, autonomous workflow states, execution permission
+  versions, account/platform kill switches, risk reservations, Trade Plans, execution commands,
+  strategy lifecycle, reconciliation, journal events, and audit evidence.
 - LangGraph coordinates bounded agent steps and may checkpoint resumable reasoning; application
   state machines validate every transition before and after an agent call.
 - Celery executes ingestion, research, indexing, backtesting, notifications, and scheduled health
   work with idempotency keys and database-recorded job status.
 - Agents receive immutable structured context and return schema-validated recommendations. They
-  never mutate broker, policy, guardrail, account, strategy, or approval authority directly.
+  never mutate broker, policy, guardrail, account, strategy, permission, or kill-switch authority
+  directly. Only the deterministic execution service may invoke broker-write adapter methods.
 
 ### Agent runtime routing
 
@@ -235,7 +253,7 @@ LiteLLM is loaded only for explicitly assigned alternative profiles.
   listing mappings, contract-specification versions, validation, normalization, cache, and
   persistence. Agents never open provider streams.
 - Connection capabilities are indexed by asset class, instrument type, venue, data capability, and
-  account. A matrix cell resolves an authoritative research source and, before HIL-2, an exact
+  account. A matrix cell resolves an authoritative research source and, before execution, an exact
   executable broker listing; no provider symbol or continuous future becomes a canonical trade ID.
 - Structured application data, time-series observations, and semantic knowledge remain logically
   separated even when PostgreSQL hosts all three.
@@ -260,13 +278,14 @@ LiteLLM is loaded only for explicitly assigned alternative profiles.
   `BLOCKED` status; partial failure cannot be represented as a complete healthy matrix.
 - `forex_research`, `metals_research`, `crypto_research`, and `stocks_research` each rank the three
   instrument types for their asset class. Cross-asset analyst roles and the critic retain bounded
-  structured contracts; HIL-1 decisions and replacements are keyed by both matrix dimensions.
+  structured contracts; eligible lane results continue into analysis without an approval state.
 
 ### Contract and data migration
 
-- Preserve existing category-only research runs, selections, proposals, and trades as immutable
+- Preserve existing category-only research runs, selections, proposals, approvals, and trades as immutable
   historical evidence tagged `LEGACY_UNTYPED`; do not guess whether an old symbol meant spot, CFD,
-  or futures. Legacy records remain readable but cannot seed a new actionable proposal until an
+  or futures. Legacy approval records remain readable but cannot drive new transitions. Legacy
+  untyped records cannot seed a new executable Trade Plan until an
   operator verifies the exact typed listing and specification.
 - Introduce asset-class, instrument-type, lane, venue-listing, specification-version, and dated-
   contract columns as nullable in the expand migration; backfill only provable mappings; deploy
@@ -283,29 +302,85 @@ LiteLLM is loaded only for explicitly assigned alternative profiles.
   dated contracts, tick movement, tick value, margin, settlement, expiry, and roll eligibility.
 - Notional, margin, and maximum loss are separate values. Sizing calculates loss per minimum
   quantity increment through the Stop Loss plus deterministic costs and gap allowance, rounds down,
-  then recomputes risk, margin, and aggregate exposure. Missing required metadata blocks HIL-2.
+  then recomputes risk, margin, and aggregate exposure. Missing required metadata blocks execution.
 - Shared-underlying exposure aggregates across wrappers: spot gold, gold CFD, and gold futures are
   correlated economic exposure, not independent diversification.
-- Futures rolls are explicit new decisions and transactions; no approval or position silently moves
-  to another contract. Stock corporate actions and CFD cash adjustments are point-in-time events;
+- Futures rolls are explicit new Trade Plans and transactions; no position silently moves to another
+  contract. Stock corporate actions and CFD cash adjustments are point-in-time events;
   raw/as-traded and adjusted analytical series remain distinct.
 
 ### Risk concurrency and conservative defaults
 
-- Actionable proposals atomically reserve candidate worst-case risk. WAIT, REJECT, expiry, or
-  cancellation releases it; TAKE carries the reservation into awaiting manual entry; reconciliation
-  converts it to actual open-position reserved risk.
-- A missing or invalid Stop Loss is unbounded risk and blocks a new proposal unless an explicit
+- Executable Trade Plans atomically reserve candidate worst-case risk before command authorization.
+  Block, invalidation, expiry, command rejection, or cancellation releases it; broker acceptance keeps
+  it reserved, and confirmed fills convert it to actual open-position reserved risk. Partial fills
+  split reservation between filled position risk and unfilled command risk.
+- A missing or invalid Stop Loss is unbounded risk and blocks a new Trade Plan unless an explicit
   deterministic account/strategy rule supplies a compliant protective bound.
 - Dynamic additional-trade capacity is candidate-dependent. The dashboard shows remaining risk
   budget and labels any integer capacity with the configured standard candidate-risk unit; each real
-  proposal is recalculated independently.
+  Trade Plan is recalculated independently.
 - Correlation risk uses configured exposure groups plus rolling return correlation where sufficient
   data exists. The more conservative result governs; missing evidence falls back to the configured
   group cap or blocks when no safe bound exists.
 - Every result pins the exact venue instrument and specification version used. Margin availability
   never substitutes for worst-case-loss capacity, and a specification change, expiry threshold,
   corporate action, financing change, or stale mapping triggers revalidation.
+
+### Deterministic execution, permissions, and kill switches
+
+- `ExecutionPermissionProfile` is versioned per account and independently controls `NEW_ENTRY`,
+  `ORDER_CANCELLATION`, `STOP_LOSS_CREATE_OR_MODIFY`, `TAKE_PROFIT_CREATE_OR_MODIFY`,
+  `PARTIAL_CLOSE`, and `FULL_EXIT`.
+  Connections remain read-only until an active profile enables the requested action and the adapter
+  declares that capability. Permission changes require step-up authentication and append audit events.
+- Durable `KillSwitch` aggregates exist for the platform and each account. Activation is fail-closed,
+  immediately visible, survives restart, and prevents authorization of new entries and discretionary
+  writes. It does not remove broker-hosted protections. Deactivation requires step-up authentication,
+  a fresh broker/account health check, and an audited configuration command; no agent can operate it.
+- A versioned `TradePlan` is immutable once execution begins. `ExecutionCommand` is the sole broker-
+  write unit and stores action, requested values, Trade Plan or management-decision reference,
+  permission/policy/risk/account snapshots, deterministic authorization digest, idempotency key,
+  expected aggregate version, expiry, and correlation/causation IDs.
+- Command authorization and outbox insertion occur in one database transaction after re-reading
+  current permissions, kill switches, authoritative broker state, data freshness, policy, and risk.
+  The bridge accepts a command only when its signed account scope, action capability, command identity,
+  and expiry are valid. Agents emit bounded recommendations; they cannot invoke the adapter directly.
+- Command states are `CREATED -> VALIDATING -> BLOCKED|AUTHORIZED -> QUEUED -> DISPATCHING ->
+  ACKNOWLEDGED|REJECTED|OUTCOME_UNKNOWN`, with `PARTIALLY_APPLIED`, `APPLIED`, `SUPERSEDED`, and
+  reconciliation outcomes representing post-dispatch truth. Timeout or transport loss after dispatch
+  becomes `OUTCOME_UNKNOWN`; Matrades queries broker orders,
+  positions, and deal history before any retry. A retry reuses the command identity and never creates
+  a second economic intent.
+- Protection changes, partial closes, and full exits use the same command pipeline. A risk-reducing
+  action may proceed under a policy-defined degraded-data rule only when broker state is fresh enough
+  to identify the exact position and the action cannot increase exposure. Entry and risk-increasing
+  changes always fail closed.
+
+### Live trade experience, journaling, knowledge, and analytics
+
+- Each active-position projection joins the immutable Trade Plan, actual broker order/fill/position,
+  current protections and P&L, permission and kill-switch state, monitoring decisions, and source
+  freshness. A read-only chart query supplies live/historical candles and overlays for plan levels,
+  fills, protections, partial/full exits, journal events, and automated actions. Chart UI components
+  receive no command schema, broker credential, or execution endpoint.
+- The Journal agent appends immutable `LiveJournalObservation` records for material market, account,
+  risk, strategy, execution, and position-state events. Structured references and source times are
+  authoritative; agent prose is labeled observation versus inference. A terminal trade produces one
+  `PostTradeSummary` citing the underlying event range.
+- A transactional outbox queues each committed journal event for owner-scoped chunking and pgvector
+  indexing. Index lag or failure changes only `KnowledgeIndexStatus`; it never changes the journal.
+  `knowledge_assistant` retrieves authorized knowledge and journal segments, cites every material
+  factual claim, labels active-trade values as historical unless refreshed from structured services,
+  and has no Trade Plan or execution tool.
+- `PerformanceObservation` is tagged exactly `BACKTEST`, `PAPER`, or `LIVE`. Versioned deterministic
+  calculators produce separate metric sets and side-by-side comparisons; operational views default
+  to `LIVE`. Edge is after-cost expectancy with formula, population, period, sample size, uncertainty,
+  and `POSITIVE`, `INCONCLUSIVE`, or `NEGATIVE` status. Aggregates drill down to contributing trades;
+  open-position unrealized P&L remains separate.
+- Broker acceptance/fill events drive a notification outbox keyed by `(execution_command_id,
+  notification_kind, fill_revision, channel)`. Unconfirmed submissions are never labeled entered;
+  partial and complete fills update the same execution timeline without duplicate entry alerts.
 
 ### Strategy integrity
 
@@ -329,9 +404,10 @@ LiteLLM is loaded only for explicitly assigned alternative profiles.
 
 Freeze asset-class and instrument-type enums, research-lane keys, underlying/listing/contract IDs,
 instrument-specification versions, money/quantity/time units, ownership rules, error format, event
-envelope, HIL-specific actions, state machines, freshness semantics, idempotency, optimistic
-concurrency, legacy-read/new-write migration compatibility, and adapter/agent contracts. Build
-authority-order and forbidden-dependency architecture tests first.
+envelope, Trade Plan and execution-command actions/state machines, per-account permission actions,
+kill-switch semantics, freshness, idempotency, optimistic concurrency, legacy-read/new-write migration
+compatibility, and adapter/agent contracts. Build authority-order, forbidden-dependency, and no-agent-
+broker-write architecture tests first.
 
 ### Stage 1 - Platform and security foundation
 
@@ -344,7 +420,7 @@ stage.
 
 Implement the Codex App Server worker pool and default runtime adapter first, then the optional
 LiteLLM adapter and explicit selection UI. Add the model catalog, runtime-bound profiles and
-fallbacks, all 16 fixed agent definitions including `stocks_research`, agent configuration versions,
+fallbacks, all 17 fixed agent definitions including `stocks_research` and `knowledge_assistant`, agent configuration versions,
 independent system/user prompt resolution, tool permission sets, capability validation, test-agent
 flow, and execution audit. Seed the knowledge-source registry but do not permit retrieval to affect
 authority.
@@ -357,7 +433,7 @@ correlation/exposure groups, candidate reservations, dynamic capacity, and instr
 valuation and sizing. Include cash availability, contract multiplier, tick/point value, quantity
 increment, margin, financing/funding, expiry/roll, gap allowance, currency conversion, and shared-
 underlying aggregation in deterministic hard-block explanations. Complete boundary/property and
-concurrency tests before trade proposals.
+concurrency tests before executable Trade Plans.
 
 ### Stage 4 - Market, event, and knowledge data
 
@@ -371,13 +447,13 @@ configured exchange feed and CoinGecko broad discovery context; neither is silen
 unsupported lane authority. Complete knowledge ingestion, provenance, scoping, retrieval, and
 degraded behavior behind the structured-data boundary.
 
-### Stage 5 - Analysis, research, and HIL-1
+### Stage 5 - Autonomous analysis and market research
 
 Build deterministic indicators, structure, liquidity, volatility, correlation, and fingerprints;
 bounded fundamental/sentiment/regime outputs; 12 independently terminal daily lane rankings;
-asset-class specialist review; exact typed candidate and exclusion evidence; persisted matrix
-selections; lane-scoped APPROVE and REPLACE plus run-scoped RERUN RESEARCH; and explicit READY,
-NO TRADE, NOT CONFIGURED, UNAVAILABLE, STALE, BLOCKED, and aggregate degraded paths.
+asset-class specialist review; exact typed candidate and exclusion evidence; autonomous candidate
+progression without selection approval; deterministic next-candidate fallback after invalidation; and
+explicit READY, NO TRADE, NOT CONFIGURED, UNAVAILABLE, STALE, BLOCKED, and aggregate degraded paths.
 
 ### Stage 6 - Strategy platform and validation
 
@@ -393,32 +469,41 @@ chronological discovery partition for the agent, generates multiple cited hypoth
 deterministic unseen holdout partition to select or safely reject them before human approval. This
 preliminary screen is research evidence and never substitutes for formal validation or paper trading.
 
-### Stage 7 - Proposal vertical slice and HIL-2
+### Stage 7 - Trade Plan and deterministic execution authorization
 
-Implement strategy selection, setup detection, deterministic construction, fresh snapshot capture,
-policy/effective-limit/portfolio/risk evaluation, PASS/REDUCE SIZE/HARD BLOCK, critic review,
-candidate reservation, Trade Desk, and TAKE/WAIT/REJECT. Validate all FR-032 fields and the 5-second
-acceptance target.
+Implement strategy selection, setup detection, immutable Trade Plan construction, fresh snapshot
+capture, policy/effective-limit/portfolio/risk evaluation, PASS/REDUCE SIZE/HARD BLOCK, critic review,
+candidate reservation, per-account execution permission profiles, durable account/platform kill
+switches, command authorization, transactional outbox, and the automation operations view. Validate
+all FR-032 fields, the 5-second evaluation target, and that disabled or blocked actions emit no broker write.
 
-### Stage 8 - Broker bridge and reconciliation
+### Stage 8 - Execution-capable broker bridge and reconciliation
 
-Implement authenticated MT5/Wine bridge health and read/event contracts, broker snapshots and
-positions, read-only symbol directory and quotes, calculation mode, contract size, tick value,
-quantity bounds, margin/swap, session and expiry metadata, awaiting-manual-entry state, exact typed
-instrument/contract matching, ambiguous user confirmation, event deduplication/order handling, and
-conversion from proposal values to actual broker authority.
+Extend the authenticated MT5/Wine bridge with capability negotiation and bounded order entry,
+cancellation, protection change, partial-close, and full-exit commands. Matrades enqueues commands in
+the durable Python bridge; the MQL5 EA polls them through outbound `WebRequest`, submits validated
+`MqlTradeRequest` operations, and posts receipts/results/events. Implement signed command envelopes,
+transactional bridge leasing and a restart-safe local ledger, expiry, nonce/idempotency persistence,
+symbol and position preconditions, broker snapshots, orders/deals/positions, exact typed instrument/
+contract matching, partial fills, uncertain-outcome reconciliation before retry, duplicate/out-of-
+order event handling, and conversion from planned to actual broker authority. Ambiguous matches
+become BLOCKED rather than waiting for routine approval.
 
-### Stage 9 - Monitoring and HIL-3
+### Stage 9 - Autonomous monitoring, charts, and live journaling
 
-Implement live position analysis, management-policy/risk validation, HOLD and position-change
-recommendations, APPROVE/WAIT/REJECT, manual-change reconciliation, broker protection events, and
-safe disconnect/reconnect behavior.
+Implement live position analysis, management-policy/risk/permission revalidation, HOLD and structured
+position-change actions through the execution service, broker protection events, safe disconnect/
+reconnect behavior, adjacent active Trade Plans, read-only interactive charts and overlays, immutable
+live Journal-agent observations, continuous knowledge indexing, and terminal post-trade summaries.
 
-### Stage 10 - Closed loop and hardening
+### Stage 10 - Knowledge Q&A, analytics, notifications, and hardening
 
-Complete journal timelines, structured performance, strategy health, controlled research triggers,
-approval inbox, dashboards, in-app notifications followed by optional channels, backup/restore,
-security review, load/replay tests, failure simulations, source/license review, and production runbooks.
+Implement the read-only citation-grounded Knowledge Assistant; separate `BACKTEST`, `PAPER`, and
+`LIVE` performance projections; deterministic win/loss, profitability, drawdown, expectancy, and edge
+calculations with drill-down; deduplicated confirmed-entry notifications in-product and through
+Telegram/Pushover adapters; strategy health and controlled research triggers; automation dashboards;
+backup/restore; security review; load/replay tests; execution failure simulations; source/license
+review; and production runbooks.
 
 ## Verification Strategy
 
@@ -432,20 +517,26 @@ security review, load/replay tests, failure simulations, source/license review, 
   reject symbol-only and cross-type substitution, prove shared source-cut quota behavior, and ensure
   continuous futures never become actionable.
 - Integration tests cover persistence, migrations, task idempotency, consistent account snapshots,
-  concurrent proposal reservations, Codex App Server process recovery, same-runtime fallback,
-  explicit LiteLLM selection, prohibition of cross-runtime fallback, knowledge isolation, bridge
-  authentication, reconciliation, and immutable audit linkage.
+  concurrent Trade Plan reservations, permission and kill-switch races, Codex App Server process
+  recovery, same-runtime fallback, explicit LiteLLM selection, prohibition of cross-runtime fallback,
+  knowledge isolation, bridge authentication, command idempotency, partial fills, uncertain-outcome
+  reconciliation, and immutable audit linkage.
 - Replay tests prove point-in-time market/macro handling, no look-ahead, shared-evaluator parity,
   realistic trading costs, and reproducible strategy/policy/risk outcomes.
 - Security tests cover tenant isolation, MFA/step-up, session revocation, secret rotation/redaction,
   authorization, prompt injection boundaries, runtime-selection authorization, no silent runtime
-  migration, and agent tool-permission invariance.
-- End-to-end tests cover all actions at HIL-1/2/3, NO TRADE, hard block, reduced size, manual entry,
-  ambiguous reconciliation, protective closure, both AI strategy origins, and retrieval failure.
-- Acceptance suites map SC-001 through SC-015 directly and publish evidence for release gates.
+  migration, agent tool-permission invariance, no agent broker credentials, chart read-only behavior,
+  Knowledge Assistant execution refusal, and step-up-protected permission/kill-switch changes.
+- End-to-end tests cover autonomous 12-lane progression, NO TRADE, hard block, reduced size, enabled
+  and disabled account actions, kill switches, entry/cancel/protection/partial/full-exit execution,
+  partial fills, ambiguous/unknown reconciliation, protective closure, active Trade Plan and chart
+  overlays, live journal indexing, grounded Q&A refusal, separate analytics populations, confirmed-
+  entry notifications, both AI strategy origins, and retrieval failure.
+- Acceptance suites map SC-001 through SC-024 directly and publish evidence for release gates.
 
 ## Complexity Tracking
 
 No constitutional violation requires a complexity exception. The modular monolith, PostgreSQL
 extensions, one task queue, and limited deployment boundaries are the simplest design that preserves
-durable HIL workflows, time-series analysis, contextual retrieval, and cross-platform MT5 operation.
+transactional financial invariants, durable autonomous execution state, time-series analysis,
+contextual retrieval, read-only charts, and cross-platform MT5 operation.

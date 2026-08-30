@@ -58,25 +58,25 @@ Agent runtime events contain previous/new runtime, selection source, configurati
 actor, and reason. Connecting LiteLLM or synchronizing its models does not emit a selection change;
 only explicit configuration activation can change an agent from the Codex default.
 
-## Research and HIL-1 Events
+## Autonomous Research Events
 
 - `research.queued`, `research.started`, `research.degraded`, `research.completed`, `research.failed`
 - `research_lane.started`, `research_lane.ready`, `research_lane.no_trade`,
   `research_lane.not_configured`, `research_lane.unavailable`, `research_lane.stale`,
   `research_lane.blocked`
-- `market_selection.approval_requested`
-- `market_selection.approved`
-- `market_selection.replaced`
-- `market_selection.rerun_requested`
+- `market_selection.selected`
+- `market_selection.invalidated`
+- `market_selection.fallback_selected`
+- `market_selection.no_trade`
 - `market_selection.expired`
 
 Every lane payload identifies `(asset_class, instrument_type)`, the matrix/run version, provider
 binding and source-cut references, terminal state, and—when ready—the immutable candidate, exact
 venue listing or dated futures contract, and specification version. `research.completed` summarizes
 all 12 terminal lane results and cannot imply that a non-ready lane produced a recommendation.
-REPLACE stays within the original lane and creates a new selection version; RERUN creates a new
-research run. Mapping/specification changes, futures expiry/roll, corporate actions, and financing-
-term changes expire affected selections and proposals rather than silently rewriting them.
+Fallback stays within the original lane and creates a new selection version. Mapping/specification
+changes, futures expiry/roll, corporate actions, and financing-term changes invalidate affected
+selections and Trade Plans rather than silently rewriting them.
 
 ## Strategy Events
 
@@ -93,48 +93,68 @@ term changes expire affected selections and proposals rather than silently rewri
 Events reference draft/version revision, actor/agent execution, accepted rule revisions, schema/code
 versions and validation evidence. Conversation prose alone never emits `strategy_rule.revised`.
 
-## Policy, Risk, and Proposal Events
+## Policy, Risk, Permission, and Trade Plan Events
 
 - `ruleset.verified`, `ruleset.activated`, `guardrail_profile.activated`
 - `account_snapshot.recorded`
 - `policy.evaluated`, `risk.evaluated`
 - `risk_reservation.created`, `.converted`, `.released`, `.expired`
-- `trade_proposal.blocked`, `.reduced`, `.approval_requested`, `.expired`
-- `trade_proposal.take_recorded`, `.wait_recorded`, `.rejected`
+- `execution_permission.activated`, `.replaced`
+- `kill_switch.activated`, `.deactivated`, `.dispatch_blocked`
+- `trade_plan.created`, `.reduced`, `.validated`, `.authorized`, `.blocked`, `.expired`, `.cancelled`
 
-`risk.evaluated` contains the immutable context/result IDs and result status. HARD_BLOCK never emits
-`trade_proposal.approval_requested`. TAKE carries its reservation to awaiting manual entry.
+`risk.evaluated` contains immutable context/result IDs and status. HARD_BLOCK never emits
+`trade_plan.authorized`. Permission and kill events carry scope, version/safety epoch, actor, reason,
+and step-up audit reference without secrets.
 
-## Broker, Trade, and HIL-3 Events
+## Execution, Broker, and Trade Events
 
-- `broker.position_opened`, `.changed`, `.closed`
+- `execution_command.created`, `.dispatching`, `.submitted`, `.acknowledged`, `.rejected`,
+  `.outcome_unknown`, `.reconciling`, `.reconciled`, `.blocked_ambiguous`, `.superseded`
+- `broker.order_accepted`, `.rejected`, `.cancelled`, `.expired`
+- `broker.fill_partial`, `.completed`, `.corrected`
+- `broker.position_opened`, `.changed`, `.closed`, `.external_activity_detected`
 - `broker.stop_loss_changed`, `.take_profit_changed`, `.protection_executed`
 - `broker.account_changed`, `broker.connection_stale`, `.restored`
-- `reconciliation.candidate_found`, `.confirmation_requested`, `.confirmed`, `.rejected`
+- `reconciliation.started`, `.confirmed`, `.no_effect_confirmed`, `.blocked_ambiguous`, `.failed`
 - `trade.position_activated`, `trade.monitoring_updated`
-- `trade_management.approval_requested`
-- `trade_management.approved`, `.wait_recorded`, `.rejected`
+- `management_action.proposed`, `.authorized`, `.blocked`, `.submitted`, `.reconciled`
 - `trade.closed`, `trade.journaled`
 
-Broker event payloads preserve provider event/sequence and source times. HIL-3 applies only to a
-recommended discretionary change; broker protection execution may close the trade directly.
+Execution payloads reference Trade Plan, command, authorization, permission version, platform/account
+safety epochs, exact target, expected broker version, certainty, and reconciliation state. Broker
+payloads preserve provider IDs, sequence and source times; acceptance, fill, and position are distinct
+facts. Broker protection execution may close the trade directly. An ambiguous match blocks autonomous
+management and never becomes confirmed by inference.
 
 ## Knowledge and Operations Events
 
 - `knowledge_source.created`, `.disabled`, `.deletion_requested`, `.deleted`
 - `knowledge_ingestion.started`, `.completed`, `.failed`
 - `knowledge_index.degraded`, `.restored`
-- `notification.delivery_requested`, `.delivered`, `.failed`
+- `journal.event_committed`, `.observation_requested`, `.observation_appended`, `.observation_failed`
+- `journal.index_requested`, `.indexed`, `.index_retry_scheduled`, `.index_failed`
+- `journal.summary_requested`, `.summary_created`, `.summary_indexed`, `.summary_failed`
+- `knowledge_assistant.answered`, `.partial`, `.insufficient`, `.refused`
+- `performance.observation_recorded`, `.population_materialized`, `.metrics_calculated`,
+  `.edge_assessed`, `.rollup_degraded`, `.rollup_restored`
+- `trade_entry.confirmed`, `trade_entry_notification.created`, `.status_updated`
+- `notification.delivery_requested`, `.delivered`, `.retry_scheduled`, `.failed`, `.unknown`
+- `chart.source_degraded`, `.source_restored`
 - `job.started`, `.retry_scheduled`, `.completed`, `.failed`
 - `service.health_changed`, `circuit_breaker.opened`, `.closed`
 
 Deletion events keep a tombstone but not deleted content. Knowledge degradation never implies that
-current risk or policy is unavailable.
+current risk or policy is unavailable. Journal commits precede indexing. Knowledge Assistant events
+store query digest/retrieval audit and answer status without unnecessary sensitive text. Trade-entry
+notification events reference committed broker acceptance/fill evidence and a root dedupe identity;
+unconfirmed submissions emit none. Chart interactions emit no trading-domain event.
 
 ## UI Event Projection
 
 Authenticated SSE exposes owner-scoped projections with last-event resume IDs. User-visible states
-include `RESEARCHING`, `WAITING`, `ACTION_REQUIRED`, `ACTIVE`, `BLOCKED`, `DEGRADED`, and `OFFLINE`.
+include `RESEARCHING`, `EXECUTING`, `RECONCILING`, `OUTCOME_UNKNOWN`, `ACTIVE`, `BLOCKED`,
+`DEGRADED`, `KILL_SWITCH_ACTIVE`, and `OFFLINE`.
 The UI must re-fetch aggregate state after reconnect or version gaps rather than reconstructing
 financial truth solely from the event stream.
 
@@ -145,7 +165,12 @@ financial truth solely from the event stream.
 - Missing versions trigger bounded recovery and authoritative re-fetch.
 - Cross-owner/account events are never delivered or consumed outside scope.
 - Payload validation rejects secrets, raw prompt credentials, and unsupported schema versions.
-- Approval, risk-reservation and broker-event replay remains idempotent.
+- Execution-command, risk-reservation, journal-index, notification, and broker-event replay remains idempotent.
 - A 12-lane research run emits exactly one terminal lane fact per requested lane; duplicate terminal
-  delivery is idempotent and cross-instrument-type replacement is rejected.
-- Continuous futures identifiers are rejected from executable selection and proposal events.
+  delivery is idempotent and cross-instrument-type fallback is rejected.
+- Continuous futures identifiers are rejected from executable selection and Trade Plan events.
+- Permission and kill-switch races cannot dispatch with stale versions/epochs.
+- An uncertain command cannot retry before a reconciliation fact proves no effect.
+- Duplicate/out-of-order fills cannot create duplicate positions or entry notifications.
+- Knowledge Assistant trading prompts emit `refused` and no execution event.
+- Chart interaction emits no Trade Plan, command, or broker event.

@@ -18,8 +18,9 @@
   current rows.
 - Secrets are represented only by `credential_id`/`secret_version_id`; plaintext and ciphertext do
   not appear in domain events, agent context, or API responses.
-- Soft deletion is allowed for ordinary configuration. Audit, approval, strategy-version, policy-
-  version, risk, trade, and broker evidence is append-only or immutable after finalization.
+- Soft deletion is allowed for ordinary configuration. Audit, execution-permission versions, kill-
+  switch events, Trade Plans, commands, strategy versions, policy versions, risk, journal, trade, and
+  broker evidence is append-only or immutable after finalization.
 
 ## Identity and Security
 
@@ -111,7 +112,8 @@ Seeded fixed roles are:
 
 `orchestrator`, `forex_research`, `metals_research`, `crypto_research`, `stocks_research`, `technical_analyst`,
 `fundamental_analyst`, `sentiment_analyst`, `regime_analyst`, `strategy_selector`,
-`strategy_researcher`, `strategy_assistant`, `critic`, `trade_monitor`, `journal`, and `performance`.
+`strategy_researcher`, `strategy_assistant`, `critic`, `trade_monitor`, `journal`, `performance`, and
+the read-only `knowledge_assistant`.
 
 Each definition stores immutable logical ID, role/type, required/optional status, required
 capabilities, default runtime type (`CODEX_APP_SERVER`), default tool-permission set, input/output
@@ -199,7 +201,7 @@ cash settlement, multiplier, tick value, and margin for futures.
 `FuturesSeries` identifies a venue/root. `FuturesContract` identifies one dated executable contract
 and stores listing/notice/last-trade/expiry/settlement fields and roll lineage. `ContinuousFuture`
 stores a synthetic analytical series and adjustment method; it cannot be tradable or referenced by
-HIL-2. A versioned `RollRule` defines safety buffers, liquidity/open-interest thresholds, and
+an executable Trade Plan. A versioned `RollRule` defines safety buffers, liquidity/open-interest thresholds, and
 selection method. A `FuturesChainSnapshot` preserves all eligible/excluded contracts, source cutoff,
 and deterministically selected contract.
 
@@ -263,9 +265,10 @@ requested lane.
 
 `ResearchCandidate` references an immutable candidate ID, lane, exact venue instrument and dated
 contract where applicable, specification version, rank/factors, fingerprint, evidence and source
-cut. `MarketSelection` owns `MarketSelectionEntry` records keyed by lane, each linking the chosen
-candidate, HIL-1 decision, effective/expiry times, and replacement lineage. A replacement must stay
-within the same lane; unresolved lanes cannot progress to HIL-2.
+cut. `MarketSelection` owns `MarketSelectionEntry` records keyed by lane, each linking the autonomously
+chosen candidate, selection reason, effective/expiry times, invalidation, deterministic fallback, and
+replacement lineage. A fallback stays within the same lane; unresolved lanes cannot progress to
+Trade Plan construction.
 
 Pre-matrix category-only records retain their original payload and receive `LEGACY_UNTYPED` migration
 metadata. They remain auditable and readable, but no migration invents an instrument type, venue
@@ -277,7 +280,8 @@ an explicit verified mapping that creates a new typed selection version.
 ### TradingAccount
 
 Stores owner, display name, `PERSONAL` or `PROP_FIRM`, currency, nominal starting balance, broker
-connection, program/ruleset, guardrail profile, execution mode (`MANUAL`), status, and active account-
+connection, program/ruleset, guardrail profile, execution mode (`READ_ONLY` or `AUTOMATED`), status,
+active execution-permission version, account kill-switch reference, and active account-
 snapshot reference. A prop account requires an active verified compatible ruleset.
 
 ### AccountSnapshot
@@ -311,9 +315,10 @@ source, and effective value. `PolicyEvaluation` stores immutable inputs, checks,
 
 ### PositionRiskReservation
 
-Represents remaining worst-case loss for either an actual open position or actionable proposal.
-Fields include account, proposal/position, amount/currency/base amount, Stop Loss and current-price
-references, calculation version, status (`PROVISIONAL`, `AWAITING_ENTRY`, `OPEN_POSITION`, `RELEASED`,
+Represents remaining worst-case loss for an authorized Trade Plan, working command/order, partial
+fill, or actual open position. Fields include account, Trade Plan/command/order/position, amount/
+currency/base amount, Stop Loss and current-price references, calculation version, status
+(`PROVISIONAL`, `COMMAND_PENDING`, `ORDER_WORKING`, `PARTIALLY_FILLED`, `OPEN_POSITION`, `RELEASED`,
 `EXPIRED`), and expiry/release reason. Active reservations are included atomically in capacity.
 
 ### ExposureGroup and CorrelationRule
@@ -345,7 +350,7 @@ Validation invariants:
 - Exposure aggregates economically equivalent underlying risk across spot, CFD, and futures wrappers.
 - Tightening a hard limit or adding loss/exposure cannot increase permitted size or capacity.
 - Unrealized profit contributes only when the active policy explicitly defines it.
-- A hard-block result cannot create an actionable approval.
+- A hard-block result cannot create an ExecutionAuthorization or BrokerCommand.
 
 ## Strategy Platform
 
@@ -405,7 +410,9 @@ account-policy simulation.
 
 Compatibility is versioned per account/ruleset/instrument/regime. Health records time-bound
 `ACTIVE`, `DEGRADED`, `SUSPENDED`, or `RETIRED` evidence and do not mutate rules. Performance records
-contain structured metrics, population size, time window and dimensions; narrative is separate.
+contain exactly one evidence class (`BACKTEST`, `PAPER`, or `LIVE`), structured metrics, population
+digest and contributing IDs, exclusions, cost/calculation/FX versions, sample size, time window,
+dimensions, and uncertainty. Narrative is separate and evidence classes never share one population.
 
 ## Knowledge
 
@@ -432,55 +439,138 @@ Deletion purges retrievable content/embeddings and retains a minimal immutable t
 cannot return a disabled, deleted, unauthorized, or superseded segment unless an explicit historical
 audit path permits metadata-only access.
 
-## Trading Workflow, Broker State, and Approvals
+### JournalIndexWorkItem and KnowledgeAssistantAnswer
 
-### TradeProposal
+`JournalIndexWorkItem` is unique by journal event, index generation, and embedding-model version. It
+stores `QUEUED`, `RUNNING`, `INDEXED`, `RETRY`, or `FAILED`, attempt count, error, and active-generation
+switch state. Indexing failure never changes the authoritative journal event.
 
-Immutable proposal links owner/account, market fingerprint, validated strategy version/artifact,
-construction values, evidence and invalidation, policy evaluation, risk context/result, critic
-execution/result, freshness set, code version, state, expiry, risk reservation, and HIL-2 approval.
-Only PASS or compliant REDUCE_SIZE results may enter `TRADE_PENDING_APPROVAL`.
+`KnowledgeAssistantQuery` stores owner, optional account/trade/strategy scope, question digest or
+protected reference, filters, authorization snapshot, and request time. `KnowledgeAssistantAnswer`
+stores `ANSWERED`, `PARTIAL`, `INSUFFICIENT`, `DEGRADED`, or `REFUSED`; claim records labeled
+`EVIDENCE` or `INFERENCE`; citation records referencing authorized immutable segments or journal
+events; active-trade historical-value warning; retrieval audit; agent/model/prompt/tool versions;
+and completion time. A material evidence claim without a valid returned citation cannot persist as
+supported. The aggregate has no executable trading representation.
 
-### ApprovalRequest and ApprovalDecision
+## Autonomous Trading, Execution, Broker State, and Journaling
 
-`ApprovalRequest` stores type (`MARKET_SELECTION`, `TRADE_ENTRY`, `TRADE_MANAGEMENT`), subject,
-payload schema/version, allowed actions, urgency, status, expiry, expected subject version, and audit
-correlation. `ApprovalDecision` stores exact action, actor, time, optional rationale, step-up context
-where required, and resulting subject version.
+### ExecutionPermissionProfileVersion and KillSwitchState
 
-Allowed actions are type-specific:
+`ExecutionPermissionProfileVersion` is immutable and account scoped. It contains independently
+default-denied booleans for `NEW_ENTRY`, `ORDER_CANCELLATION`, `STOP_LOSS_CREATE_OR_MODIFY`,
+`TAKE_PROFIT_CREATE_OR_MODIFY`, `PARTIAL_CLOSE`, and `FULL_EXIT`; effective interval; actor/reason;
+step-up verification; expected prior version; and audit correlation. A permission is necessary but
+never overrides policy, risk, broker capability, or kill state.
 
-- HIL-1: `APPROVE`, `REPLACE`, `RERUN_RESEARCH`
-- HIL-2: `TAKE`, `WAIT`, `REJECT`
-- HIL-3: `APPROVE`, `WAIT`, `REJECT`
+`KillSwitchState` has `PLATFORM` or `ACCOUNT` scope, `ACTIVE` or `INACTIVE`, a monotonically increasing
+safety epoch, reason, actor, activation/deactivation times, step-up context for deactivation, and
+version. Effective kill is platform active OR account active. Activation fences stale workers and
+blocks new authorization/dispatch while read-only monitoring, reconciliation, journaling,
+notifications, and broker-hosted protections continue.
 
-### BrokerPosition and BrokerEvent
+### TradePlan and ExecutionAuthorization
 
-`BrokerPosition` is the latest projection of provider position ID, account, canonical instrument,
-exact venue listing or dated futures contract, asset class, instrument type, pinned specification,
-direction, actual entry/size and quantity unit, Stop Loss/Take Profit, margin, financing/funding,
-fees, P&L, broker version/timestamps, and freshness.
-`BrokerEvent` is immutable and deduplicated by provider event/sequence; types include position opened,
-changed/closed, protection changed/executed, and account changed.
+`TradePlan` is the immutable economic intent. It links owner/account, exact typed listing/contract,
+market fingerprint, validated strategy version/artifact, direction, entry or zone, normalized size,
+Stop Loss, targets, invalidation, management rules, maximum loss, Risk:Reward, evidence, policy/risk/
+critic results, freshness set, code version, content digest, state, expiry, and risk reservation.
 
-### Reconciliation
+`ExecutionAuthorization` is short-lived and deterministic. It stores Trade Plan or autonomous-
+management-action revision, action, permission-profile version and effective permission, platform/
+account safety epochs, account/position/order snapshots, policy/risk/data results, instrument-
+specification version, authorization digest, issued/expiry times, and blocked reasons. Only current
+PASS or compliant REDUCE_SIZE inputs may produce it.
 
-Links proposal, detected position, match factors/scores, status (`CANDIDATE`, `AUTO_MATCHED`,
-`USER_CONFIRMATION_REQUIRED`, `CONFIRMED`, `REJECTED`, `SUPERSEDED`), user decision if ambiguous,
-and actual-value snapshot. One broker position and one proposal can have at most one confirmed match.
+### ExecutionCommand and ExecutionAttempt
 
-### Trade, TradeRecommendation, and JournalEvent
+`ExecutionCommand` is the sole broker-write intent. Fields include stable command ID, semantic unique
+key, account sequence, action (`PLACE_ORDER`, `CANCEL_ORDER`, `SET_OR_CHANGE_STOP_LOSS`,
+`SET_OR_CHANGE_TAKE_PROFIT`, `PARTIAL_CLOSE`, `FULL_EXIT`), source Trade Plan or management action,
+authorization ID, exact target order/position, requested postcondition, normalized values, expected
+broker version, idempotency key, safety epochs, state, outcome certainty, expiry, and correlation IDs.
 
-`Trade` links proposal, account, strategy version, confirmed broker position, lifecycle status, open/
-close times and outcome. `TradeRecommendation` stores HOLD or validated management action, evidence,
-policy/risk effect, agent execution, expiry and HIL-3 linkage. `JournalEvent` is append-only and links
-trade, event type, actor/source, structured payload, evidence/version references, broker event,
-approval and timestamps.
+`ExecutionAttempt` records every transport attempt with command, attempt number, bridge lease,
+request/response digests, dispatch/ack timestamps, raw broker result reference, retry proof, and
+error. A retry never creates a new command identity. Timeout or crash after dispatch produces
+`OUTCOME_UNKNOWN` and requires reconciliation.
 
-### Notification
+### BrokerOrder, BrokerFill, BrokerPosition, and BrokerEvent
 
-Stores normalized event type, owner, subject, urgency, channel attempts, delivery/read/acknowledgment
-state, idempotency key, and timestamps. Notification delivery never changes approval state.
+`BrokerOrder` projects provider order/client tag, source command, account, exact typed instrument,
+side/type, requested and cumulative-filled quantity, limit/stop values, attached protection, status,
+broker version/sequence, and times. `BrokerFill` is immutable and unique by provider execution ID;
+it stores order/position, incremental and cumulative quantity, price, fees, liquidity metadata where
+available, source sequence, and broker time.
+
+`BrokerPosition` is the latest projection of provider position ID, origin (`MATRADES` or `EXTERNAL`),
+account, canonical instrument, exact listing or dated contract, specification, direction, actual
+entry/size and unit, Stop Loss/Take Profit, margin, financing/funding, fees, P&L, broker version/times,
+and freshness. `BrokerEvent` is immutable and deduplicated by provider event/sequence; it includes
+order accepted/rejected/cancelled/expired, partial/complete/corrected fill, position open/change/
+close, protection change/execution, and account change.
+
+### AutonomousManagementAction and ReconciliationRun
+
+`AutonomousManagementAction` stores `HOLD`, `SET_OR_CHANGE_STOP_LOSS`,
+`SET_OR_CHANGE_TAKE_PROFIT`, `PARTIAL_CLOSE`,
+or `FULL_EXIT`; exact position/version; agent recommendation if any; deterministic policy/risk/
+permission/kill validation; requested postcondition; expiry; and resulting authorization/command.
+
+`ReconciliationRun` stores account and source watermark, trigger, scanned orders/deals/positions,
+candidate matches, actual result, certainty, and status (`RUNNING`, `CONFIRMED`, `NO_EFFECT_CONFIRMED`,
+`BLOCKED_AMBIGUOUS`, `FAILED`). `ReconciliationMatch` prioritizes command/client IDs then broker IDs;
+symbol/time/side/quantity are fallback evidence only. Cross-account/type/contract matches are
+forbidden. An exceptional step-up-protected administrative resolution may classify evidence but
+cannot dispatch a broker command.
+
+### Trade, JournalEvent, LiveJournalObservation, and PostTradeSummary
+
+`Trade` links Trade Plan, account, strategy version, broker orders/fills/position, lifecycle status,
+open/close times, realized outcome, and evidence class (`LIVE`). `JournalEvent` is immutable and
+links trade, Trade Plan/version, position, source domain event/version, event/evidence/recorded times,
+structured evidence references, actor/source, provider/code versions, and indexing status.
+
+`LiveJournalObservation` links one authoritative event and stores `OBSERVATION`, `INFERENCE`, or
+`MIXED`, narrative, claims/evidence, uncertainty, and Journal-agent execution/model/prompt/tool
+versions. `PostTradeSummary` links terminal broker outcome, exact included event range/digest,
+chronology, rationale, fees, MAE, MFE, outcome, lessons, agent execution, version, and indexing state.
+
+### ChartContext and ChartOverlay
+
+`ChartContext` is a non-executable read model containing account/trade, normalized instrument,
+listing/contract and broker mapping, provider/cutoff/freshness, timeframe, candle reference,
+Trade Plan and position versions, indicators, and ordered overlays. `ChartOverlay` stores plan entry/
+zone, broker order/fill, Stop Loss, Take Profit, partial/full exit, journal marker, or automated action;
+planned/actual state; price/time/range; and immutable source aggregate/event/version. It has no
+execution command fields or broker credential.
+
+### PerformanceObservation, MetricSet, and EdgeAssessment
+
+`PerformanceObservation` represents one completed simulated or actual trade and is tagged exactly
+`BACKTEST`, `PAPER`, or `LIVE`. It stores run/trade/fill identities, account/strategy/instrument/
+regime/session dimensions, initial risk, gross/net outcome, R, costs, MAE/MFE, duration, exit reason,
+currency/FX version, completeness, and exclusion reason. `PerformancePopulation` pins one evidence
+class, filters, cutoff, contributing IDs/digest, exclusions, missing values, and calculation/cost/FX
+versions. `PerformanceMetricSet` stores the deterministic FR-120 values.
+
+`EdgeAssessment` stores one population, after-cost expectancy in money and R, formula, sample size,
+period, uncertainty method/seed/interval, and `POSITIVE`, `INCONCLUSIVE`, `NEGATIVE`, or
+`INSUFFICIENT_SAMPLE`. Unrealized open-position P&L is a separate snapshot and cannot enter
+completed-trade expectancy or win rate.
+
+### TradeEntryNotification and NotificationDelivery
+
+`TradeEntryNotification` is one logical aggregate per owner/account/broker order. It links the
+confirmed broker event and Trade Plan, advances monotonically through `PENDING_ORDER`,
+`PARTIALLY_FILLED`, and `FILLED`, records cumulative quantity/price/protections and version, and has
+one audience snapshot. A submitted but unconfirmed command cannot create it.
+
+`NotificationDelivery` is unique by notification, notification version, and channel. It stores
+`QUEUED`, `SENDING`, `DELIVERED`, `RETRY`, `FAILED`, or `UNKNOWN_DELIVERY`; provider receipt,
+idempotency identity, attempt history, and times. V1 channel values are `IN_PRODUCT`, `TELEGRAM`, and
+`PUSHOVER`; additional channels remain adapter extensions. In-product delivery is authoritative;
+channel failure is isolated and cannot change execution state.
 
 ## Aggregate Relationships
 
@@ -493,20 +583,27 @@ User
 │   ├── AccountSnapshots
 │   ├── ResearchMatrixVersions ── ProviderBindings
 │   ├── active PropRuleset + GuardrailProfile
+│   ├── ExecutionPermissionProfileVersions + AccountKillSwitch
 │   ├── PositionRiskReservations + ExposureSnapshots
-│   └── RiskEvaluationContexts ── RiskCapacityResults
+│   ├── RiskEvaluationContexts ── RiskCapacityResults
+│   ├── TradePlans ── ExecutionAuthorizations ── ExecutionCommands ── Attempts
+│   ├── BrokerOrders ── BrokerFills ── BrokerPositions
+│   └── ReconciliationRuns + TradeEntryNotifications
+├── PlatformKillSwitch ── fences every TradingAccount
 ├── UnderlyingAssets ── Instruments ── VenueInstruments ── SpecificationVersions
 │   └── FuturesSeries ── DatedContracts/ChainSnapshots/RollRules
-├── ResearchRuns ── 12 ResearchLaneResults ── MarketSelections ── HIL-1 Approvals
+├── ResearchRuns ── 12 ResearchLaneResults ── Autonomous MarketSelections
 ├── Strategies ── StrategyVersions
 │   ├── Drafts ── RuleRevisions/Suggestions/ChangeSets
 │   ├── Fingerprints/SimilarityAssessments
 │   └── Implementation/Backtest/Validation/Paper/Promotion evidence
 ├── KnowledgeSources ── Documents ── Segments
-└── TradeProposals ── HIL-2 Approval ── Reconciliation ── Trade
-    ├── BrokerPosition/BrokerEvents
-    ├── Recommendations ── HIL-3 Approvals
-    └── JournalEvents ── PerformanceRecords
+├── KnowledgeAssistantQueries ── Answers/Claims/Citations
+└── Trades
+    ├── AutonomousManagementActions ── ExecutionCommands
+    ├── ChartContexts/Overlays
+    ├── JournalEvents ── LiveObservations/PostTradeSummary ── IndexWorkItems
+    └── PerformanceObservations/Populations/MetricSets/EdgeAssessments
 ```
 
 ## State Transitions
@@ -532,6 +629,18 @@ DISABLED -> UNTESTED (explicit re-enable)
 A newer valid observation is required to recover from STALE/OFFLINE. Status policy determines which
 dependent workflows block or degrade.
 
+### Execution permissions and kill switches
+
+```text
+Permission profile: DRAFT -> VALIDATED -> ACTIVE -> SUPERSEDED
+Kill switch: INACTIVE --ACTIVATE--> ACTIVE --STEP_UP_DEACTIVATE--> INACTIVE
+activation increments safety_epoch; deactivation increments safety_epoch again
+```
+
+No agent transition exists. A command captured under an older permission version or safety epoch
+must revalidate; a queued undispatched command is blocked, while an already dispatched command
+enters outcome reconciliation.
+
 ### Strategy
 
 ```text
@@ -548,13 +657,13 @@ Stages cannot be skipped. A material change creates a new DRAFT linked to an imm
 ```text
 QUEUED -> RESEARCHING -> each requested lane reaches
   READY | NO_TRADE | NOT_CONFIGURED | UNAVAILABLE | STALE | BLOCKED
-all lanes terminal -> MARKETS_PENDING_APPROVAL
-MARKETS_PENDING_APPROVAL --APPROVE/REPLACE--> MARKETS_APPROVED
-MARKETS_PENDING_APPROVAL --RERUN_RESEARCH--> RESEARCHING (new run/version)
-any approved selection -> EXPIRED when its listing, contract, specification, or source cut expires
+READY -> SELECTED -> ANALYZING
+SELECTED -> INVALIDATED -> FALLBACK_SELECTED | NO_TRADE
+all lanes terminal -> COMPLETE | DEGRADED
+any selection -> EXPIRED when its listing, contract, specification, or source cut expires
 ```
 
-A replacement remains in its original `(asset_class, instrument_type)` lane. A missing provider
+A fallback remains in its original `(asset_class, instrument_type)` lane. A missing provider
 binding, mapping, authoritative contract specification, or dated futures contract produces an
 explicit non-ready result and cannot silently fall back to another instrument type.
 
@@ -571,25 +680,40 @@ FUTURES_LISTED -> ACTIVE -> FIRST_NOTICE_APPROACHING | LAST_TRADE_APPROACHING
 Corporate actions, broker-term changes, contract rolls, mapping changes, and specification-version
 changes invalidate affected recommendations and force deterministic revalidation.
 
-### Proposal and trade
+### Trade Plan, execution command, and trade
 
 ```text
 MONITORING -> SETUP_CANDIDATE -> POLICY_VALIDATION -> RISK_VALIDATION
 RISK_VALIDATION -> HARD_BLOCKED | REDUCED | CRITIC_REVIEW
 REDUCED -> CRITIC_REVIEW
-CRITIC_REVIEW -> REJECTED_BY_CRITIC | TRADE_PENDING_APPROVAL
-TRADE_PENDING_APPROVAL --TAKE--> AWAITING_MANUAL_ENTRY
-TRADE_PENDING_APPROVAL --WAIT--> MONITORING
-TRADE_PENDING_APPROVAL --REJECT--> TRADE_REJECTED
-AWAITING_MANUAL_ENTRY -> POSITION_DETECTED -> POSITION_MATCH_PENDING
-POSITION_MATCH_PENDING -> POSITION_ACTIVE | MATCH_REJECTED
-POSITION_ACTIVE -> MANAGEMENT_PENDING_APPROVAL | TRADE_CLOSED
-MANAGEMENT_PENDING_APPROVAL --APPROVE/WAIT/REJECT--> POSITION_ACTIVE
+CRITIC_REVIEW -> REJECTED_BY_CRITIC | TRADE_PLAN_READY
+TRADE_PLAN_READY -> AUTHORIZING -> BLOCKED | AUTHORIZED
+AUTHORIZED -> EXECUTION_PENDING | EXPIRED | CANCELLED
+
+ExecutionCommand:
+CREATED -> VALIDATING -> BLOCKED | AUTHORIZED
+AUTHORIZED -> QUEUED -> DISPATCHING
+DISPATCHING -> ACKNOWLEDGED | REJECTED | OUTCOME_UNKNOWN
+ACKNOWLEDGED -> PARTIALLY_APPLIED | APPLIED | SUPERSEDED | OUTCOME_UNKNOWN
+PARTIALLY_APPLIED -> APPLIED | SUPERSEDED | OUTCOME_UNKNOWN
+OUTCOME_UNKNOWN -> RECONCILING
+RECONCILING -> ACKNOWLEDGED | PARTIALLY_APPLIED | APPLIED
+             | NO_EFFECT_CONFIRMED | BLOCKED_AMBIGUOUS
+NO_EFFECT_CONFIRMED -> DISPATCHING (same command identity)
+
+Broker order/position:
+ORDER_ACCEPTED -> PARTIALLY_FILLED -> FILLED
+ORDER_ACCEPTED | PARTIALLY_FILLED -> CANCELLED | EXPIRED
+first fill -> POSITION_ACTIVE
+POSITION_ACTIVE -> MANAGEMENT_ACTION_PENDING -> ExecutionCommand lifecycle
+POSITION_ACTIVE -> TRADE_CLOSED
 TRADE_CLOSED -> JOURNALED
 ```
 
-At every transition, expired or changed authoritative inputs force revalidation. Broker-side
-protective execution may move `POSITION_ACTIVE` directly to `TRADE_CLOSED` without HIL-3.
+At every authorization and dispatch boundary, changed inputs, permissions, safety epochs, broker
+versions, or freshness force revalidation. Broker-side protective execution may move
+`POSITION_ACTIVE` directly to `TRADE_CLOSED`. External broker activity enters reconciliation with
+origin `EXTERNAL`; ambiguous evidence blocks autonomous management.
 
 ### Background job and knowledge ingestion
 
@@ -602,6 +726,11 @@ REGISTERED -> INGESTING -> INDEXED
 INGESTING -> DEGRADED | FAILED
 INDEXED -> REPROCESSING -> INDEXED
 any source state -> DISABLED -> DELETING -> DELETED_TOMBSTONE
+
+Journal event:
+COMMITTED -> INDEX_QUEUED -> INDEXING -> INDEXED
+INDEXING -> RETRY | FAILED
+terminal trade -> SUMMARY_QUEUED -> SUMMARY_CREATED -> SUMMARY_INDEXED
 ```
 
 Job and ingestion transitions require idempotency keys; a retry cannot duplicate an accepted domain

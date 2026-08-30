@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from redis.asyncio import Redis
 
@@ -22,6 +22,8 @@ class RedisAgentGateway:
         logical_id: str,
         payload: dict[str, Any],
         output_schema: dict[str, Any],
+        *,
+        owner_id: UUID | None = None,
     ) -> dict[str, Any]:
         request_id = str(uuid4())
         response_key = f"{AGENT_RESPONSE_PREFIX}{request_id}"
@@ -31,6 +33,7 @@ class RedisAgentGateway:
             "logical_id": logical_id,
             "payload": payload,
             "output_schema": output_schema,
+            "owner_id": str(owner_id) if owner_id else None,
         }
         await self.redis.lpush(AGENT_REQUEST_QUEUE, json.dumps(request, default=str))
         response = await self.redis.blpop(response_key, timeout=self.timeout_seconds)
@@ -47,3 +50,21 @@ class RedisAgentGateway:
 
     async def close(self) -> None:
         await self.redis.aclose()
+
+
+class OwnerScopedAgentGateway:
+    """Adds immutable tenant scope to every delegated agent request."""
+
+    def __init__(self, gateway: RedisAgentGateway, owner_id: UUID) -> None:
+        self.gateway = gateway
+        self.owner_id = owner_id
+
+    async def invoke(
+        self, logical_id: str, payload: dict[str, Any], output_schema: dict[str, Any]
+    ) -> dict[str, Any]:
+        return await self.gateway.invoke(
+            logical_id, payload, output_schema, owner_id=self.owner_id
+        )
+
+    async def close(self) -> None:
+        await self.gateway.close()

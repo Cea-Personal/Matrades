@@ -4,11 +4,14 @@ import hashlib
 import hmac
 import os
 import time
+from base64 import b64encode
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
+import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 
+from bridges.mt5.commands import BridgeCommand, BridgeCommandQueue, BridgeReceipt
 from packages.broker_sdk.schemas import BrokerInstrument, BrokerSnapshot
 
 
@@ -20,7 +23,11 @@ def verify(
     window: int = 30,
     nonce: str = "",
 ) -> None:
-    if abs(time.time() - int(timestamp)) > window:
+    try:
+        fresh = abs(time.time() - int(timestamp)) <= window
+    except (TypeError, ValueError):
+        fresh = False
+    if not fresh:
         raise HTTPException(401, "stale signed request")
     signed = timestamp.encode() + (b"." + nonce.encode() if nonce else b"") + b"." + body
     expected = hmac.new(secret, signed, hashlib.sha256).hexdigest()
@@ -28,22 +35,75 @@ def verify(
         raise HTTPException(401, "invalid signature")
 
 
-def create_app(reader: object | None = None, secret: bytes | None = None) -> FastAPI:
-    app = FastAPI(title="Matrades read-only MT5 bridge")
+def create_app(
+    reader: object | None = None,
+    secret: bytes | None = None,
+    *,
+    authority_url: str | None = None,
+    authority_token: str | None = None,
+    authority_client: httpx.AsyncClient | None = None,
+) -> FastAPI:
+    app = FastAPI(title="Matrades bounded MT5 execution bridge")
     bridge_secret = (
         secret or os.environ.get("MATRADES_MT5_BRIDGE_SECRET", "development-mt5-secret").encode()
     )
+    credential_authority_url = (
+        authority_url
+        if authority_url is not None
+        else os.environ.get("MATRADES_MT5_AUTHORITY_URL", "")
+    )
+    credential_authority_token = (
+        authority_token
+        if authority_token is not None
+        else os.environ.get("MATRADES_MT5_AUTHORITY_TOKEN", "")
+    )
+    trusted_client_fingerprint = os.environ.get("MATRADES_MT5_CLIENT_CERT_FINGERPRINT", "")
     seen_nonces: dict[str, float] = {}
     sequences: dict[UUID, int] = {}
     latest_snapshots: dict[UUID, dict] = {}
     latest_received: dict[UUID, float] = {}
     latest_history: dict[UUID, list] = {}
+    command_queue = BridgeCommandQueue(os.environ.get("MATRADES_MT5_COMMAND_QUEUE_PATH"))
+    app.state.command_queue = command_queue
+
+    async def verify_with_credential_authority(
+        body: bytes, timestamp: str, nonce: str, signature: str
+    ) -> None:
+        try:
+            if abs(time.time() - int(timestamp)) > 30:
+                raise HTTPException(401, "stale signed request")
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(401, "stale signed request") from exc
+        payload = {
+            "body_base64": b64encode(body).decode(),
+            "timestamp": timestamp,
+            "nonce": nonce,
+            "signature": signature,
+        }
+        owns_client = authority_client is None
+        client = authority_client or httpx.AsyncClient(timeout=5)
+        try:
+            response = await client.post(
+                credential_authority_url,
+                json=payload,
+                headers={"X-Matrades-Service-Token": credential_authority_token},
+            )
+        except httpx.HTTPError as exc:
+            raise HTTPException(503, "MT5 credential authority unavailable") from exc
+        finally:
+            if owns_client:
+                await client.aclose()
+        if response.status_code == 401:
+            raise HTTPException(401, "invalid signature")
+        if response.is_error:
+            raise HTTPException(503, "MT5 credential authority unavailable")
 
     async def authenticate(
         request: Request,
         x_timestamp: str = Header(),
         x_nonce: str = Header(),
         x_signature: str = Header(),
+        x_client_cert_fingerprint: str | None = Header(default=None),
     ) -> None:
         now = time.time()
         for value, observed in tuple(seen_nonces.items()):
@@ -51,7 +111,15 @@ def create_app(reader: object | None = None, secret: bytes | None = None) -> Fas
                 seen_nonces.pop(value, None)
         if x_nonce in seen_nonces:
             raise HTTPException(401, "replayed signed request")
-        verify(await request.body(), x_timestamp, x_signature, bridge_secret, nonce=x_nonce)
+        if trusted_client_fingerprint and not hmac.compare_digest(
+            x_client_cert_fingerprint or "", trusted_client_fingerprint
+        ):
+            raise HTTPException(401, "client certificate verification failed")
+        body = await request.body()
+        if credential_authority_url:
+            await verify_with_credential_authority(body, x_timestamp, x_nonce, x_signature)
+        else:
+            verify(body, x_timestamp, x_signature, bridge_secret, nonce=x_nonce)
         seen_nonces[x_nonce] = now
 
     @app.get("/health")
@@ -63,8 +131,14 @@ def create_app(reader: object | None = None, secret: bytes | None = None) -> Fas
             "fresh": fresh,
             "bridge_version": "1.0.0",
             "observed_at": datetime.now(UTC).isoformat(),
-            "capabilities": ["accounts.read", "positions.read", "history.read"],
-            "writes": False,
+            "capabilities": [
+                "accounts.read",
+                "positions.read",
+                "history.read",
+                "commands.poll",
+                "commands.receipt",
+            ],
+            "writes": True,
         }
 
     @app.post("/ingest")
@@ -76,7 +150,10 @@ def create_app(reader: object | None = None, secret: bytes | None = None) -> Fas
             raise HTTPException(422, "invalid broker snapshot") from exc
         previous = latest_snapshots.get(payload.account_id)
         if previous is not None and payload.sequence <= int(previous["sequence"]):
-            raise HTTPException(409, "out-of-order or replayed broker snapshot")
+            previous_observed_at = datetime.fromisoformat(str(previous["observed_at"]))
+            restarted = payload.sequence == 1 and payload.observed_at > previous_observed_at
+            if not restarted:
+                raise HTTPException(409, "out-of-order or replayed broker snapshot")
         latest_snapshots[payload.account_id] = payload.model_dump(mode="json")
         latest_received[payload.account_id] = time.time()
         latest_history[payload.account_id] = []
@@ -183,6 +260,34 @@ def create_app(reader: object | None = None, secret: bytes | None = None) -> Fas
             "current_sequence": current,
             "events": [],
         }
+
+    @app.get("/commands/poll")
+    async def poll_commands(
+        account_id: UUID, limit: int = 20, _: None = Depends(authenticate)
+    ) -> list[dict]:
+        commands = []
+        for item in command_queue.poll(account_id, min(limit, 50)):
+            # The EA has a deliberately small JSON parser. Flatten the bounded
+            # postcondition so nested payload braces cannot truncate a command.
+            data = item.model_dump(mode="json")
+            payload = data.pop("payload", {})
+            data.update(payload)
+            commands.append(data)
+        return commands
+
+    @app.post("/commands", status_code=202)
+    async def enqueue_command(
+        command: BridgeCommand, _: None = Depends(authenticate)
+    ) -> dict:
+        if not command.authorization_id or not command.authorization_digest:
+            raise HTTPException(403, "server authorization is required")
+        return command_queue.enqueue(command).model_dump(mode="json")
+
+    @app.post("/commands/receipts")
+    async def command_receipt(
+        receipt: BridgeReceipt, _: None = Depends(authenticate)
+    ) -> dict:
+        return command_queue.receipt(receipt).model_dump(mode="json")
 
     return app
 
