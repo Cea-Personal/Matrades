@@ -16,7 +16,7 @@ const providers = [
   { id: "CALENDAR", label: "Calendar", credential: false, purpose: "calendar" },
   { id: "NEWS", label: "News", credential: false, purpose: "news" },
   { id: "FOREX_FACTORY", label: "Forex Factory", credential: false, purpose: "news" },
-  { id: "SERPAPI", label: "SerpApi (YouTube discovery)", credential: true, purpose: "knowledge" },
+  { id: "SERPAPI", label: "SerpApi + YouTube transcript ingestion", credential: true, purpose: "knowledge" },
   { id: "OPENAI", label: "OpenAI", credential: true, purpose: "knowledge_embedding" },
   { id: "MT5_BRIDGE", label: "MT5 Bridge", credential: true, purpose: "broker" },
 ] as const;

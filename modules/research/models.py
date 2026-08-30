@@ -80,7 +80,9 @@ class ResearchCandidate(BaseModel):
 class AgentReview(BaseModel):
     logical_id: str
     status: str
+    raw_decision: str | None = None
     evidence: list[str] = Field(default_factory=list)
+    score_adjustments: dict[str, float] = Field(default_factory=dict)
 
 
 class ResearchCycleResult(BaseModel):
@@ -145,7 +147,10 @@ class ResearchLaneResult(BaseModel):
     exclusions: list[str] = Field(default_factory=list)
     binding_id: UUID | None = None
     source_cut_refs: list[str] = Field(default_factory=list)
+    observed_candidates: list[str] = Field(default_factory=list)
+    agent_reviews: list[AgentReview] = Field(default_factory=list)
     reason_code: str | None = None
+    failure_detail: str | None = None
     completed_at: AwareDatetime
 
     @model_validator(mode="after")

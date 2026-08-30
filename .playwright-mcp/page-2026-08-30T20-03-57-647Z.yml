@@ -1,0 +1,404 @@
+- generic [active] [ref=f2e1]:
+  - alert [ref=f2e3]
+  - generic [ref=f2e4]:
+    - complementary [ref=f2e5]:
+      - link "MATRADES" [ref=f2e6] [cursor=pointer]:
+        - /url: /
+      - paragraph [ref=f2e7]: Evidence, automation, and accountable execution.
+      - navigation "Primary" [ref=f2e8]:
+        - link "Overview" [ref=f2e9] [cursor=pointer]:
+          - /url: /
+        - link "Trade desk" [ref=f2e10] [cursor=pointer]:
+          - /url: /trading
+        - link "Research" [ref=f2e11] [cursor=pointer]:
+          - /url: /research
+        - link "Strategies" [ref=f2e12] [cursor=pointer]:
+          - /url: /strategies
+        - link "Connections" [ref=f2e13] [cursor=pointer]:
+          - /url: /connections
+        - link "Configuration" [ref=f2e14] [cursor=pointer]:
+          - /url: /configuration
+        - link "Agents" [ref=f2e15] [cursor=pointer]:
+          - /url: /agents
+        - link "Knowledge" [ref=f2e16] [cursor=pointer]:
+          - /url: /knowledge
+        - link "Operations" [ref=f2e17] [cursor=pointer]:
+          - /url: /operations
+        - generic [ref=f2e18]:
+          - link "Extras" [ref=f2e19] [cursor=pointer]:
+            - /url: /extras
+          - link "Market research" [ref=f2e20] [cursor=pointer]:
+            - /url: /extras?folder=market-research
+          - link "Strategy research" [ref=f2e21] [cursor=pointer]:
+            - /url: /extras?folder=strategy-research
+          - link "Trade recommendations" [ref=f2e22] [cursor=pointer]:
+            - /url: /extras?folder=trade-recommendations
+          - link "Generated code" [ref=f2e23] [cursor=pointer]:
+            - /url: /extras?folder=generated-code
+          - link "MT5 bridge EA" [ref=f2e24] [cursor=pointer]:
+            - /url: /extras?folder=mt5-bridge-ea
+      - generic [ref=f2e25]:
+        - generic [ref=f2e26]: headed-audit-20260830@example.com
+        - generic [ref=f2e27]: OWNER
+        - button "Sign out" [ref=f2e28] [cursor=pointer]
+    - main [ref=f2e29]:
+      - generic [ref=f2e30]:
+        - generic [ref=f2e31]:
+          - paragraph [ref=f2e32]: Autonomous research
+          - heading "Autonomous market research" [level=1] [ref=f2e33]
+          - paragraph [ref=f2e34]: The research agents autonomously discover and rank the best candidate in every enabled asset-class × instrument-type lane.
+        - article [ref=f2e35]:
+          - generic [ref=f2e36]:
+            - heading "Per-account research cycle" [level=2] [ref=f2e37]
+            - paragraph [ref=f2e38]: "The scheduler checks each account every minute. Next scheduled cycle for this account: 31/08/2026, 07:00:00 (UTC)"
+          - generic [ref=f2e39]:
+            - text: Trading account
+            - combobox "Trading account" [ref=f2e40]:
+              - option "Matrix Audit Beta" [selected]
+              - option "Matrix Audit Alpha"
+          - generic [ref=f2e41]:
+            - strong [ref=f2e42]: Saved account schedule
+            - generic [ref=f2e43]: 05:00 · UTC
+            - generic [ref=f2e44]: "Next run: 31/08/2026, 07:00:00 · last saved 30/08/2026, 19:38:38"
+            - generic [ref=f2e45]:
+              - button "Edit / replace schedule" [ref=f2e46] [cursor=pointer]
+              - button "Remove schedule" [ref=f2e47] [cursor=pointer]
+          - paragraph [ref=f2e48]: Manual runs use the enabled typed matrix below; a symbol list never determines the instrument type.
+        - article [ref=f2e49]:
+          - generic [ref=f2e50]:
+            - heading "Typed research matrix · account Matrix Audit Beta" [level=2] [ref=f2e51]
+            - paragraph [ref=f2e52]: Read-only here. Only candidates enabled in Configuration → Account research matrix are shown.
+          - generic [ref=f2e53]:
+            - article [ref=f2e54]:
+              - strong [ref=f2e55]: FOREX · SPOT
+              - paragraph [ref=f2e56]: NOT_CONFIGURED
+              - generic [ref=f2e57]: The market-data provider failed before agent review could complete.
+              - group [ref=f2e58]:
+                - generic "Complete decision breakdown" [ref=f2e59]
+                - generic [ref=f2e60]:
+                  - paragraph [ref=f2e61]: The market-data provider failed before agent review could complete.
+                  - generic [ref=f2e62]:
+                    - term [ref=f2e63]: Terminal status
+                    - definition [ref=f2e64]: NOT_CONFIGURED
+                    - term [ref=f2e65]: Reason code
+                    - definition [ref=f2e66]: PROVIDER_ERROR:ResearchDataUnavailable
+                    - term [ref=f2e67]: Provider / runtime detail
+                    - definition [ref=f2e68]: None
+                    - term [ref=f2e69]: Completed
+                    - definition [ref=f2e70]: 30/08/2026, 19:39:00
+                    - term [ref=f2e71]: Provider binding
+                    - definition [ref=f2e72]: Not retained
+                    - term [ref=f2e73]: Candidates evaluated
+                    - definition [ref=f2e74]: None retained
+                    - term [ref=f2e75]: Blocking checks / exclusions
+                    - definition [ref=f2e76]: None
+                    - term [ref=f2e77]: Source snapshots
+                    - definition [ref=f2e78]: None retained
+                  - paragraph [ref=f2e79]: "Limited historical detail: this run was completed before full decision-trace persistence was enabled. Run the matrix again to capture the complete evidence chain."
+            - article [ref=f2e80]:
+              - strong [ref=f2e81]: FOREX · CFD
+              - paragraph [ref=f2e82]: NOT_CONFIGURED
+              - generic [ref=f2e83]: The market-data provider failed before agent review could complete.
+              - group [ref=f2e84]:
+                - generic "Complete decision breakdown" [ref=f2e85]
+                - generic [ref=f2e86]:
+                  - paragraph [ref=f2e87]: The market-data provider failed before agent review could complete.
+                  - generic [ref=f2e88]:
+                    - term [ref=f2e89]: Terminal status
+                    - definition [ref=f2e90]: NOT_CONFIGURED
+                    - term [ref=f2e91]: Reason code
+                    - definition [ref=f2e92]: PROVIDER_ERROR:ResearchDataUnavailable
+                    - term [ref=f2e93]: Provider / runtime detail
+                    - definition [ref=f2e94]: None
+                    - term [ref=f2e95]: Completed
+                    - definition [ref=f2e96]: 30/08/2026, 19:39:00
+                    - term [ref=f2e97]: Provider binding
+                    - definition [ref=f2e98]: Not retained
+                    - term [ref=f2e99]: Candidates evaluated
+                    - definition [ref=f2e100]: None retained
+                    - term [ref=f2e101]: Blocking checks / exclusions
+                    - definition [ref=f2e102]: None
+                    - term [ref=f2e103]: Source snapshots
+                    - definition [ref=f2e104]: None retained
+                  - paragraph [ref=f2e105]: "Limited historical detail: this run was completed before full decision-trace persistence was enabled. Run the matrix again to capture the complete evidence chain."
+            - article [ref=f2e106]:
+              - strong [ref=f2e107]: FOREX · FUTURES
+              - paragraph [ref=f2e108]: NOT_CONFIGURED
+              - generic [ref=f2e109]: The market-data provider failed before agent review could complete.
+              - group [ref=f2e110]:
+                - generic "Complete decision breakdown" [ref=f2e111]
+                - generic [ref=f2e112]:
+                  - paragraph [ref=f2e113]: The market-data provider failed before agent review could complete.
+                  - generic [ref=f2e114]:
+                    - term [ref=f2e115]: Terminal status
+                    - definition [ref=f2e116]: NOT_CONFIGURED
+                    - term [ref=f2e117]: Reason code
+                    - definition [ref=f2e118]: PROVIDER_ERROR:ResearchDataUnavailable
+                    - term [ref=f2e119]: Provider / runtime detail
+                    - definition [ref=f2e120]: None
+                    - term [ref=f2e121]: Completed
+                    - definition [ref=f2e122]: 30/08/2026, 19:39:00
+                    - term [ref=f2e123]: Provider binding
+                    - definition [ref=f2e124]: Not retained
+                    - term [ref=f2e125]: Candidates evaluated
+                    - definition [ref=f2e126]: None retained
+                    - term [ref=f2e127]: Blocking checks / exclusions
+                    - definition [ref=f2e128]: None
+                    - term [ref=f2e129]: Source snapshots
+                    - definition [ref=f2e130]: None retained
+                  - paragraph [ref=f2e131]: "Limited historical detail: this run was completed before full decision-trace persistence was enabled. Run the matrix again to capture the complete evidence chain."
+            - article [ref=f2e132]:
+              - strong [ref=f2e133]: METALS · SPOT
+              - paragraph [ref=f2e134]: NOT_CONFIGURED
+              - generic [ref=f2e135]: The market-data provider failed before agent review could complete.
+              - group [ref=f2e136]:
+                - generic "Complete decision breakdown" [ref=f2e137]
+                - generic [ref=f2e138]:
+                  - paragraph [ref=f2e139]: The market-data provider failed before agent review could complete.
+                  - generic [ref=f2e140]:
+                    - term [ref=f2e141]: Terminal status
+                    - definition [ref=f2e142]: NOT_CONFIGURED
+                    - term [ref=f2e143]: Reason code
+                    - definition [ref=f2e144]: PROVIDER_ERROR:ResearchDataUnavailable
+                    - term [ref=f2e145]: Provider / runtime detail
+                    - definition [ref=f2e146]: None
+                    - term [ref=f2e147]: Completed
+                    - definition [ref=f2e148]: 30/08/2026, 19:39:00
+                    - term [ref=f2e149]: Provider binding
+                    - definition [ref=f2e150]: Not retained
+                    - term [ref=f2e151]: Candidates evaluated
+                    - definition [ref=f2e152]: None retained
+                    - term [ref=f2e153]: Blocking checks / exclusions
+                    - definition [ref=f2e154]: None
+                    - term [ref=f2e155]: Source snapshots
+                    - definition [ref=f2e156]: None retained
+                  - paragraph [ref=f2e157]: "Limited historical detail: this run was completed before full decision-trace persistence was enabled. Run the matrix again to capture the complete evidence chain."
+            - article [ref=f2e158]:
+              - strong [ref=f2e159]: METALS · CFD
+              - paragraph [ref=f2e160]: NOT_CONFIGURED
+              - generic [ref=f2e161]: The market-data provider failed before agent review could complete.
+              - group [ref=f2e162]:
+                - generic "Complete decision breakdown" [ref=f2e163]
+                - generic [ref=f2e164]:
+                  - paragraph [ref=f2e165]: The market-data provider failed before agent review could complete.
+                  - generic [ref=f2e166]:
+                    - term [ref=f2e167]: Terminal status
+                    - definition [ref=f2e168]: NOT_CONFIGURED
+                    - term [ref=f2e169]: Reason code
+                    - definition [ref=f2e170]: PROVIDER_ERROR:ResearchDataUnavailable
+                    - term [ref=f2e171]: Provider / runtime detail
+                    - definition [ref=f2e172]: None
+                    - term [ref=f2e173]: Completed
+                    - definition [ref=f2e174]: 30/08/2026, 19:39:00
+                    - term [ref=f2e175]: Provider binding
+                    - definition [ref=f2e176]: Not retained
+                    - term [ref=f2e177]: Candidates evaluated
+                    - definition [ref=f2e178]: None retained
+                    - term [ref=f2e179]: Blocking checks / exclusions
+                    - definition [ref=f2e180]: None
+                    - term [ref=f2e181]: Source snapshots
+                    - definition [ref=f2e182]: None retained
+                  - paragraph [ref=f2e183]: "Limited historical detail: this run was completed before full decision-trace persistence was enabled. Run the matrix again to capture the complete evidence chain."
+            - article [ref=f2e184]:
+              - strong [ref=f2e185]: METALS · FUTURES
+              - paragraph [ref=f2e186]: NOT_CONFIGURED
+              - generic [ref=f2e187]: The market-data provider failed before agent review could complete.
+              - group [ref=f2e188]:
+                - generic "Complete decision breakdown" [ref=f2e189]
+                - generic [ref=f2e190]:
+                  - paragraph [ref=f2e191]: The market-data provider failed before agent review could complete.
+                  - generic [ref=f2e192]:
+                    - term [ref=f2e193]: Terminal status
+                    - definition [ref=f2e194]: NOT_CONFIGURED
+                    - term [ref=f2e195]: Reason code
+                    - definition [ref=f2e196]: PROVIDER_ERROR:ResearchDataUnavailable
+                    - term [ref=f2e197]: Provider / runtime detail
+                    - definition [ref=f2e198]: None
+                    - term [ref=f2e199]: Completed
+                    - definition [ref=f2e200]: 30/08/2026, 19:39:00
+                    - term [ref=f2e201]: Provider binding
+                    - definition [ref=f2e202]: Not retained
+                    - term [ref=f2e203]: Candidates evaluated
+                    - definition [ref=f2e204]: None retained
+                    - term [ref=f2e205]: Blocking checks / exclusions
+                    - definition [ref=f2e206]: None
+                    - term [ref=f2e207]: Source snapshots
+                    - definition [ref=f2e208]: None retained
+                  - paragraph [ref=f2e209]: "Limited historical detail: this run was completed before full decision-trace persistence was enabled. Run the matrix again to capture the complete evidence chain."
+            - article [ref=f2e210]:
+              - strong [ref=f2e211]: CRYPTOCURRENCY · SPOT
+              - paragraph [ref=f2e212]: NOT_CONFIGURED
+              - generic [ref=f2e213]: The market-data provider failed before agent review could complete.
+              - group [ref=f2e214]:
+                - generic "Complete decision breakdown" [ref=f2e215]
+                - generic [ref=f2e216]:
+                  - paragraph [ref=f2e217]: The market-data provider failed before agent review could complete.
+                  - generic [ref=f2e218]:
+                    - term [ref=f2e219]: Terminal status
+                    - definition [ref=f2e220]: NOT_CONFIGURED
+                    - term [ref=f2e221]: Reason code
+                    - definition [ref=f2e222]: PROVIDER_ERROR:ResearchDataUnavailable
+                    - term [ref=f2e223]: Provider / runtime detail
+                    - definition [ref=f2e224]: None
+                    - term [ref=f2e225]: Completed
+                    - definition [ref=f2e226]: 30/08/2026, 19:39:00
+                    - term [ref=f2e227]: Provider binding
+                    - definition [ref=f2e228]: Not retained
+                    - term [ref=f2e229]: Candidates evaluated
+                    - definition [ref=f2e230]: None retained
+                    - term [ref=f2e231]: Blocking checks / exclusions
+                    - definition [ref=f2e232]: None
+                    - term [ref=f2e233]: Source snapshots
+                    - definition [ref=f2e234]: None retained
+                  - paragraph [ref=f2e235]: "Limited historical detail: this run was completed before full decision-trace persistence was enabled. Run the matrix again to capture the complete evidence chain."
+            - article [ref=f2e236]:
+              - strong [ref=f2e237]: CRYPTOCURRENCY · CFD
+              - paragraph [ref=f2e238]: NOT_CONFIGURED
+              - generic [ref=f2e239]: The market-data provider failed before agent review could complete.
+              - group [ref=f2e240]:
+                - generic "Complete decision breakdown" [ref=f2e241]
+                - generic [ref=f2e242]:
+                  - paragraph [ref=f2e243]: The market-data provider failed before agent review could complete.
+                  - generic [ref=f2e244]:
+                    - term [ref=f2e245]: Terminal status
+                    - definition [ref=f2e246]: NOT_CONFIGURED
+                    - term [ref=f2e247]: Reason code
+                    - definition [ref=f2e248]: PROVIDER_ERROR:ResearchDataUnavailable
+                    - term [ref=f2e249]: Provider / runtime detail
+                    - definition [ref=f2e250]: None
+                    - term [ref=f2e251]: Completed
+                    - definition [ref=f2e252]: 30/08/2026, 19:39:00
+                    - term [ref=f2e253]: Provider binding
+                    - definition [ref=f2e254]: Not retained
+                    - term [ref=f2e255]: Candidates evaluated
+                    - definition [ref=f2e256]: None retained
+                    - term [ref=f2e257]: Blocking checks / exclusions
+                    - definition [ref=f2e258]: None
+                    - term [ref=f2e259]: Source snapshots
+                    - definition [ref=f2e260]: None retained
+                  - paragraph [ref=f2e261]: "Limited historical detail: this run was completed before full decision-trace persistence was enabled. Run the matrix again to capture the complete evidence chain."
+            - article [ref=f2e262]:
+              - strong [ref=f2e263]: CRYPTOCURRENCY · FUTURES
+              - paragraph [ref=f2e264]: NOT_CONFIGURED
+              - generic [ref=f2e265]: The market-data provider failed before agent review could complete.
+              - group [ref=f2e266]:
+                - generic "Complete decision breakdown" [ref=f2e267]
+                - generic [ref=f2e268]:
+                  - paragraph [ref=f2e269]: The market-data provider failed before agent review could complete.
+                  - generic [ref=f2e270]:
+                    - term [ref=f2e271]: Terminal status
+                    - definition [ref=f2e272]: NOT_CONFIGURED
+                    - term [ref=f2e273]: Reason code
+                    - definition [ref=f2e274]: PROVIDER_ERROR:ResearchDataUnavailable
+                    - term [ref=f2e275]: Provider / runtime detail
+                    - definition [ref=f2e276]: None
+                    - term [ref=f2e277]: Completed
+                    - definition [ref=f2e278]: 30/08/2026, 19:39:00
+                    - term [ref=f2e279]: Provider binding
+                    - definition [ref=f2e280]: Not retained
+                    - term [ref=f2e281]: Candidates evaluated
+                    - definition [ref=f2e282]: None retained
+                    - term [ref=f2e283]: Blocking checks / exclusions
+                    - definition [ref=f2e284]: None
+                    - term [ref=f2e285]: Source snapshots
+                    - definition [ref=f2e286]: None retained
+                  - paragraph [ref=f2e287]: "Limited historical detail: this run was completed before full decision-trace persistence was enabled. Run the matrix again to capture the complete evidence chain."
+            - article [ref=f2e288]:
+              - strong [ref=f2e289]: STOCKS · SPOT
+              - paragraph [ref=f2e290]: NOT_CONFIGURED
+              - generic [ref=f2e291]: The market-data provider failed before agent review could complete.
+              - group [ref=f2e292]:
+                - generic "Complete decision breakdown" [ref=f2e293]
+                - generic [ref=f2e294]:
+                  - paragraph [ref=f2e295]: The market-data provider failed before agent review could complete.
+                  - generic [ref=f2e296]:
+                    - term [ref=f2e297]: Terminal status
+                    - definition [ref=f2e298]: NOT_CONFIGURED
+                    - term [ref=f2e299]: Reason code
+                    - definition [ref=f2e300]: PROVIDER_ERROR:ResearchDataUnavailable
+                    - term [ref=f2e301]: Provider / runtime detail
+                    - definition [ref=f2e302]: None
+                    - term [ref=f2e303]: Completed
+                    - definition [ref=f2e304]: 30/08/2026, 19:39:00
+                    - term [ref=f2e305]: Provider binding
+                    - definition [ref=f2e306]: Not retained
+                    - term [ref=f2e307]: Candidates evaluated
+                    - definition [ref=f2e308]: None retained
+                    - term [ref=f2e309]: Blocking checks / exclusions
+                    - definition [ref=f2e310]: None
+                    - term [ref=f2e311]: Source snapshots
+                    - definition [ref=f2e312]: None retained
+                  - paragraph [ref=f2e313]: "Limited historical detail: this run was completed before full decision-trace persistence was enabled. Run the matrix again to capture the complete evidence chain."
+            - article [ref=f2e314]:
+              - strong [ref=f2e315]: STOCKS · CFD
+              - paragraph [ref=f2e316]: NOT_CONFIGURED
+              - generic [ref=f2e317]: The market-data provider failed before agent review could complete.
+              - group [ref=f2e318]:
+                - generic "Complete decision breakdown" [ref=f2e319]
+                - generic [ref=f2e320]:
+                  - paragraph [ref=f2e321]: The market-data provider failed before agent review could complete.
+                  - generic [ref=f2e322]:
+                    - term [ref=f2e323]: Terminal status
+                    - definition [ref=f2e324]: NOT_CONFIGURED
+                    - term [ref=f2e325]: Reason code
+                    - definition [ref=f2e326]: PROVIDER_ERROR:ResearchDataUnavailable
+                    - term [ref=f2e327]: Provider / runtime detail
+                    - definition [ref=f2e328]: None
+                    - term [ref=f2e329]: Completed
+                    - definition [ref=f2e330]: 30/08/2026, 19:39:00
+                    - term [ref=f2e331]: Provider binding
+                    - definition [ref=f2e332]: Not retained
+                    - term [ref=f2e333]: Candidates evaluated
+                    - definition [ref=f2e334]: None retained
+                    - term [ref=f2e335]: Blocking checks / exclusions
+                    - definition [ref=f2e336]: None
+                    - term [ref=f2e337]: Source snapshots
+                    - definition [ref=f2e338]: None retained
+                  - paragraph [ref=f2e339]: "Limited historical detail: this run was completed before full decision-trace persistence was enabled. Run the matrix again to capture the complete evidence chain."
+            - article [ref=f2e340]:
+              - strong [ref=f2e341]: STOCKS · FUTURES
+              - paragraph [ref=f2e342]: NOT_CONFIGURED
+              - generic [ref=f2e343]: The market-data provider failed before agent review could complete.
+              - group [ref=f2e344]:
+                - generic "Complete decision breakdown" [ref=f2e345]
+                - generic [ref=f2e346]:
+                  - paragraph [ref=f2e347]: The market-data provider failed before agent review could complete.
+                  - generic [ref=f2e348]:
+                    - term [ref=f2e349]: Terminal status
+                    - definition [ref=f2e350]: NOT_CONFIGURED
+                    - term [ref=f2e351]: Reason code
+                    - definition [ref=f2e352]: PROVIDER_ERROR:ResearchDataUnavailable
+                    - term [ref=f2e353]: Provider / runtime detail
+                    - definition [ref=f2e354]: None
+                    - term [ref=f2e355]: Completed
+                    - definition [ref=f2e356]: 30/08/2026, 19:39:00
+                    - term [ref=f2e357]: Provider binding
+                    - definition [ref=f2e358]: Not retained
+                    - term [ref=f2e359]: Candidates evaluated
+                    - definition [ref=f2e360]: None retained
+                    - term [ref=f2e361]: Blocking checks / exclusions
+                    - definition [ref=f2e362]: None
+                    - term [ref=f2e363]: Source snapshots
+                    - definition [ref=f2e364]: None retained
+                  - paragraph [ref=f2e365]: "Limited historical detail: this run was completed before full decision-trace persistence was enabled. Run the matrix again to capture the complete evidence chain."
+          - generic [ref=f2e366]:
+            - button "Run configured matrix now" [ref=f2e367] [cursor=pointer]
+            - generic [ref=f2e368]: Matrix version 0 · 12 configured candidates
+        - article [ref=f2e369]:
+          - heading "Cycle outcome · Matrix Audit Beta" [level=2] [ref=f2e370]
+          - paragraph [ref=f2e371]: Only the latest cycle, candidates, terminal lane statuses, and evidence for this trading account are shown below.
+        - article [ref=f2e372]:
+          - generic [ref=f2e373]:
+            - strong [ref=f2e374]: "Cycle status: COMPLETED"
+            - generic [ref=f2e375]: Updated 30/08/2026, 19:39:00
+        - generic [ref=f2e376]:
+          - generic [ref=f2e377]: Candidates are selected by the scheduled research cycle and passed to strategy research automatically.
+          - button "Run typed matrix again" [ref=f2e378] [cursor=pointer]
+        - article [ref=f2e379]:
+          - heading "Market research archive · Matrix Audit Beta" [level=2] [ref=f2e380]
+          - paragraph [ref=f2e381]: Only completed cycles for this trading account are listed. Every artifact has an immutable completion timestamp.
+          - list [ref=f2e382]:
+            - listitem [ref=f2e383]:
+              - strong [ref=f2e384]: COMPLETED
+              - generic [ref=f2e385]: d483f0ab-fdc9-40cc-b272-81d425cd4663/market_research/2026/08/30/20260830T173900.134536Z_3a5e26ef-e82f-455e-b5b6-8af79700d306
+              - generic [ref=f2e386]: "Completed timestamp: 30/08/2026, 19:39:00 · SHA-256 9aa52e883a8f…"

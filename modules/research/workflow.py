@@ -41,7 +41,7 @@ ASSET_CLASS_ROLES = {
 AGENT_OUTPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "decision": {"type": "string"},
+        "decision": {"type": "string", "enum": ["PASS", "REASSESS"]},
         "score_adjustments": {
             "type": "array",
             "items": {
@@ -76,6 +76,48 @@ def _bounded_adjustments(response: dict[str, Any]) -> dict[str, float]:
         if isinstance(instrument, str) and isinstance(value, (int, float)):
             adjustments[instrument] = max(-10.0, min(10.0, float(value)))
     return adjustments
+
+
+def _review_decision(response: dict[str, Any]) -> tuple[str, str]:
+    """Normalize model prose to the fail-closed verdict vocabulary without discarding it."""
+    raw = str(response.get("decision", "REASSESS")).strip() or "REASSESS"
+    return ("PASS" if raw.upper() == "PASS" else "REASSESS", raw)
+
+
+def _provider_failure_detail(exc: Exception) -> str | None:
+    """Expose safe domain diagnostics without persisting URLs or credential-bearing errors."""
+    if type(exc).__name__ != "ResearchDataUnavailable":
+        return None
+    return str(exc).strip()[:500] or None
+
+
+def _market_research_review_contract(role: str) -> dict[str, Any]:
+    """Keep analytical selection separate from later broker execution authority."""
+    return {
+        "stage": "MARKET_CANDIDATE_RESEARCH",
+        "review_role": role,
+        "decision_semantics": {
+            "PASS": "Evidence is adequate for this candidate to continue research ranking.",
+            "REASSESS": (
+                "Core market evidence is stale, corrupt, contradictory, or otherwise "
+                "insufficient to support research ranking."
+            ),
+        },
+        "cfd_proxy_policy": (
+            "A non-executable underlying-market proxy is expected for CFD research. "
+            "Do not return REASSESS solely because executable=false or because later "
+            "MT5 broker validation is required."
+        ),
+        "optional_context_policy": (
+            "Missing macro, sentiment, or event-risk context must be disclosed and must "
+            "receive a zero adjustment; it is not by itself a reason to block a candidate "
+            "whose core price evidence is fresh and usable."
+        ),
+        "execution_boundary": (
+            "PASS advances research only. It never authorizes a strategy, risk decision, "
+            "broker symbol, order, or trade. MT5 validation remains mandatory later."
+        ),
+    }
 
 
 class AutonomousResearchWorkflow:
@@ -251,6 +293,7 @@ class AutonomousResearchWorkflow:
                         lane=lane,
                         status=getattr(exc, "lane_status", LaneStatus.UNAVAILABLE),
                         reason_code=f"PROVIDER_ERROR:{type(exc).__name__}",
+                        failure_detail=_provider_failure_detail(exc),
                         completed_at=datetime.now(UTC),
                     )
                 )
@@ -267,6 +310,8 @@ class AutonomousResearchWorkflow:
                     )
                 )
                 continue
+            observed_candidates = [item.listing.symbol for item in typed]
+            source_cut_refs = list(dict.fromkeys(item.source_cut_id for item in typed))
             reviews: list[AgentReview] = []
             adjusted_scores = {item.listing.symbol: min(100.0, item.volume) for item in typed}
             analyst_failed = False
@@ -277,26 +322,39 @@ class AutonomousResearchWorkflow:
                         {
                             "lane": lane.model_dump(mode="json"),
                             "candidates": [item.model_dump(mode="json") for item in typed],
+                            "source_cut_refs": source_cut_refs,
+                            "review_contract": _market_research_review_contract(role),
                         },
                         AGENT_OUTPUT_SCHEMA,
                     )
                     evidence = [str(item) for item in response.get("evidence", [])]
+                    score_adjustments = _bounded_adjustments(response)
+                    review_status, raw_decision = _review_decision(response)
                     reviews.append(
                         AgentReview(
                             logical_id=role,
-                            status=str(response.get("decision", "REASSESS")).upper(),
+                            status=review_status,
+                            raw_decision=raw_decision,
                             evidence=evidence,
+                            score_adjustments=score_adjustments,
                         )
                     )
-                    if str(response.get("decision", "REASSESS")).upper() != "PASS":
+                    if review_status != "PASS":
                         analyst_failed = True
                         break
-                    for symbol, adjustment in _bounded_adjustments(response).items():
+                    for symbol, adjustment in score_adjustments.items():
                         if symbol in adjusted_scores:
                             adjusted_scores[symbol] = max(
                                 0.0, min(100.0, adjusted_scores[symbol] + adjustment)
                             )
                 except Exception as exc:
+                    reviews.append(
+                        AgentReview(
+                            logical_id=role,
+                            status="UNAVAILABLE",
+                            evidence=[f"Agent invocation failed: {type(exc).__name__}"],
+                        )
+                    )
                     results.append(
                         ResearchLaneResult(
                             run_id=run.id,
@@ -304,6 +362,9 @@ class AutonomousResearchWorkflow:
                             status=LaneStatus.UNAVAILABLE,
                             reason_code=f"AGENT_ERROR:{role}:{type(exc).__name__}",
                             exclusions=[f"agent={role}"],
+                            source_cut_refs=source_cut_refs,
+                            observed_candidates=observed_candidates,
+                            agent_reviews=reviews,
                             completed_at=datetime.now(UTC),
                         )
                     )
@@ -322,6 +383,9 @@ class AutonomousResearchWorkflow:
                                 for review in reviews
                                 if review.status != "PASS"
                             ],
+                            source_cut_refs=source_cut_refs,
+                            observed_candidates=observed_candidates,
+                            agent_reviews=reviews,
                             completed_at=datetime.now(UTC),
                         )
                     )
@@ -336,10 +400,22 @@ class AutonomousResearchWorkflow:
                     {
                         "lane": lane.model_dump(mode="json"),
                         "candidates": [item.model_dump(mode="json") for item in ranked_snapshots],
+                        "source_cut_refs": source_cut_refs,
+                        "review_contract": _market_research_review_contract("critic"),
                     },
                     AGENT_OUTPUT_SCHEMA,
                 )
-                if str(response.get("decision", "REASSESS")).upper() != "PASS":
+                critic_status, critic_raw_decision = _review_decision(response)
+                reviews.append(
+                    AgentReview(
+                        logical_id="critic",
+                        status=critic_status,
+                        raw_decision=critic_raw_decision,
+                        evidence=[str(item) for item in response.get("evidence", [])],
+                        score_adjustments=_bounded_adjustments(response),
+                    )
+                )
+                if critic_status != "PASS":
                     results.append(
                         ResearchLaneResult(
                             run_id=run.id,
@@ -347,17 +423,30 @@ class AutonomousResearchWorkflow:
                             status=LaneStatus.NO_TRADE,
                             reason_code="CRITIC_REASSESS",
                             exclusions=[item.listing.symbol for item in ranked_snapshots],
+                            source_cut_refs=source_cut_refs,
+                            observed_candidates=observed_candidates,
+                            agent_reviews=reviews,
                             completed_at=datetime.now(UTC),
                         )
                     )
                     continue
             except Exception as exc:
+                reviews.append(
+                    AgentReview(
+                        logical_id="critic",
+                        status="UNAVAILABLE",
+                        evidence=[f"Agent invocation failed: {type(exc).__name__}"],
+                    )
+                )
                 results.append(
                     ResearchLaneResult(
                         run_id=run.id,
                         lane=lane,
                         status=LaneStatus.UNAVAILABLE,
                         reason_code=f"CRITIC_ERROR:{type(exc).__name__}",
+                        source_cut_refs=source_cut_refs,
+                        observed_candidates=observed_candidates,
+                        agent_reviews=reviews,
                         completed_at=datetime.now(UTC),
                     )
                 )
@@ -399,7 +488,9 @@ class AutonomousResearchWorkflow:
                     candidate=candidates[0],
                     ranked_candidates=candidates,
                     exclusions=[item.listing.symbol for item in ranked_snapshots[1:]],
-                    source_cut_refs=[item.source_cut_id for item in ranked_snapshots],
+                    source_cut_refs=source_cut_refs,
+                    observed_candidates=observed_candidates,
+                    agent_reviews=reviews,
                     completed_at=datetime.now(UTC),
                 )
             )

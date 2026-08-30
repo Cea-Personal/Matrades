@@ -18,6 +18,7 @@ from modules.connections.models import ConnectionProvider
 from modules.connections.resolution import find_connection, resolve_connection
 from modules.identity.authorization import Actor, Role
 from modules.knowledge.ingestion import build_source_data
+from modules.knowledge.openai_embeddings import embed_source_data
 from modules.strategies.compiler import compile_strategy
 from modules.strategies.evidence import resolve_approved_candidate
 from modules.strategies.fingerprints import fingerprint
@@ -404,19 +405,24 @@ async def submit(
         f"Specification:\n{specification.model_dump_json(indent=2)}\n\n"
         f"Generated evaluator code:\n{compiled.generated_code}"
     )
+    strategy_knowledge_data = await embed_source_data(
+        db,
+        actor.owner_id,
+        build_source_data(
+            name=f"Generated strategy — {specification.name}",
+            content=strategy_content,
+            media_type="text/plain",
+            category="strategies",
+            tags=["generated-strategy", specification.family.value, specification.origin.value],
+            source_kind="GENERATED_STRATEGY",
+            external_id=str(version.id),
+        ),
+    )
     strategy_source = await store.create(
         "knowledge_source",
         actor.owner_id,
         {
-            **build_source_data(
-                name=f"Generated strategy — {specification.name}",
-                content=strategy_content,
-                media_type="text/plain",
-                category="strategies",
-                tags=["generated-strategy", specification.family.value, specification.origin.value],
-                source_kind="GENERATED_STRATEGY",
-                external_id=str(version.id),
-            ),
+            **strategy_knowledge_data,
             "linked_strategy_version_id": str(version.id),
         },
         state="ACTIVE",

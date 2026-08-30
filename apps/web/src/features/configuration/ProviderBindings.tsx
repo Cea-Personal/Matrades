@@ -52,6 +52,11 @@ export function ProviderBindings() {
     onSuccess: async () => { setMessage("Connection tested and provider binding verified for the selected account."); await invalidate(); },
     onError: (error: Error) => setMessage(error.message),
   });
+  const remove = useMutation({
+    mutationFn: (binding: Resource) => api(`/accounts/${selectedAccountId}/provider-bindings/${binding.id}`, { method: "DELETE" }),
+    onSuccess: async () => { setMessage("Provider binding removed. You can create its replacement above."); await invalidate(); },
+    onError: (error: Error) => setMessage(error.message),
+  });
   const activeAccounts = (accounts.data ?? []).filter(item => item.state !== "DELETED");
   const activeConnections = (connections.data ?? []).filter(item => item.state !== "DELETED");
   const connectionNames = new Map(activeConnections.map(item => [item.id, String(item.name)]));
@@ -59,7 +64,7 @@ export function ProviderBindings() {
 
   return <section className="section-stack">
     <header><p className="eyebrow">Connection authority</p><h2>Provider bindings</h2><p className="muted">Bind configured data sources to this account’s enabled market lanes or to its economic context. Market lanes always come from the active account research matrix.</p></header>
-    {message ? <p className={create.isError || testAndVerify.isError ? "notice bad" : "notice good"}>{message}</p> : null}
+    {message ? <p className={create.isError || testAndVerify.isError || remove.isError ? "notice bad" : "notice good"}>{message}</p> : null}
     <article className="card form-stack">
       <label>Trading account<select value={selectedAccountId} onChange={event => { setAccountId(event.target.value); setLane(""); }}>{activeAccounts.map(account => <option key={account.id} value={account.id}>{String(account.name)}</option>)}</select></label>
       <div className="form-grid"><label>Binding use<select value={scope} onChange={event => { const nextScope = event.target.value as BindingScope; setScope(nextScope); setCapability(nextScope === "MARKET_RESEARCH" ? "DISCOVERY" : "ECONOMIC_CALENDAR"); }}><option value="MARKET_RESEARCH">Market research</option><option value="ECONOMIC_CONTEXT">Economic calendar, news & macro context</option></select></label>{scope === "MARKET_RESEARCH" ? <label>Matrix lane<select required value={selectedLane} onChange={event => setLane(event.target.value)}>{enabledLanes.map(item => <option key={`${item.asset_class}:${item.instrument_type}`} value={`${item.asset_class}:${item.instrument_type}`}>{item.asset_class} · {item.instrument_type}</option>)}</select></label> : <label>Coverage<output>Account economic context</output></label>}</div>
@@ -68,6 +73,6 @@ export function ProviderBindings() {
       <label>Configured connection<select required value={connectionId} onChange={event => setConnectionId(event.target.value)}><option value="">Select a connection</option>{activeConnections.map(connection => <option key={connection.id} value={connection.id}>{String(connection.name)} · {String(connection.provider)} · {String(connection.health ?? "UNTESTED")}</option>)}</select></label>
       <button className="btn primary" disabled={!selectedAccountId || !connectionId || create.isPending || (scope === "MARKET_RESEARCH" && !selectedLane)} onClick={() => create.mutate()}>{create.isPending ? "Saving…" : "Save provider binding"}</button>
     </article>
-    <article className="card"><h3>Current provider bindings</h3>{bindings.data?.length ? <div className="table-wrap"><table><thead><tr><th>Use</th><th>Coverage</th><th>Capability</th><th>Connection</th><th>Status</th><th /></tr></thead><tbody>{bindings.data.map(binding => { const bindingLane = binding.lane as Lane | undefined; return <tr key={binding.id}><td>{String(binding.binding_scope ?? "MARKET_RESEARCH").replaceAll("_", " ")}</td><td>{bindingLane ? `${bindingLane.asset_class} · ${bindingLane.instrument_type}` : "Economic context"}</td><td>{String(binding.capability)}</td><td>{connectionNames.get(String(binding.connection_id)) ?? String(binding.connection_id)}</td><td>{String(binding.verification_status)}</td><td>{binding.verification_status === "VERIFIED" ? "Verified" : <button className="btn compact" disabled={testAndVerify.isPending} onClick={() => testAndVerify.mutate(binding)}>Test & verify</button>}</td></tr>; })}</tbody></table></div> : <p className="empty">No provider bindings for this account.</p>}</article>
+    <article className="card"><h3>Current provider bindings</h3>{bindings.data?.length ? <div className="table-wrap"><table><thead><tr><th>Use</th><th>Coverage</th><th>Capability</th><th>Connection</th><th>Status</th><th /></tr></thead><tbody>{bindings.data.map(binding => { const bindingLane = binding.lane as Lane | undefined; return <tr key={binding.id}><td>{String(binding.binding_scope ?? "MARKET_RESEARCH").replaceAll("_", " ")}</td><td>{bindingLane ? `${bindingLane.asset_class} · ${bindingLane.instrument_type}` : "Economic context"}</td><td>{String(binding.capability)}</td><td>{connectionNames.get(String(binding.connection_id)) ?? String(binding.connection_id)}</td><td>{String(binding.verification_status)}</td><td><div className="actions">{binding.verification_status === "VERIFIED" ? <span>Verified</span> : <button className="btn compact" disabled={testAndVerify.isPending} onClick={() => testAndVerify.mutate(binding)}>Test & verify</button>}<button className="btn compact danger" disabled={remove.isPending} onClick={() => remove.mutate(binding)}>Remove</button></div></td></tr>; })}</tbody></table></div> : <p className="empty">No provider bindings for this account.</p>}</article>
   </section>;
 }

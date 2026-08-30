@@ -74,7 +74,16 @@ async def probe_connection(
                     f"Twelve Data {body['code']}: "
                     f"{body.get('message', 'provider rejected request')}"
                 )
-            capabilities = ["provider.authenticated", "forex.read", "metals.read", "candles.read"]
+            capabilities = [
+                "provider.authenticated",
+                "market.discovery",
+                "instrument_directory.read",
+                "forex.read",
+                "metals.read",
+                "stocks.read",
+                "quotes.read",
+                "candles.read",
+            ]
             # /api_usage is deliberately symbol-free.  A successful response
             # proves the key is accepted; instrument availability is checked
             # when research requests the selected market-research pair.
@@ -84,7 +93,12 @@ async def probe_connection(
         elif profile.provider == ConnectionProvider.COINBASE:
             response = await http.get("https://api.exchange.coinbase.com/time")
             response.raise_for_status()
-            capabilities = ["crypto.read", "candles.read", "order_book.read"]
+            capabilities = [
+                "crypto.read",
+                "crypto.discovery",
+                "candles.read",
+                "order_book.read",
+            ]
             fresh = bool(response.json().get("epoch"))
         elif profile.provider == ConnectionProvider.COINGECKO:
             response = await http.get("https://api.coingecko.com/api/v3/ping")

@@ -131,6 +131,25 @@ async def test_twelve_data_probe_validates_key_without_requesting_a_symbol() -> 
 
     assert result.status == "HEALTHY"
     assert "forex.read" in result.capabilities
+    assert "market.discovery" in result.capabilities
+
+
+async def test_openai_probe_advertises_embedding_capability() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/models"
+        assert request.headers["Authorization"] == "Bearer project-key"
+        return httpx.Response(200, json={"data": [{"id": "text-embedding-3-small"}]})
+
+    profile = ConnectionProfile(
+        name="OpenAI knowledge embeddings",
+        provider=ConnectionProvider.OPENAI,
+        credential_id=uuid4(),
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await probe_connection(profile, "project-key", client=client)
+
+    assert result.status == "HEALTHY"
+    assert "embeddings.create" in result.capabilities
 
 
 def test_twelve_data_health_is_throttled_for_one_hour() -> None:

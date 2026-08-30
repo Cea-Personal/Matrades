@@ -126,18 +126,25 @@ def create_app(
     async def health(_: None = Depends(authenticate)) -> dict:
         now = time.time()
         fresh = bool(reader) or any(now - observed <= 15 for observed in latest_received.values())
+        capabilities = [
+            "accounts.read",
+            "positions.read",
+            "history.read",
+            "commands.poll",
+            "commands.receipt",
+        ]
+        # Discovery is truthful only when this bridge process has a live MT5
+        # reader capable of enumerating the terminal's broker symbol catalog.
+        if reader and hasattr(reader, "symbols"):
+            capabilities.extend(
+                ["instruments.read", "quotes.read", "contract_terms.read"]
+            )
         return {
             "status": "healthy" if fresh else "waiting_for_ea",
             "fresh": fresh,
             "bridge_version": "1.0.0",
             "observed_at": datetime.now(UTC).isoformat(),
-            "capabilities": [
-                "accounts.read",
-                "positions.read",
-                "history.read",
-                "commands.poll",
-                "commands.receipt",
-            ],
+            "capabilities": capabilities,
             "writes": True,
         }
 

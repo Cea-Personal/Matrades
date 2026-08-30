@@ -625,12 +625,11 @@ async def get_embedding_configuration(
     return {"configured": True, **records[0].data}
 
 
-@router.put("/embedding-configuration")
-async def save_embedding_configuration(
+async def _verify_and_reindex_embedding_configuration(
     payload: EmbeddingConfigurationInput,
-    actor: Annotated[Actor, Depends(require_roles(Role.OWNER, Role.OPERATOR))],
-    db: Annotated[AsyncSession, Depends(get_db)],
-):
+    actor: Actor,
+    db: AsyncSession,
+) -> dict:
     try:
         connection = await resolve_connection(db, actor.owner_id, payload.connection_id)
     except (LookupError, RuntimeError, ValueError) as exc:
@@ -683,7 +682,7 @@ async def save_embedding_configuration(
             reindexed_segments += len(segments)
     except (httpx.HTTPError, RuntimeError, ValueError) as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
-    configuration = {
+    return {
         "provider": "OPENAI",
         "connection_id": str(payload.connection_id),
         "model": payload.model,
@@ -691,7 +690,26 @@ async def save_embedding_configuration(
         "verified_at": datetime.now(UTC).isoformat(),
         "reindexed_segments": reindexed_segments,
     }
+
+
+async def _activate_embedding_configuration(
+    payload: EmbeddingConfigurationInput,
+    actor: Actor,
+    db: AsyncSession,
+    *,
+    restored_from_version: int | None = None,
+) -> dict:
+    configuration = await _verify_and_reindex_embedding_configuration(payload, actor, db)
+    store = ResourceStore(db)
     records = await store.list("knowledge_embedding_configuration", actor.owner_id)
+    current_version = (
+        int(records[0].data.get("configuration_version", 0)) if records else 0
+    )
+    configuration = {
+        **configuration,
+        "configuration_version": current_version + 1,
+        "restored_from_version": restored_from_version,
+    }
     if records:
         record = await store.update(
             records[0],
@@ -707,7 +725,65 @@ async def save_embedding_configuration(
             actor_id=actor.actor_id,
             event_type="knowledge_embedding.configuration_saved",
         )
+    await store.create(
+        "knowledge_embedding_configuration_version",
+        actor.owner_id,
+        configuration,
+        actor_id=actor.actor_id,
+        event_type="knowledge_embedding.version_created",
+    )
     return {"configured": True, **record.data}
+
+
+@router.put("/embedding-configuration")
+async def save_embedding_configuration(
+    payload: EmbeddingConfigurationInput,
+    actor: Annotated[Actor, Depends(require_roles(Role.OWNER, Role.OPERATOR))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    return await _activate_embedding_configuration(payload, actor, db)
+
+
+@router.get("/embedding-configuration/versions")
+async def list_embedding_configuration_versions(
+    actor: Annotated[Actor, Depends(current_actor)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    records = await ResourceStore(db).list(
+        "knowledge_embedding_configuration_version", actor.owner_id
+    )
+    return [item.public() for item in records]
+
+
+@router.post("/embedding-configuration/versions/{configuration_version}/restore")
+async def restore_embedding_configuration_version(
+    configuration_version: int,
+    actor: Annotated[Actor, Depends(require_roles(Role.OWNER, Role.OPERATOR))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    records = await ResourceStore(db).list(
+        "knowledge_embedding_configuration_version", actor.owner_id
+    )
+    version = next(
+        (
+            item
+            for item in records
+            if int(item.data.get("configuration_version", 0)) == configuration_version
+        ),
+        None,
+    )
+    if version is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "embedding configuration version not found")
+    return await _activate_embedding_configuration(
+        EmbeddingConfigurationInput(
+            connection_id=UUID(str(version.data["connection_id"])),
+            model=str(version.data["model"]),
+            dimensions=int(version.data["dimensions"]),
+        ),
+        actor,
+        db,
+        restored_from_version=configuration_version,
+    )
 
 
 @assistant_router.post("/answers")

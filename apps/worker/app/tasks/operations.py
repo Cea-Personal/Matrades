@@ -11,6 +11,7 @@ from apps.worker.app.celery_app import celery_app
 from modules.credentials.vault import EnvelopeCipher
 from modules.journal.models import JournalEntry, JournalEntryKind
 from modules.knowledge.ingestion import build_source_data
+from modules.knowledge.openai_embeddings import embed_source_data
 from modules.notifications.providers import NotificationDeliveryError, send_notification
 from modules.performance.metrics import analytics
 from modules.performance.models import PerformanceRecord
@@ -245,14 +246,14 @@ async def _index_journal_entries(limit: int = 100) -> int:
                     "knowledge_source",
                     event.owner_id,
                     {
-                        **build_source_data(
+                        **await embed_source_data(session, event.owner_id, build_source_data(
                             name=f"Live journal — {entry.data.get('text', entry_id)}",
                             content=json.dumps(entry.data, default=str),
                             category="live-journal",
                             tags=["journal", "live-trade"],
                             source_kind="LIVE_JOURNAL",
                             external_id=str(entry_id),
-                        ),
+                        )),
                         "journal_entry_id": str(entry_id),
                     },
                     record_id=source_id,

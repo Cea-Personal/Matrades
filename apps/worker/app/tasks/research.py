@@ -18,7 +18,12 @@ from modules.connections.models import ConnectionProvider, MarketDataCapability,
 from modules.connections.resolution import find_connection
 from modules.research.artifacts import ResearchCycleArchive
 from modules.research.matrix import ALL_LANES
-from modules.research.models import MarketCategory, TypedResearchRun
+from modules.research.models import (
+    MarketCategory,
+    ResearchLaneResult,
+    TypedResearchCandidate,
+    TypedResearchRun,
+)
 from modules.research.scheduling import default_schedule, is_due, normalize_schedule
 from modules.research.workflow import AutonomousResearchWorkflow
 from packages.shared.config import settings
@@ -31,6 +36,43 @@ DEFAULT_CATEGORIES = [
     MarketCategory.METAL,
     MarketCategory.CRYPTO,
 ]
+
+
+def _verified_market_bindings(
+    records: list[ResourceRecord], account_id: str
+) -> list[ProviderBinding]:
+    """Validate market bindings without treating economic context as a market lane."""
+    return [
+        ProviderBinding.model_validate(item.data)
+        for item in records
+        if item.data.get("account_id") == account_id
+        and item.data.get("verification_status") == "VERIFIED"
+        and item.data.get("binding_scope", "MARKET_RESEARCH") == "MARKET_RESEARCH"
+        and item.data.get("lane") is not None
+    ]
+
+
+def _typed_instrument_data(
+    account_id: UUID,
+    candidate: TypedResearchCandidate,
+    lane_result: ResearchLaneResult,
+) -> dict[str, object]:
+    """Flatten required authority references while retaining the full typed models."""
+    return {
+        "account_id": str(account_id),
+        "asset_class": candidate.lane.asset_class.value,
+        "instrument_type": candidate.lane.instrument_type.value,
+        "venue_instrument_id": str(candidate.listing.id),
+        "quantity_unit": candidate.specification.quantity_unit.value,
+        "listing": candidate.listing.model_dump(mode="json"),
+        "specification": candidate.specification.model_dump(mode="json"),
+        "specification_version_id": str(candidate.specification.id),
+        "connection_binding_id": (
+            str(lane_result.binding_id) if lane_result.binding_id else None
+        ),
+        "source_cut_refs": lane_result.source_cut_refs,
+        "freshness": candidate.specification.freshness,
+    }
 
 
 async def _execute_research_cycle(run_id: UUID) -> dict:
@@ -67,12 +109,10 @@ async def _execute_research_cycle(run_id: UUID) -> dict:
                 item.id: item
                 for item in await ResourceStore(session).list("connection", owner_id)
             }
-            bindings = [
-                ProviderBinding.model_validate(item.data)
-                for item in await ResourceStore(session).list("provider_binding", owner_id)
-                if item.data.get("account_id") == str(record.data["account_id"])
-                and item.data.get("verification_status") == "VERIFIED"
-            ]
+            bindings = _verified_market_bindings(
+                await ResourceStore(session).list("provider_binding", owner_id),
+                str(record.data["account_id"]),
+            )
             eligible_capabilities = {
                 MarketDataCapability.DISCOVERY,
                 MarketDataCapability.INSTRUMENT_DIRECTORY,
@@ -187,19 +227,9 @@ async def _execute_research_cycle(run_id: UUID) -> dict:
                     existing_instrument = await typed_store.get(
                         "typed_instrument", instrument_id, owner_id
                     )
-                    instrument_data = {
-                        "account_id": str(typed_run.account_id),
-                        "asset_class": candidate.lane.asset_class.value,
-                        "instrument_type": candidate.lane.instrument_type.value,
-                        "listing": candidate.listing.model_dump(mode="json"),
-                        "specification": candidate.specification.model_dump(mode="json"),
-                        "specification_version_id": str(candidate.specification.id),
-                        "connection_binding_id": str(lane_result.binding_id)
-                        if lane_result.binding_id
-                        else None,
-                        "source_cut_refs": lane_result.source_cut_refs,
-                        "freshness": candidate.specification.freshness,
-                    }
+                    instrument_data = _typed_instrument_data(
+                        typed_run.account_id, candidate, lane_result
+                    )
                     if existing_instrument is None:
                         await typed_store.create(
                             "typed_instrument",

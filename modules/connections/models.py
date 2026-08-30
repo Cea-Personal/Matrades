@@ -37,7 +37,7 @@ PROVIDER_LABELS = {
     ConnectionProvider.CALENDAR: "Calendar",
     ConnectionProvider.NEWS: "News",
     ConnectionProvider.FOREX_FACTORY: "Forex Factory calendar scraper",
-    ConnectionProvider.SERPAPI: "SerpApi YouTube/search discovery",
+    ConnectionProvider.SERPAPI: "SerpApi + YouTube transcript ingestion",
     ConnectionProvider.OPENAI: "OpenAI",
     ConnectionProvider.MT5_BRIDGE: "MT5 Bridge",
 }

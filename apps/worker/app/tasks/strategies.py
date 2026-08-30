@@ -13,6 +13,7 @@ from modules.agents.rpc import OwnerScopedAgentGateway, RedisAgentGateway
 from modules.backtesting.engine import BacktestConfiguration, PointInTimeBacktester
 from modules.connections.resolution import resolve_connection
 from modules.knowledge.ingestion import build_source_data
+from modules.knowledge.openai_embeddings import embed_source_data
 from modules.research.artifacts import ResearchCycleArchive
 from modules.strategies.ai_workflow import StrategyGenerationWorkflow
 from modules.strategies.compiler import compile_strategy
@@ -440,7 +441,7 @@ async def _generate_strategy(run_id: UUID) -> dict:
             f"Generated evaluator code:\n{compile_strategy(proposal.specification).generated_code}"
         )
         proposal_data = {
-            **build_source_data(
+            **await embed_source_data(session, owner_id, build_source_data(
                 name=f"Strategy proposal — {proposal.specification.name}",
                 content=proposal_content,
                 media_type="text/plain",
@@ -449,7 +450,7 @@ async def _generate_strategy(run_id: UUID) -> dict:
                 source_date=completed_at.date().isoformat(),
                 source_kind="GENERATED_STRATEGY_PROPOSAL",
                 external_id=str(run_id),
-            ),
+            )),
             "linked_strategy_research_run_id": str(run_id),
             "linked_strategy_draft_id": str(draft.id),
         }

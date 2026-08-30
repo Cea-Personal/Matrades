@@ -98,7 +98,7 @@ class LiveResearchDataProvider:
         persisted = self.lane_snapshots.get(lane_key)
         if persisted:
             return persisted
-        if lane.instrument_type is not InstrumentType.SPOT:
+        if lane.instrument_type not in {InstrumentType.SPOT, InstrumentType.CFD}:
             raise ResearchDataUnavailable(
                 f"{lane.instrument_type.value} authority is not configured for "
                 f"{lane.asset_class.value}",
@@ -141,17 +141,34 @@ class LiveResearchDataProvider:
                 symbol=snapshot.instrument,
                 asset_class=lane.asset_class,
                 instrument_type=lane.instrument_type,
+                executable=lane.instrument_type is InstrumentType.SPOT,
+                aliases={
+                    snapshot.instrument.replace("/", "").replace("-", ""),
+                    snapshot.instrument,
+                },
             )
+            is_cfd_proxy = lane.instrument_type is InstrumentType.CFD
             specification = InstrumentSpecificationVersion(
                 venue_instrument_id=listing.id,
                 effective_from=snapshot.observed_at,
                 price_currency="USD",
                 quantity_unit=(
-                    QuantityUnit.UNITS
+                    QuantityUnit.LOTS
+                    if is_cfd_proxy
+                    else QuantityUnit.UNITS
                     if lane.asset_class is not AssetClass.STOCKS
                     else QuantityUnit.SHARES
                 ),
-                provenance={"provider": snapshot.source, "source_cut_id": snapshot.source_version},
+                provenance={
+                    "provider": snapshot.source,
+                    "source_cut_id": snapshot.source_version,
+                    "research_price_role": (
+                        "UNDERLYING_MARKET_PROXY_FOR_CFD" if is_cfd_proxy else "DIRECT_SPOT"
+                    ),
+                    "execution_authority": (
+                        "MT5_BROKER_VALIDATION_REQUIRED" if is_cfd_proxy else snapshot.source
+                    ),
+                },
             )
             typed.append(
                 TypedResearchSnapshot(

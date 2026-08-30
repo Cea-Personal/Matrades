@@ -24,6 +24,20 @@ from packages.shared.store import ResourceStore
 router = APIRouter(tags=["Research"])
 
 
+def _account_matrix_history(records: list[Any], account_id: UUID) -> list[Any]:
+    """Return only one account's matrices, newest logical version first."""
+    return sorted(
+        [item for item in records if item.data.get("account_id") == str(account_id)],
+        key=lambda item: int(item.data.get("version", 0)),
+        reverse=True,
+    )
+
+
+def _next_account_matrix_version(records: list[Any], account_id: UUID) -> int:
+    history = _account_matrix_history(records, account_id)
+    return int(history[0].data.get("version", 0)) + 1 if history else 1
+
+
 class MatrixLaneInput(ResearchLaneKey):
     enabled: bool = True
 
@@ -109,19 +123,15 @@ async def get_account_research_matrix(
 ):
     store = ResourceStore(db)
     await _account(store, actor, account_id)
-    record = next(
-        (
-            item
-            for item in await store.list("research_matrix", actor.owner_id)
-            if item.data.get("account_id") == str(account_id)
-        ),
-        None,
+    history = _account_matrix_history(
+        await store.list("research_matrix", actor.owner_id), account_id
     )
+    record = history[0] if history else None
     if record is None:
         return {
             "id": None,
             "account_id": str(account_id),
-            "version": 1,
+            "version": 0,
             "lanes": [{**lane.model_dump(mode="json"), "enabled": True} for lane in ALL_LANES],
             "schedule": {"enabled": False, "run_at": "00:00", "timezone": "UTC", "weekdays": []},
             "effective_from": None,
@@ -137,12 +147,10 @@ async def list_account_research_matrix_versions(
 ):
     store = ResourceStore(db)
     await _account(store, actor, account_id)
-    records = [
-        item.public()
-        for item in await store.list("research_matrix", actor.owner_id)
-        if item.data.get("account_id") == str(account_id)
-    ]
-    return sorted(records, key=lambda item: int(item.get("version", 0)), reverse=True)
+    records = _account_matrix_history(
+        await store.list("research_matrix", actor.owner_id), account_id
+    )
+    return [item.public() for item in records]
 
 
 @router.post("/accounts/{account_id}/research-matrix/versions/{matrix_id}/restore")
@@ -158,12 +166,8 @@ async def restore_account_research_matrix_version(
     source = await store.get("research_matrix", matrix_id, actor.owner_id)
     if source is None or source.data.get("account_id") != str(account_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "research matrix version not found")
-    history = [
-        item
-        for item in await store.list("research_matrix", actor.owner_id)
-        if item.data.get("account_id") == str(account_id)
-    ]
-    version = max((int(item.data.get("version", 0)) for item in history), default=0) + 1
+    all_matrices = await store.list("research_matrix", actor.owner_id)
+    version = _next_account_matrix_version(all_matrices, account_id)
     restored = {
         **source.data,
         "account_id": str(account_id),
@@ -191,12 +195,8 @@ async def replace_account_research_matrix(
 ):
     store = ResourceStore(db)
     await _account(store, actor, account_id)
-    previous = [
-        item
-        for item in await store.list("research_matrix", actor.owner_id)
-        if item.data.get("account_id") == str(account_id)
-    ]
-    version = max((int(item.data.get("version", 0)) for item in previous), default=0) + 1
+    all_matrices = await store.list("research_matrix", actor.owner_id)
+    version = _next_account_matrix_version(all_matrices, account_id)
     data = _matrix_data(account_id, payload, version)
     record = await store.create(
         "research_matrix",
@@ -297,14 +297,35 @@ async def verify_account_provider_binding(
     advertised = {str(item).upper() for item in connection.data.get("capabilities", [])}
     required = str(record.data["capability"]).upper()
     aliases = {
-        "DISCOVERY": {"DISCOVERY", "INSTRUMENT_DIRECTORY", "CRYPTO.DISCOVERY", "ASSET_METADATA.READ"},
-        "INSTRUMENT_DIRECTORY": {"DISCOVERY", "INSTRUMENT_DIRECTORY"},
+        "DISCOVERY": {
+            "DISCOVERY",
+            "MARKET.DISCOVERY",
+            "INSTRUMENT_DIRECTORY",
+            "INSTRUMENT_DIRECTORY.READ",
+            "INSTRUMENTS.READ",
+            "CRYPTO.DISCOVERY",
+            "ASSET_METADATA.READ",
+        },
+        "INSTRUMENT_DIRECTORY": {
+            "DISCOVERY",
+            "MARKET.DISCOVERY",
+            "INSTRUMENT_DIRECTORY",
+            "INSTRUMENT_DIRECTORY.READ",
+            "INSTRUMENTS.READ",
+        },
         "QUOTE": {"QUOTE", "QUOTES", "FOREX.READ", "METALS.READ", "CRYPTO.READ"},
         "CANDLES": {"CANDLE", "CANDLES", "HISTORY", "CANDLES.READ", "HISTORY.READ"},
         "FUTURES_CHAIN": {"FUTURES_CHAIN", "CONTRACT_DETAILS"},
         "CONTRACT_DETAILS": {"CONTRACT_DETAILS", "FUTURES_CHAIN"},
         "OPEN_INTEREST": {"OPEN_INTEREST", "CFTC_COT"},
-        "ECONOMIC_CALENDAR": {"ECONOMIC_CALENDAR", "CALENDAR", "NEWS", "CALENDAR.READ", "NEWS.READ", "FOREX_FACTORY.SCRAPE"},
+        "ECONOMIC_CALENDAR": {
+            "ECONOMIC_CALENDAR",
+            "CALENDAR",
+            "NEWS",
+            "CALENDAR.READ",
+            "NEWS.READ",
+            "FOREX_FACTORY.SCRAPE",
+        },
         "MACROECONOMIC": {"MACROECONOMIC", "MACRO", "ECONOMIC", "MACRO.READ"},
         "NEWS": {"NEWS", "NEWS.READ", "SEARCH.READ"},
     }
@@ -324,6 +345,28 @@ async def verify_account_provider_binding(
         event_type="provider_binding.verified",
     )
     return updated.public()
+
+
+@router.delete("/accounts/{account_id}/provider-bindings/{binding_id}")
+async def delete_account_provider_binding(
+    account_id: UUID,
+    binding_id: UUID,
+    actor: Annotated[Actor, Depends(require_roles(Role.OWNER, Role.OPERATOR))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    store = ResourceStore(db)
+    await _account(store, actor, account_id)
+    record = await store.get("provider_binding", binding_id, actor.owner_id)
+    if record is None or record.data.get("account_id") != str(account_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "provider binding not found")
+    updated = await store.update(
+        record,
+        {**record.data, "removed_at": datetime.now(UTC).isoformat()},
+        state="DELETED",
+        actor_id=actor.actor_id,
+        event_type="provider_binding.removed",
+    )
+    return {"deleted": True, "binding_id": str(updated.id)}
 
 
 @router.get("/instruments")

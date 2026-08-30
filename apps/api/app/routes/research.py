@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -85,11 +85,13 @@ async def list_runs(
 async def list_research_artifacts(
     actor: Annotated[Actor, Depends(current_actor)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    account_id: Annotated[UUID | None, Query()] = None,
 ):
     records = await ResourceStore(db).list("research_run", actor.owner_id)
     return [
         {
             "run_id": str(item.id),
+            "account_id": item.data.get("account_id"),
             "cycle_type": "market_research",
             "state": item.state,
             "completed_at": item.data.get("completed_at") or item.updated_at.isoformat(),
@@ -97,6 +99,7 @@ async def list_research_artifacts(
         }
         for item in records
         if item.data.get("artifact")
+        and (account_id is None or item.data.get("account_id") == str(account_id))
     ]
 
 
