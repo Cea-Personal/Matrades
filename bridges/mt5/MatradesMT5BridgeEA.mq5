@@ -8,7 +8,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Matrades"
 #property link      "https://github.com/matrades"
-#property version   "1.000"
+#property version   "1.100"
 #property strict
 #property description "MT5 snapshot publisher and bounded command executor for Matrades"
 #property description "Add the bridge URL to Tools > Options > Expert Advisors > Allow WebRequest"
@@ -19,8 +19,13 @@ input string InpMatradesAccountId = "";
 input string InpAccountReference = "";
 input int    InpPublishSeconds = 5;
 input int    InpRequestTimeoutMs = 5000;
+input int    InpMarketDataPublishSeconds = 60;
+input int    InpResearchCandleCount = 100;
+input int    InpMaxResearchMetalSymbols = 20;
 
 ulong g_sequence = 0;
+ulong g_market_data_sequence = 0;
+datetime g_last_market_data_publish = 0;
 string g_processed_command_ids[];
 int g_last_publish_status = 0;
 int g_last_publish_error = 0;
@@ -219,6 +224,131 @@ string SnapshotJson()
    body+=",\"positions\":"+PositionsJson();
    body+=",\"signature\":\"ea-published-over-authenticated-channel\"}";
    return(body);
+  }
+
+bool IsMetalSymbol(string symbol)
+  {
+   string searchable=symbol+" "+SymbolInfoString(symbol,SYMBOL_PATH)+" "+
+                     SymbolInfoString(symbol,SYMBOL_DESCRIPTION);
+   StringToUpper(searchable);
+   return(StringFind(searchable,"XAU")>=0 || StringFind(searchable,"XAG")>=0 ||
+          StringFind(searchable,"GOLD")>=0 || StringFind(searchable,"SILVER")>=0);
+  }
+
+string CandlesJson(string symbol)
+  {
+   MqlRates rates[];
+   int requested=InpResearchCandleCount;
+   if(requested<3)
+      requested=3;
+   if(requested>500)
+      requested=500;
+   int copied=CopyRates(symbol,PERIOD_H1,0,requested,rates);
+   if(copied<3)
+      return("[]");
+   string result="[";
+   for(int index=0;index<copied;index++)
+     {
+      if(index>0)
+         result+=",";
+      result+="{\"observed_at\":\""+IsoTime(rates[index].time)+"\"";
+      result+=",\"open\":"+DoubleToString(rates[index].open,8);
+      result+=",\"high\":"+DoubleToString(rates[index].high,8);
+      result+=",\"low\":"+DoubleToString(rates[index].low,8);
+      result+=",\"close\":"+DoubleToString(rates[index].close,8);
+      result+=",\"tick_volume\":"+IntegerToString((long)rates[index].tick_volume)+"}";
+     }
+   result+="]";
+   return(result);
+  }
+
+string MetalInstrumentsJson()
+  {
+   string result="[";
+   int accepted=0;
+   int total=SymbolsTotal(false);
+   int maximum=InpMaxResearchMetalSymbols;
+   if(maximum<1)
+      maximum=1;
+   if(maximum>50)
+      maximum=50;
+   for(int index=0;index<total && accepted<maximum;index++)
+     {
+      string symbol=SymbolName(index,false);
+      if(StringLen(symbol)==0 || !IsMetalSymbol(symbol) || !SymbolSelect(symbol,true))
+         continue;
+      double bid=SymbolInfoDouble(symbol,SYMBOL_BID);
+      double ask=SymbolInfoDouble(symbol,SYMBOL_ASK);
+      double contract_size=SymbolInfoDouble(symbol,SYMBOL_TRADE_CONTRACT_SIZE);
+      double tick_size=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
+      double volume_min=SymbolInfoDouble(symbol,SYMBOL_VOLUME_MIN);
+      double volume_max=SymbolInfoDouble(symbol,SYMBOL_VOLUME_MAX);
+      double volume_step=SymbolInfoDouble(symbol,SYMBOL_VOLUME_STEP);
+      string candles=CandlesJson(symbol);
+      if(bid<=0.0 || ask<=0.0 || contract_size<=0.0 || tick_size<=0.0 ||
+         volume_min<=0.0 || volume_max<=0.0 || volume_step<=0.0 || candles=="[]")
+         continue;
+      if(accepted>0)
+         result+=",";
+      result+="{\"symbol\":\""+JsonEscape(symbol)+"\"";
+      result+=",\"path\":\""+JsonEscape(SymbolInfoString(symbol,SYMBOL_PATH))+"\"";
+      result+=",\"description\":\""+JsonEscape(SymbolInfoString(symbol,SYMBOL_DESCRIPTION))+"\"";
+      result+=",\"bid\":"+DoubleToString(bid,8);
+      result+=",\"ask\":"+DoubleToString(ask,8);
+      result+=",\"digits\":"+IntegerToString((long)SymbolInfoInteger(symbol,SYMBOL_DIGITS));
+      result+=",\"trade_contract_size\":"+DoubleToString(contract_size,8);
+      result+=",\"trade_tick_size\":"+DoubleToString(tick_size,8);
+      result+=",\"trade_tick_value\":"+DoubleToString(SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_VALUE),8);
+      result+=",\"volume_min\":"+DoubleToString(volume_min,8);
+      result+=",\"volume_max\":"+DoubleToString(volume_max,8);
+      result+=",\"volume_step\":"+DoubleToString(volume_step,8);
+      result+=",\"swap_long\":"+DoubleToString(SymbolInfoDouble(symbol,SYMBOL_SWAP_LONG),8);
+      result+=",\"swap_short\":"+DoubleToString(SymbolInfoDouble(symbol,SYMBOL_SWAP_SHORT),8);
+      result+=",\"trade_mode\":"+IntegerToString((long)SymbolInfoInteger(symbol,SYMBOL_TRADE_MODE));
+      result+=",\"candles\":"+candles+"}";
+      accepted++;
+     }
+   result+="]";
+   return(result);
+  }
+
+bool PublishMarketData()
+  {
+   string instruments=MetalInstrumentsJson();
+   if(instruments=="[]")
+     {
+      Print("Matrades bridge: no broker metal symbols with live quotes and H1 candles were found.");
+      return(false);
+     }
+   g_market_data_sequence++;
+   string body="{\"account_id\":\""+JsonEscape(InpMatradesAccountId)+"\"";
+   body+=",\"sequence\":"+IntegerToString((long)g_market_data_sequence);
+   body+=",\"observed_at\":\""+IsoTime(TimeGMT())+"\"";
+   body+=",\"broker\":\""+JsonEscape(AccountInfoString(ACCOUNT_COMPANY))+"\"";
+   body+=",\"server\":\""+JsonEscape(AccountInfoString(ACCOUNT_SERVER))+"\"";
+   body+=",\"timeframe\":\"H1\",\"instruments\":"+instruments+"}";
+   string timestamp=IntegerToString((long)TimeGMT());
+   string nonce=NewNonce();
+   string signature=HmacSha256(timestamp+"."+nonce+"."+body,InpBridgeSecret);
+   string headers="Content-Type: application/json\r\nX-Timestamp: "+timestamp+
+                  "\r\nX-Nonce: "+nonce+"\r\nX-Signature: "+signature+"\r\n";
+   uchar request_bytes[];
+   char request_data[];
+   char response_data[];
+   StringBytes(body,request_bytes);
+   ArrayResize(request_data,ArraySize(request_bytes));
+   for(int index=0;index<ArraySize(request_bytes);index++)
+      request_data[index]=(char)request_bytes[index];
+   string response_headers="";
+   int status=WebRequest("POST",BaseUrl()+"/market-data/ingest",headers,
+                         InpRequestTimeoutMs,request_data,response_data,response_headers);
+   if(status!=200)
+     {
+      PrintFormat("Matrades bridge market data publish failed: HTTP %d, error %d",status,GetLastError());
+      return(false);
+     }
+   g_last_market_data_publish=TimeGMT();
+   return(true);
   }
 
 bool PublishSnapshot()
@@ -548,11 +678,15 @@ int OnInit()
      }
    if(InpPublishSeconds<1)
       return(INIT_PARAMETERS_INCORRECT);
+   if(InpMarketDataPublishSeconds<5 || InpResearchCandleCount<3 ||
+      InpResearchCandleCount>500 || InpMaxResearchMetalSymbols<1)
+      return(INIT_PARAMETERS_INCORRECT);
    if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) || !MQLInfoInteger(MQL_TRADE_ALLOWED))
       Print("Matrades bridge warning: Algorithmic Trading is disabled for the terminal or this EA; WebRequest and authorized command execution will remain unavailable.");
    MathSrand((int)GetTickCount());
    EventSetTimer(InpPublishSeconds);
    PublishSnapshot();
+   PublishMarketData();
    PollCommands();
    PrintFormat("Matrades MT5 bridge EA started for account %s",InpMatradesAccountId);
    return(INIT_SUCCEEDED);
@@ -568,6 +702,8 @@ void OnTimer()
    if(!TerminalInfoInteger(TERMINAL_CONNECTED))
       return;
    PublishSnapshot();
+   if(TimeGMT()-g_last_market_data_publish>=InpMarketDataPublishSeconds)
+      PublishMarketData();
    PollCommands();
   }
 

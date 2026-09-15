@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+CODEX_APP_SERVER_JSONL_LIMIT = 8 * 1024 * 1024
+
 
 class CodexAppServerClient:
     """Supervises the official JSONL stdio app-server protocol."""
@@ -34,6 +36,9 @@ class CodexAppServerClient:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            # App-server JSONL events may echo the complete structured research
+            # input. asyncio's 64 KiB default corrupts the stream on those frames.
+            limit=CODEX_APP_SERVER_JSONL_LIMIT,
         )
         await self._request(
             "initialize",
@@ -104,13 +109,11 @@ class CodexAppServerClient:
             completed_messages: list[str] = []
             assert self.process is not None and self.process.stdout is not None
             while True:
-                raw = await asyncio.wait_for(self.process.stdout.readline(), timeout=120)
-                if not raw:
-                    stderr = ""
-                    if self.process.stderr:
-                        stderr = (await self.process.stderr.read()).decode(errors="replace")
-                    raise RuntimeError(f"Codex app-server exited before turn completion: {stderr}")
-                message = json.loads(raw)
+                message = await self._read_message(
+                    read_timeout_seconds=120,
+                    closed_message="Codex app-server exited before turn completion",
+                    include_stderr=True,
+                )
                 method = message.get("method")
                 params_value = message.get("params", {})
                 if method == "item/completed":
@@ -149,15 +152,51 @@ class CodexAppServerClient:
         await self._write({"method": method, "id": request_id, "params": params})
         assert self.process is not None and self.process.stdout is not None
         while True:
-            raw = await asyncio.wait_for(self.process.stdout.readline(), timeout=30)
-            if not raw:
-                raise RuntimeError("Codex app-server closed its stdout")
-            message = json.loads(raw)
+            message = await self._read_message(
+                read_timeout_seconds=30,
+                closed_message="Codex app-server closed its stdout",
+            )
             if message.get("id") != request_id:
                 continue
             if "error" in message:
                 raise RuntimeError(str(message["error"]))
             return dict(message.get("result", {}))
+
+    async def _read_message(
+        self,
+        *,
+        read_timeout_seconds: float,
+        closed_message: str,
+        include_stderr: bool = False,
+    ) -> dict[str, Any]:
+        assert self.process is not None and self.process.stdout is not None
+        try:
+            raw = await asyncio.wait_for(
+                self.process.stdout.readline(), timeout=read_timeout_seconds
+            )
+        except (asyncio.LimitOverrunError, ValueError) as exc:
+            # readline() leaves an over-limit JSONL frame in the buffer. Restart
+            # the app-server so the next lane cannot consume a poisoned stream.
+            await self.stop()
+            raise RuntimeError(
+                f"Codex app-server JSONL frame exceeded the "
+                f"{CODEX_APP_SERVER_JSONL_LIMIT}-byte safety limit"
+            ) from exc
+        if not raw:
+            stderr = ""
+            if include_stderr and self.process.stderr:
+                stderr = (await self.process.stderr.read()).decode(errors="replace")
+            detail = f": {stderr}" if stderr else ""
+            raise RuntimeError(f"{closed_message}{detail}")
+        try:
+            message = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            await self.stop()
+            raise ValueError("Codex app-server emitted malformed JSONL") from exc
+        if not isinstance(message, dict):
+            await self.stop()
+            raise ValueError("Codex app-server JSONL message must be an object")
+        return message
 
     async def _notify(self, method: str, params: dict[str, Any]) -> None:
         await self._write({"method": method, "params": params})

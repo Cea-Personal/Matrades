@@ -116,3 +116,41 @@ class BrokerInstrument(BaseModel):
     swap_short: Decimal | None = None
     sessions: tuple[str, ...] = ()
     expiry: AwareDateTime | None = None
+
+
+class BrokerMarketCandle(BaseModel):
+    observed_at: AwareDateTime
+    open: Decimal = Field(gt=0)
+    high: Decimal = Field(gt=0)
+    low: Decimal = Field(gt=0)
+    close: Decimal = Field(gt=0)
+    tick_volume: Decimal = Field(default=Decimal("0"), ge=0)
+
+
+class BrokerMarketInstrumentSnapshot(BaseModel):
+    symbol: str = Field(min_length=1, max_length=80)
+    path: str = ""
+    description: str = ""
+    bid: Decimal = Field(gt=0)
+    ask: Decimal = Field(gt=0)
+    digits: int = Field(ge=0, le=12)
+    trade_contract_size: Decimal = Field(gt=0)
+    trade_tick_size: Decimal = Field(gt=0)
+    trade_tick_value: Decimal | None = Field(default=None, ge=0)
+    volume_min: Decimal = Field(gt=0)
+    volume_max: Decimal = Field(gt=0)
+    volume_step: Decimal = Field(gt=0)
+    swap_long: Decimal | None = None
+    swap_short: Decimal | None = None
+    trade_mode: int = Field(ge=0)
+    candles: list[BrokerMarketCandle] = Field(min_length=3, max_length=500)
+
+
+class BrokerMarketDataSnapshot(BaseModel):
+    account_id: UUID
+    sequence: int = Field(ge=1)
+    observed_at: AwareDateTime
+    broker: str = ""
+    server: str = ""
+    timeframe: str = "H1"
+    instruments: list[BrokerMarketInstrumentSnapshot] = Field(min_length=1, max_length=50)

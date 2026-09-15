@@ -10,12 +10,13 @@ from zoneinfo import ZoneInfo
 import httpx
 from sqlalchemy import select
 
+from adapters.market_data.mt5_research import Mt5ResearchDataProvider
 from adapters.market_data.research import LiveResearchDataProvider
 from adapters.news.forex_factory import DEFAULT_FOREX_FACTORY_FEED, fetch_forex_factory_events
 from apps.worker.app.celery_app import celery_app
 from modules.agents.rpc import OwnerScopedAgentGateway, RedisAgentGateway
 from modules.connections.models import ConnectionProvider, MarketDataCapability, ProviderBinding
-from modules.connections.resolution import find_connection
+from modules.connections.resolution import find_connection, resolve_connection
 from modules.research.artifacts import ResearchCycleArchive
 from modules.research.matrix import ALL_LANES
 from modules.research.models import (
@@ -80,6 +81,8 @@ async def _execute_research_cycle(run_id: UUID) -> dict:
     typed_matrix_version = 1
     configured_lanes: set[str] | None = None
     lane_binding_ids: dict[str, UUID] = {}
+    mt5_lane_keys: set[str] = set()
+    mt5 = None
     async with unit_of_work() as session:
         record = await session.get(ResourceRecord, run_id)
         if record is None or record.kind != "research_run":
@@ -130,6 +133,16 @@ async def _execute_research_cycle(run_id: UUID) -> dict:
                 ):
                     configured_lanes.add(binding.lane.as_string())
                     lane_binding_ids.setdefault(binding.lane.as_string(), binding.id)
+                    if (
+                        connection.data.get("provider") == ConnectionProvider.MT5_BRIDGE.value
+                        and binding.lane.asset_class.value == "METALS"
+                        and binding.lane.instrument_type.value == "CFD"
+                    ):
+                        mt5_lane_keys.add(binding.lane.as_string())
+                        if mt5 is None or mt5.id != binding.connection_id:
+                            mt5 = await resolve_connection(
+                                session, owner_id, binding.connection_id
+                            )
 
     enabled = {
         provider_name
@@ -141,6 +154,14 @@ async def _execute_research_cycle(run_id: UUID) -> dict:
     }
     twelve_configuration = twelve.profile.configuration if twelve else {}
     coinbase_configuration = coinbase.profile.configuration if coinbase else {}
+    lane_providers = {}
+    if mt5 and mt5.secret and mt5_lane_keys:
+        mt5_provider = Mt5ResearchDataProvider(
+            str(mt5.profile.configuration["bridge_url"]),
+            mt5.secret,
+            UUID(str(record.data["account_id"])),
+        )
+        lane_providers = {lane_key: mt5_provider for lane_key in mt5_lane_keys}
     provider = LiveResearchDataProvider(
         settings,
         twelve_data_api_key=twelve.secret if twelve else None,
@@ -149,6 +170,7 @@ async def _execute_research_cycle(run_id: UUID) -> dict:
         metals_universe=twelve_configuration.get("metals_universe"),
         crypto_universe=coinbase_configuration.get("crypto_universe"),
         configured_lanes=configured_lanes,
+        lane_providers=lane_providers,
     )
     agents = OwnerScopedAgentGateway(
         RedisAgentGateway(

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api, type Resource } from "@/lib/api";
@@ -36,67 +37,12 @@ type AccountSchedule = {
 type ResearchArtifact = { run_id: string; account_id: string; cycle_type: string; state: string; completed_at: string; relative_path: string; checksum: string };
 type MatrixLane = { asset_class: string; instrument_type: string; enabled: boolean };
 type Matrix = { id?: string; account_id: string; version: number; lanes: MatrixLane[] };
-type AgentReview = { logical_id: string; status: string; raw_decision?: string; evidence: string[]; score_adjustments?: Record<string, number> };
 type TypedLaneResult = {
   lane: { asset_class: string; instrument_type: string };
   status: string;
   reason_code?: string;
   candidate?: { listing: { symbol: string; venue: string }; score: number; evidence: string[] };
-  exclusions?: string[];
-  binding_id?: string;
-  source_cut_refs?: string[];
-  observed_candidates?: string[];
-  agent_reviews?: AgentReview[];
-  failure_detail?: string;
-  completed_at?: string;
 };
-
-const reasonExplanation = (reason?: string) => {
-  if (!reason) return "No terminal explanation was recorded.";
-  if (reason === "ANALYST_REASSESS") return "An analyst did not pass the available market evidence. The lane failed closed, so no trade candidate advanced.";
-  if (reason === "CRITIC_REASSESS") return "The final critic rejected the ranked candidates. The lane failed closed, so no trade candidate advanced.";
-  if (reason === "NO_ELIGIBLE_CANDIDATE") return "The provider returned no eligible instruments for this configured lane.";
-  if (reason === "NO_VERIFIED_PROVIDER_BINDING") return "This account has no verified market-research provider binding for the lane.";
-  if (reason === "PROVIDER_LANE_CAPABILITY_MISSING") return "The selected provider cannot discover this asset-class and instrument-type lane.";
-  if (reason.startsWith("PROVIDER_ERROR:")) return "The market-data provider failed before agent review could complete.";
-  if (reason.startsWith("AGENT_ERROR:")) return "An analyst invocation failed. Research stopped safely without producing a trade candidate.";
-  if (reason.startsWith("CRITIC_ERROR:")) return "The final critic invocation failed. Research stopped safely without producing a trade candidate.";
-  return reason.replaceAll("_", " ");
-};
-
-function DecisionBreakdown({ result }: { result: TypedLaneResult }) {
-  const reviews = result.agent_reviews ?? [];
-  const candidates = result.observed_candidates ?? [];
-  const sourceCuts = result.source_cut_refs ?? [];
-  const exclusions = result.exclusions ?? [];
-  const hasAuditTrace = reviews.length > 0 || candidates.length > 0 || sourceCuts.length > 0;
-
-  return <details open={result.status !== "READY"}>
-    <summary>{result.status === "NO_TRADE" ? "Why no trade? Complete decision breakdown" : "Complete decision breakdown"}</summary>
-    <div className="inset form-stack">
-      <p>{reasonExplanation(result.reason_code)}</p>
-      <dl>
-        <dt>Terminal status</dt><dd>{result.status}</dd>
-        <dt>Reason code</dt><dd>{result.reason_code ?? "None — candidate passed"}</dd>
-        <dt>Provider / runtime detail</dt><dd>{result.failure_detail ?? "None"}</dd>
-        <dt>Completed</dt><dd>{result.completed_at ? new Date(result.completed_at).toLocaleString() : "Not retained by this historical run"}</dd>
-        <dt>Provider binding</dt><dd>{result.binding_id ?? "Not retained"}</dd>
-        <dt>Candidates evaluated</dt><dd>{candidates.join(", ") || "None retained"}</dd>
-        <dt>Blocking checks / exclusions</dt><dd>{exclusions.join(", ") || "None"}</dd>
-        <dt>Source snapshots</dt><dd>{sourceCuts.join(", ") || "None retained"}</dd>
-      </dl>
-      {reviews.length ? <div><h4>Agent decision trace</h4><ol className="record-list">{reviews.map((review, index) => {
-        const adjustments = Object.entries(review.score_adjustments ?? {});
-        return <li key={`${review.logical_id}-${index}`}>
-          <strong>{review.logical_id.replaceAll("_", " ")} · {review.status}</strong>
-          {review.raw_decision && review.raw_decision.toUpperCase() !== review.status ? <span>Agent&apos;s raw verdict: {review.raw_decision}</span> : null}
-          {review.evidence.length ? <ul>{review.evidence.map((item, evidenceIndex) => <li key={`${evidenceIndex}-${item}`}>{item}</li>)}</ul> : <span>No evidence text returned.</span>}
-          {adjustments.length ? <small>Score adjustments: {adjustments.map(([symbol, value]) => `${symbol} ${value >= 0 ? "+" : ""}${value}`).join(" · ")}</small> : null}
-        </li>;
-      })}</ol></div> : <p className="notice warn">{hasAuditTrace ? "This run has market evidence but no retained agent trace." : "Limited historical detail: this run was completed before full decision-trace persistence was enabled. Run the matrix again to capture the complete evidence chain."}</p>}
-    </div>
-  </details>;
-}
 
 export function MarketSelection() {
   const queryClient = useQueryClient();
@@ -179,12 +125,12 @@ export function MarketSelection() {
     </article>
 
     <article className="card form-stack">
-      <div><h2>Typed research matrix · account {String(accounts.data?.find(item => item.id === selectedAccountId)?.name ?? "")}</h2><p className="muted">Read-only here. Only candidates enabled in Configuration → Account research matrix are shown.</p></div>
+      <div><h2>Typed research matrix · account {String(accounts.data?.find(item => item.id === selectedAccountId)?.name ?? "")}</h2><p className="muted">Read-only here. Only configured lanes, latest statuses, and selected candidates are shown. Full decision evidence is archived in Extras.</p></div>
       {enabledLanes.length ? <div className="grid two">{enabledLanes.map(lane => {
         const result = typedResults.find(item => item.lane.asset_class === lane.asset_class && item.lane.instrument_type === lane.instrument_type);
-        return <article className="card form-stack" key={`${lane.asset_class}:${lane.instrument_type}`}><strong>{lane.asset_class} · {lane.instrument_type}</strong><p className={result?.status === "READY" ? "good" : result?.status === "NO_TRADE" ? "warn" : "muted"}>{result?.status ?? "NOT_RUN"}</p>{result?.candidate ? <><p>{result.candidate.listing.symbol} · {result.candidate.listing.venue}</p><small>Score {result.candidate.score.toFixed(2)}</small></> : <small>{result ? reasonExplanation(result.reason_code) : "No completed lane result yet"}</small>}{result ? <DecisionBreakdown result={result} /> : null}</article>;
+        return <article className="card form-stack" key={`${lane.asset_class}:${lane.instrument_type}`}><strong>{lane.asset_class} · {lane.instrument_type}</strong><p className={result?.status === "READY" ? "good" : result?.status === "NO_TRADE" ? "warn" : "muted"}>{result?.status ?? "NOT_RUN"}</p>{result?.candidate ? <><p>{result.candidate.listing.symbol} · {result.candidate.listing.venue}</p><small>Score {result.candidate.score.toFixed(2)}</small></> : <small>{result?.reason_code?.replaceAll("_", " ") ?? "No completed lane result yet"}</small>}</article>;
       })}</div> : <p className="empty">No research candidates are enabled for this account. Configure the account research matrix first.</p>}
-      <div className="actions"><button className="btn primary" disabled={!selectedAccountId || runTyped.isPending || !enabledLanes.length} onClick={() => runTyped.mutate()}>{runTyped.isPending ? "Queuing…" : "Run configured matrix now"}</button><span className="muted">Matrix version {matrix.data?.version ?? 1} · {enabledLanes.length} configured candidates</span></div>
+      <div className="actions"><button className="btn primary" disabled={!selectedAccountId || runTyped.isPending || !enabledLanes.length} onClick={() => runTyped.mutate()}>{runTyped.isPending ? "Queuing…" : "Run configured matrix now"}</button><Link className="btn" href="/extras?folder=market-research">View detailed evidence in Extras</Link><span className="muted">Matrix version {matrix.data?.version ?? 1} · {enabledLanes.length} configured candidates</span></div>
     </article>
 
     {message && <p className="notice">{message}</p>}

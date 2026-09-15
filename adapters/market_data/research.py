@@ -11,6 +11,7 @@ from adapters.market_data.twelve_data.client import TwelveDataClient
 from modules.connections.models import ConnectionProvider
 from modules.market_data.models import InstrumentSpecificationVersion, VenueInstrument
 from modules.research.models import MarketCategory, ResearchSnapshot, TypedResearchSnapshot
+from modules.research.ports import TypedResearchDataProvider
 from packages.shared.config import Settings
 from packages.shared.domain_types import (
     AssetClass,
@@ -45,6 +46,7 @@ class LiveResearchDataProvider:
         crypto_universe: str | None = None,
         lane_snapshots: dict[str, list[TypedResearchSnapshot]] | None = None,
         configured_lanes: set[str] | None = None,
+        lane_providers: dict[str, TypedResearchDataProvider] | None = None,
     ) -> None:
         self.settings = settings
         self.enabled_providers = enabled_providers
@@ -53,6 +55,7 @@ class LiveResearchDataProvider:
         self.crypto_universe = crypto_universe or settings.research_crypto_universe
         self.lane_snapshots = lane_snapshots or {}
         self.configured_lanes = configured_lanes
+        self.lane_providers = lane_providers or {}
         self.coinbase = CoinbaseClient()
         api_key = twelve_data_api_key or (
             settings.twelve_data_api_key.get_secret_value()
@@ -98,6 +101,9 @@ class LiveResearchDataProvider:
         persisted = self.lane_snapshots.get(lane_key)
         if persisted:
             return persisted
+        routed = self.lane_providers.get(lane_key)
+        if routed is not None:
+            return await routed.gather_lane(lane)
         if lane.instrument_type not in {InstrumentType.SPOT, InstrumentType.CFD}:
             raise ResearchDataUnavailable(
                 f"{lane.instrument_type.value} authority is not configured for "
@@ -243,3 +249,11 @@ class LiveResearchDataProvider:
         await self.coinbase.close()
         if self.twelve_data is not None:
             await self.twelve_data.close()
+        closed: set[int] = set()
+        for provider in self.lane_providers.values():
+            if id(provider) in closed:
+                continue
+            closed.add(id(provider))
+            close = getattr(provider, "close", None)
+            if close is not None:
+                await close()

@@ -11,7 +11,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from bridges.mt5.app import create_app, verify
-from packages.broker_sdk.schemas import BrokerSnapshot
+from packages.broker_sdk.schemas import BrokerMarketDataSnapshot, BrokerSnapshot
 
 
 def test_signed_message_and_replay_window():
@@ -120,3 +120,85 @@ def test_bridge_delegates_authentication_to_ui_credential_authority() -> None:
             headers={**headers, "X-Nonce": uuid4().hex, "X-Signature": "invalid"},
         )
         assert rejected.status_code == 401
+
+
+def test_ea_market_data_enables_truthful_research_capabilities() -> None:
+    secret = b"secret"
+    account_id = uuid4()
+    observed_at = datetime.now(UTC)
+    market_data = BrokerMarketDataSnapshot.model_validate(
+        {
+            "account_id": account_id,
+            "sequence": 1,
+            "observed_at": observed_at,
+            "broker": "Octa",
+            "server": "Octa-Demo",
+            "timeframe": "H1",
+            "instruments": [
+                {
+                    "symbol": "XAUUSD",
+                    "path": "Metals",
+                    "description": "Gold vs US Dollar",
+                    "bid": "2500.10",
+                    "ask": "2500.30",
+                    "digits": 2,
+                    "trade_contract_size": "100",
+                    "trade_tick_size": "0.01",
+                    "trade_tick_value": "1",
+                    "volume_min": "0.01",
+                    "volume_max": "100",
+                    "volume_step": "0.01",
+                    "swap_long": "-20",
+                    "swap_short": "10",
+                    "trade_mode": 4,
+                    "candles": [
+                        {
+                            "observed_at": observed_at - timedelta(hours=index),
+                            "open": "2500",
+                            "high": "2510",
+                            "low": "2490",
+                            "close": str(2500 + index),
+                            "tick_volume": 100,
+                        }
+                        for index in range(3)
+                    ],
+                }
+            ],
+        }
+    )
+    body = market_data.model_dump_json().encode()
+
+    def signed_headers(payload: bytes) -> dict[str, str]:
+        timestamp = str(int(time.time()))
+        nonce = uuid4().hex
+        signed = timestamp.encode() + b"." + nonce.encode() + b"." + payload
+        return {
+            "Content-Type": "application/json",
+            "X-Timestamp": timestamp,
+            "X-Nonce": nonce,
+            "X-Signature": hmac.new(secret, signed, hashlib.sha256).hexdigest(),
+        }
+
+    with TestClient(create_app(secret=secret)) as client:
+        before = client.get("/health", headers=signed_headers(b""))
+        assert "market.discovery" not in before.json()["capabilities"]
+
+        accepted = client.post(
+            "/market-data/ingest", content=body, headers=signed_headers(body)
+        )
+        assert accepted.status_code == 200
+        assert accepted.json()["instrument_count"] == 1
+
+        health = client.get("/health", headers=signed_headers(b""))
+        assert health.json()["market_data_fresh"] is True
+        assert {"market.discovery", "instruments.read", "quotes.read", "candles.read"} <= set(
+            health.json()["capabilities"]
+        )
+
+        snapshot = client.get(
+            "/market-data",
+            params={"account_id": str(account_id)},
+            headers=signed_headers(b""),
+        )
+        assert snapshot.status_code == 200
+        assert snapshot.json()["instruments"][0]["symbol"] == "XAUUSD"

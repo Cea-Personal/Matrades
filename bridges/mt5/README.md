@@ -15,9 +15,11 @@ X-Signature: <hex HMAC-SHA256 using the shared secret>
 ```
 
 The repository includes `MatradesMT5BridgeEA.mq5`. MT5's native socket API is outbound-only, so
-the EA publishes signed snapshots to `/ingest`, polls `/commands/poll`, executes only bounded
-authorized commands, and posts signed receipts to `/commands/receipts`. The Python bridge keeps
-command identity and receipts idempotent; it is not an arbitrary broker-command proxy.
+the EA publishes signed account snapshots to `/ingest` and broker-native metal catalogues,
+contract terms, quotes, and bounded H1 candles to `/market-data/ingest`. It polls
+`/commands/poll`, executes only bounded authorized commands, and posts signed receipts to
+`/commands/receipts`. The Python bridge keeps command identity and receipts idempotent; it is not
+an arbitrary broker-command proxy.
 
 ## Configuration
 
@@ -34,16 +36,23 @@ command identity and receipts idempotent; it is not an arbitrary broker-command 
      network, or the host IP visible from Wine;
    - `InpBridgeSecret`: the same secret stored in Matrades;
    - `InpMatradesAccountId`: the UUID of the Matrades trading account;
-   - `InpAccountReference`: the broker login (optional validation only).
+   - `InpAccountReference`: the broker login (optional validation only);
+   - `InpMarketDataPublishSeconds`: how often broker metal data is refreshed (default 60);
+   - `InpResearchCandleCount`: bounded H1 history per metal symbol (default 100).
 4. In MT5, add the bridge URL (for example `http://127.0.0.1:8765`) to **Tools → Options →
    Expert Advisors → Allow WebRequest for listed URL**, enable **Algorithmic Trading** globally,
    and enable it for this EA. Keep the terminal and EA running. The EA publishes an
-   account/equity/positions snapshot every `InpPublishSeconds` seconds and polls for authorized
-   commands on the same timer. Enabling Algorithmic Trading is security-sensitive because it
-   enables every attached EA; remove or disable any EA that must not trade first.
+   account/equity/positions snapshot every `InpPublishSeconds` seconds, publishes the terminal's
+   XAU/XAG/gold/silver CFD symbols on the market-data interval, and polls for authorized commands
+   on the same timer. Enabling Algorithmic Trading is security-sensitive because it enables every
+   attached EA; remove or disable any EA that must not trade first.
 5. In Matrades, click **Test bridge**. A valid response must advertise:
    `accounts.read`, `positions.read`, `history.read`, `commands.poll`, `commands.receipt`, and
-   `fresh: true`.
+   `fresh: true`. After the first usable market snapshot it also advertises `market.discovery`,
+   `instruments.read`, `quotes.read`, `candles.read`, and `contract_terms.read`.
+6. In **Provider bindings**, bind the account's **METALS · CFD** lane to the MT5 Bridge using
+   **DISCOVERY** (or another advertised market-data capability) and verify the binding. The
+   research worker will then use the broker symbols and prices rather than a Twelve Data proxy.
 
 `127.0.0.1:8765` from inside the API container points at the container itself, not macOS. Use
 `host.docker.internal` for the host bridge. Do not expose port 8765 publicly; restrict it to the

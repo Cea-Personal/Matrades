@@ -10,7 +10,7 @@ import httpx
 
 from bridges.mt5.commands import BridgeCommand
 from modules.trading.models import ExecutionAction, ExecutionAuthorization, ExecutionCommand
-from packages.broker_sdk.schemas import BrokerInstrument, BrokerSnapshot
+from packages.broker_sdk.schemas import BrokerInstrument, BrokerMarketDataSnapshot, BrokerSnapshot
 
 
 class Mt5BridgeClient:
@@ -71,6 +71,13 @@ class Mt5BridgeClient:
         )
         response.raise_for_status()
         return BrokerInstrument.model_validate(response.json())
+
+    async def market_data(self, account_id: UUID) -> BrokerMarketDataSnapshot:
+        response = await self.client.get(
+            "/market-data", params={"account_id": str(account_id)}, headers=self.headers()
+        )
+        response.raise_for_status()
+        return BrokerMarketDataSnapshot.model_validate(response.json())
 
     async def _dispatch_command(
         self, command: ExecutionCommand, authorization: ExecutionAuthorization

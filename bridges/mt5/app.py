@@ -12,7 +12,11 @@ import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 
 from bridges.mt5.commands import BridgeCommand, BridgeCommandQueue, BridgeReceipt
-from packages.broker_sdk.schemas import BrokerInstrument, BrokerSnapshot
+from packages.broker_sdk.schemas import (
+    BrokerInstrument,
+    BrokerMarketDataSnapshot,
+    BrokerSnapshot,
+)
 
 
 def verify(
@@ -63,6 +67,8 @@ def create_app(
     latest_snapshots: dict[UUID, dict] = {}
     latest_received: dict[UUID, float] = {}
     latest_history: dict[UUID, list] = {}
+    latest_market_data: dict[UUID, dict] = {}
+    latest_market_received: dict[UUID, float] = {}
     command_queue = BridgeCommandQueue(os.environ.get("MATRADES_MT5_COMMAND_QUEUE_PATH"))
     app.state.command_queue = command_queue
 
@@ -133,19 +139,50 @@ def create_app(
             "commands.poll",
             "commands.receipt",
         ]
-        # Discovery is truthful only when this bridge process has a live MT5
-        # reader capable of enumerating the terminal's broker symbol catalog.
-        if reader and hasattr(reader, "symbols"):
+        market_fresh = bool(reader and hasattr(reader, "symbols")) or any(
+            now - observed <= 180 for observed in latest_market_received.values()
+        )
+        # Discovery is advertised only after broker-native symbol data is available.
+        if market_fresh:
             capabilities.extend(
-                ["instruments.read", "quotes.read", "contract_terms.read"]
+                [
+                    "market.discovery",
+                    "instruments.read",
+                    "quotes.read",
+                    "candles.read",
+                    "contract_terms.read",
+                ]
             )
         return {
             "status": "healthy" if fresh else "waiting_for_ea",
             "fresh": fresh,
+            "market_data_fresh": market_fresh,
             "bridge_version": "1.0.0",
             "observed_at": datetime.now(UTC).isoformat(),
             "capabilities": capabilities,
             "writes": True,
+        }
+
+    @app.post("/market-data/ingest")
+    async def ingest_market_data(request: Request, _: None = Depends(authenticate)) -> dict:
+        """Accept broker-native metal listings, quotes, terms, and bounded candles."""
+        try:
+            payload = BrokerMarketDataSnapshot.model_validate(await request.json())
+        except Exception as exc:  # noqa: BLE001 - malformed EA payload is a client error
+            raise HTTPException(422, "invalid broker market data snapshot") from exc
+        previous = latest_market_data.get(payload.account_id)
+        if previous is not None and payload.sequence <= int(previous["sequence"]):
+            previous_observed_at = datetime.fromisoformat(str(previous["observed_at"]))
+            restarted = payload.sequence == 1 and payload.observed_at > previous_observed_at
+            if not restarted:
+                raise HTTPException(409, "out-of-order or replayed market data snapshot")
+        latest_market_data[payload.account_id] = payload.model_dump(mode="json")
+        latest_market_received[payload.account_id] = time.time()
+        return {
+            "accepted": True,
+            "account_id": str(payload.account_id),
+            "sequence": payload.sequence,
+            "instrument_count": len(payload.instruments),
         }
 
     @app.post("/ingest")
@@ -229,30 +266,50 @@ def create_app(
     async def instruments(
         account_id: UUID | None = None, _: None = Depends(authenticate)
     ) -> list[dict]:
-        if not reader or not hasattr(reader, "symbols"):
-            return []
-        values = []
-        for item in reader.symbols():
-            symbol = getattr(item, "name", str(item))
-            info = reader.symbol(symbol)
-            if isinstance(info, dict):
-                values.append(info)
-            else:
-                values.append({"symbol": symbol, "raw": str(info)})
-        return values
+        if reader and hasattr(reader, "symbols"):
+            values = []
+            for item in reader.symbols():
+                symbol = getattr(item, "name", str(item))
+                info = reader.symbol(symbol)
+                if isinstance(info, dict):
+                    values.append(info)
+                else:
+                    values.append({"symbol": symbol, "raw": str(info)})
+            return values
+        snapshots = (
+            [latest_market_data[account_id]]
+            if account_id and account_id in latest_market_data
+            else list(latest_market_data.values())
+        )
+        return [
+            {key: value for key, value in instrument.items() if key != "candles"}
+            for snapshot in snapshots
+            for instrument in snapshot["instruments"]
+        ]
+
+    @app.get("/market-data")
+    async def market_data(account_id: UUID, _: None = Depends(authenticate)) -> dict:
+        if account_id not in latest_market_data:
+            raise HTTPException(503, "MT5 EA has not published market data for this account")
+        return latest_market_data[account_id]
 
     @app.get("/symbol-details")
     async def symbol_details(
         account_id: UUID, symbol: str, _: None = Depends(authenticate)
     ) -> dict:
-        if not reader or not hasattr(reader, "symbol"):
-            raise HTTPException(503, "MT5 reader is not connected")
-        info = reader.symbol(symbol)
-        if isinstance(info, BrokerInstrument):
-            return info.model_dump(mode="json")
-        if isinstance(info, dict):
-            return info
-        return {"symbol": symbol, "raw": str(info), "account_id": str(account_id)}
+        if reader and hasattr(reader, "symbol"):
+            info = reader.symbol(symbol)
+            if isinstance(info, BrokerInstrument):
+                return info.model_dump(mode="json")
+            if isinstance(info, dict):
+                return info
+            return {"symbol": symbol, "raw": str(info), "account_id": str(account_id)}
+        snapshot = latest_market_data.get(account_id)
+        if snapshot:
+            for instrument in snapshot["instruments"]:
+                if instrument["symbol"].upper() == symbol.upper():
+                    return instrument
+        raise HTTPException(404, "symbol is not present in the latest MT5 market snapshot")
 
     @app.get("/events")
     async def events(

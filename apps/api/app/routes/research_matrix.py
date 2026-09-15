@@ -313,10 +313,21 @@ async def verify_account_provider_binding(
             "INSTRUMENT_DIRECTORY.READ",
             "INSTRUMENTS.READ",
         },
-        "QUOTE": {"QUOTE", "QUOTES", "FOREX.READ", "METALS.READ", "CRYPTO.READ"},
+        "QUOTE": {
+            "QUOTE",
+            "QUOTES",
+            "QUOTES.READ",
+            "FOREX.READ",
+            "METALS.READ",
+            "CRYPTO.READ",
+        },
         "CANDLES": {"CANDLE", "CANDLES", "HISTORY", "CANDLES.READ", "HISTORY.READ"},
         "FUTURES_CHAIN": {"FUTURES_CHAIN", "CONTRACT_DETAILS"},
-        "CONTRACT_DETAILS": {"CONTRACT_DETAILS", "FUTURES_CHAIN"},
+        "CONTRACT_DETAILS": {
+            "CONTRACT_DETAILS",
+            "CONTRACT_TERMS.READ",
+            "FUTURES_CHAIN",
+        },
         "OPEN_INTEREST": {"OPEN_INTEREST", "CFTC_COT"},
         "ECONOMIC_CALENDAR": {
             "ECONOMIC_CALENDAR",
