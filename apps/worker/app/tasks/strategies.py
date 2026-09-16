@@ -7,7 +7,9 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID
 
-from adapters.market_data.history import historical_candles
+from sqlalchemy import select
+
+from adapters.market_data.history import TIMEFRAMES, historical_candles
 from apps.worker.app.celery_app import celery_app
 from modules.agents.rpc import OwnerScopedAgentGateway, RedisAgentGateway
 from modules.backtesting.engine import BacktestConfiguration, PointInTimeBacktester
@@ -27,7 +29,9 @@ from modules.strategies.evidence import (
     split_research_history,
 )
 from modules.strategies.lifecycle import StrategyState
+from modules.strategies.research_pipeline import prepare_strategy_research
 from modules.strategies.screening import screen_hypotheses
+from modules.strategies.trade_setup import build_strategy_setup
 from packages.shared.config import settings
 from packages.shared.database import unit_of_work
 from packages.shared.store import ResourceRecord, ResourceStore
@@ -37,9 +41,11 @@ from packages.strategy_sdk.taxonomy import StrategyOrigin
 
 async def _generate_strategy(run_id: UUID) -> dict:
     async with unit_of_work() as session:
-        run = await session.get(ResourceRecord, run_id)
+        run = await session.get(ResourceRecord, run_id, with_for_update=True)
         if run is None or run.kind != "strategy_research_run":
             raise RuntimeError("strategy research run not found")
+        if run.state != "QUEUED":
+            return {"state": run.state, "run_id": str(run_id)}
         draft = await session.get(ResourceRecord, UUID(str(run.data["draft_id"])))
         if draft is None or draft.kind != "strategy_draft":
             raise RuntimeError("strategy draft not found")
@@ -50,6 +56,9 @@ async def _generate_strategy(run_id: UUID) -> dict:
         market_run_id = UUID(str(run.data["market_research_run_id"]))
         account_id = UUID(str(run.data["account_id"]))
         connection_id = UUID(str(run.data["historical_connection_id"]))
+        timeframe = str(
+            run.data.get("historical_timeframe") or settings.strategy_research_timeframe
+        )
         store = ResourceStore(session)
         await store.update(
             run,
@@ -190,8 +199,16 @@ async def _generate_strategy(run_id: UUID) -> dict:
         candidate.instrument,
         history_start,
         history_end,
-        settings.strategy_research_timeframe,
+        timeframe,
+        account_id=account_id,
     )
+    timeframe_seconds = TIMEFRAMES[timeframe][1]
+    candles = [
+        item
+        for item in candles
+        if history_start <= item.observed_at
+        and item.observed_at + timedelta(seconds=timeframe_seconds) <= history_end
+    ]
     discovery, holdout = split_research_history(
         candles, discovery_ratio=settings.strategy_research_discovery_ratio
     )
@@ -213,7 +230,7 @@ async def _generate_strategy(run_id: UUID) -> dict:
             id=history_reference,
             kind="historical_discovery",
             summary=(
-                f"{len(discovery)} chronological {settings.strategy_research_timeframe} candles; "
+                f"{len(discovery)} chronological {timeframe} candles; "
                 "the later holdout is withheld from the agent"
             ),
             source_id=str(connection_id),
@@ -285,21 +302,29 @@ async def _generate_strategy(run_id: UUID) -> dict:
         },
         historical_discovery={
             "reference_id": history_reference,
-            "timeframe": settings.strategy_research_timeframe,
+            "timeframe": timeframe,
             "provider": history_source.get("provider"),
             "source_version": history_source.get("source_version"),
             "checksum": candle_checksum(discovery),
             "summary": historical_summary(discovery),
+            "recent_candles": [item.model_dump(mode="json") for item in discovery[-100:]],
         },
         account_context=account_data,
         policy_context=policy_context,
         prior_strategy_context=prior_context,
         knowledge_context=knowledge,
         references=references,
+        asset_class=candidate.asset_class,
+        instrument_type=candidate.instrument_type,
+        quantity_unit=candidate.quantity_unit,
+        venue_instrument_id=candidate.venue_instrument_id,
+        specification_version_id=candidate.specification_version_id,
+        futures_contract_id=candidate.futures_contract_id,
+        source_cut_refs=selection.data.get("source_cut_refs", []),
     )
     serialized_pack = evidence_pack.model_dump(mode="json")
     holdout_evidence = {
-        "timeframe": settings.strategy_research_timeframe,
+        "timeframe": timeframe,
         "candle_count": len(holdout),
         "start_at": holdout[0].observed_at.isoformat(),
         "end_at": holdout[-1].observed_at.isoformat(),
@@ -346,19 +371,75 @@ async def _generate_strategy(run_id: UUID) -> dict:
     finally:
         await gateway.close()
     median_price = sorted(item.close for item in discovery)[len(discovery) // 2]
+    tick = selection.data.get("candidate", {}).get("specification", {}).get("tick_size")
     screening_configuration = BacktestConfiguration(
         initial_equity=Decimal(str(account_data.get("starting_balance") or "10000")),
         spread=median_price * Decimal("0.0002"),
         commission=Decimal("0"),
         slippage=median_price * Decimal("0.00005"),
+        tick_size=Decimal(str(tick)) if tick else None,
     )
     screening = screen_hypotheses(hypotheses, holdout, screening_configuration)
+    details: dict
     if screening.selected_hypothesis_id is None:
-        raise RuntimeError("no strategy hypothesis passed preliminary holdout screening")
+        details = {
+            "state": "NO_TRADE",
+            "completed_at": datetime.now(UTC).isoformat(),
+            "rationale": "No strategy hypothesis passed the preliminary screen after costs",
+            "evidence_pack": serialized_pack,
+            "holdout_evidence": holdout_evidence,
+            "hypotheses": [item.model_dump(mode="json") for item in hypotheses],
+            "preliminary_screen": screening.model_dump(mode="json"),
+            "trade_setup": {
+                "status": "NO_TRADE",
+                "entry": None,
+                "stop_loss": None,
+                "take_profits": [],
+                "execution_authorized": False,
+            },
+        }
+        artifact = ResearchCycleArchive(settings.research_artifact_root).save_cycle(
+            owner_id=owner_id,
+            cycle_type="strategy_research",
+            cycle_id=run_id,
+            occurred_at=datetime.now(UTC),
+            details=details,
+        )
+        async with unit_of_work() as session:
+            store = ResourceStore(session)
+            run = await store.get("strategy_research_run", run_id, owner_id)
+            if run is None:
+                raise RuntimeError("strategy research run disappeared")
+            draft = await store.get("strategy_draft", UUID(run.data["draft_id"]), owner_id)
+            if draft is None:
+                raise RuntimeError("strategy draft disappeared")
+            for record in (run, draft):
+                await store.update(
+                    record,
+                    {
+                        **record.data,
+                        **details,
+                        "lifecycle_state": "NO_TRADE",
+                        "artifact": {
+                            "relative_path": artifact.relative_path,
+                            "checksum": artifact.checksum,
+                        },
+                    },
+                    state="NO_TRADE",
+                    event_type="strategy.no_trade",
+                )
+        return details
     proposal = next(
         item for item in hypotheses if item.hypothesis_id == screening.selected_hypothesis_id
     )
     completed_at = datetime.now(UTC)
+    trade_setup = build_strategy_setup(
+        proposal.specification,
+        candles,
+        now=completed_at,
+        timeframe_seconds=timeframe_seconds,
+        tick_size=Decimal(str(tick)) if tick else None,
+    )
     details = {
         "origin": origin.value,
         "description": description,
@@ -384,6 +465,7 @@ async def _generate_strategy(run_id: UUID) -> dict:
         "evidence": proposal.evidence_refs,
         "rationale": proposal.rationale,
         "agent_id": proposal.agent_id,
+        "trade_setup": trade_setup,
         "state": "AWAITING_STRATEGY_APPROVAL",
         "completed_at": completed_at.isoformat(),
     }
@@ -425,6 +507,7 @@ async def _generate_strategy(run_id: UUID) -> dict:
                 "preliminary_screen": details["preliminary_screen"],
                 "selected_hypothesis_id": proposal.hypothesis_id,
                 "agent_id": proposal.agent_id,
+                "trade_setup": trade_setup,
                 "research_run_id": str(run_id),
                 "research_artifact": artifact_data,
                 "lifecycle_state": "AWAITING_STRATEGY_APPROVAL",
@@ -441,16 +524,20 @@ async def _generate_strategy(run_id: UUID) -> dict:
             f"Generated evaluator code:\n{compile_strategy(proposal.specification).generated_code}"
         )
         proposal_data = {
-            **await embed_source_data(session, owner_id, build_source_data(
-                name=f"Strategy proposal — {proposal.specification.name}",
-                content=proposal_content,
-                media_type="text/plain",
-                category="strategies",
-                tags=["generated-strategy", "proposal", proposal.specification.family.value],
-                source_date=completed_at.date().isoformat(),
-                source_kind="GENERATED_STRATEGY_PROPOSAL",
-                external_id=str(run_id),
-            )),
+            **await embed_source_data(
+                session,
+                owner_id,
+                build_source_data(
+                    name=f"Strategy proposal — {proposal.specification.name}",
+                    content=proposal_content,
+                    media_type="text/plain",
+                    category="strategies",
+                    tags=["generated-strategy", "proposal", proposal.specification.family.value],
+                    source_date=completed_at.date().isoformat(),
+                    source_kind="GENERATED_STRATEGY_PROPOSAL",
+                    external_id=str(run_id),
+                ),
+            ),
             "linked_strategy_research_run_id": str(run_id),
             "linked_strategy_draft_id": str(draft.id),
         }
@@ -481,6 +568,50 @@ async def _generate_strategy(run_id: UUID) -> dict:
                 event_type="strategy_proposal_knowledge.reindexed",
             )
     return {**details, "artifact": artifact_data}
+
+
+async def _queue_top_pair_strategies(run_id: UUID) -> list[str]:
+    async with unit_of_work() as session:
+        market_run = await session.get(ResourceRecord, run_id, with_for_update=True)
+        if (
+            market_run is None
+            or market_run.kind != "research_run"
+            or market_run.state in {"QUEUED", "RESEARCHING"}
+        ):
+            return []
+        pending = await prepare_strategy_research(session, market_run)
+    for strategy_run_id in pending:
+        generate_strategy_draft.delay(str(strategy_run_id))
+    return [str(item) for item in pending]
+
+
+@celery_app.task(name="apps.worker.app.tasks.strategies.queue_top_pair_strategies")
+def queue_top_pair_strategies(run_id: str) -> list[str]:
+    return asyncio.run(_queue_top_pair_strategies(UUID(run_id)))
+
+
+async def _resume_top_pair_research() -> None:
+    async with unit_of_work() as session:
+        runs = list(
+            (
+                await session.scalars(
+                    select(ResourceRecord).where(
+                        ResourceRecord.kind == "research_run",
+                        ResourceRecord.created_at
+                        >= datetime.now(UTC)
+                        - timedelta(hours=settings.strategy_research_max_market_age_hours),
+                        ResourceRecord.state.notin_(["QUEUED", "RESEARCHING", "FAILED"]),
+                    )
+                )
+            ).all()
+        )
+    for run in runs:
+        await _queue_top_pair_strategies(run.id)
+
+
+@celery_app.task(name="apps.worker.app.tasks.strategies.resume_top_pair_research")
+def resume_top_pair_research() -> None:
+    asyncio.run(_resume_top_pair_research())
 
 
 async def _mark_strategy_research_failed(run_id: UUID, error: Exception) -> None:
@@ -523,7 +654,7 @@ async def _mark_strategy_research_failed(run_id: UUID, error: Exception) -> None
             )
 
 
-@celery_app.task(name="apps.worker.app.tasks.strategies.generate_strategy_draft")
+@celery_app.task(name="apps.worker.app.tasks.strategies.generate_strategy_draft", time_limit=600)
 def generate_strategy_draft(run_id: str) -> dict:
     parsed = UUID(run_id)
     try:

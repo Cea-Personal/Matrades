@@ -11,6 +11,8 @@ from hashlib import sha256
 import httpx
 
 from adapters.news.forex_factory import DEFAULT_FOREX_FACTORY_FEED, parse_forex_factory_payload
+from adapters.reranking.cohere import DEFAULT_MODEL as COHERE_MODEL
+from adapters.reranking.cohere import cohere_rerank
 from modules.connections.models import ConnectionProbe, ConnectionProfile, ConnectionProvider
 
 TWELVE_DATA_HEALTH_INTERVAL = timedelta(hours=1)
@@ -137,6 +139,18 @@ async def probe_connection(
                 raise RuntimeError(f"OpenAI rejected the API key ({response.status_code})")
             fresh = bool(response.json().get("data"))
             capabilities = ["embeddings.create", "responses.create"]
+        elif profile.provider == ConnectionProvider.COHERE:
+            await cohere_rerank(
+                credential_secret or "",
+                "What is knowledge retrieval?",
+                ["Knowledge retrieval finds relevant evidence for a question."],
+                top_n=1,
+                client=http,
+            )
+            fresh = True
+            capabilities = ["rerank.create", "knowledge.rerank"]
+            version = COHERE_MODEL
+            writes = False
         elif profile.provider == ConnectionProvider.FOREX_FACTORY:
             feed_url = str(profile.configuration.get("feed_url", DEFAULT_FOREX_FACTORY_FEED))
             response = await http.get(feed_url)

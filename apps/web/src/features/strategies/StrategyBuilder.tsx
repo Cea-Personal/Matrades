@@ -4,6 +4,7 @@ import { FormEvent, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api, type Resource } from "@/lib/api";
+import { TradeSetupSummary, type StrategyTradeSetup } from "./TopPairStrategies";
 
 type Origin = "AI_GENERATED" | "AI_ASSISTED";
 type Artifact = { run_id: string; cycle_type: string; state: string; completed_at: string; relative_path: string; checksum: string };
@@ -54,6 +55,13 @@ export function StrategyBuilder() {
     <article className="card form-stack"><h2>Research basis</h2><p className="muted">Strategy research is pinned to the latest autonomous market cycle, its approved market selection, and provider history; you do not choose another pair here.</p>{researchContext.isPending ? <p>Checking market research evidence…</p> : researchContext.data?.ready ? <dl><dt>Selected instrument</dt><dd>{researchContext.data.instrument} · {researchContext.data.category}</dd><dt>Market evidence observed</dt><dd>{researchContext.data.market_observed_at ? new Date(researchContext.data.market_observed_at).toLocaleString() : "—"}</dd><dt>Historical provider</dt><dd>{researchContext.data.historical_provider}</dd></dl> : <p className="notice">Not ready: {researchContext.data?.reason ?? "research context unavailable"}. Run the autonomous market cycle and configure its historical provider.</p>}</article>
     <form className="card form-stack" onSubmit={submitGeneration}><h2>Generate strategy</h2><div className="form-grid"><label>Creation mode<select value={origin} onChange={event => setOrigin(event.target.value as Origin)}><option value="AI_GENERATED">AI Generated</option><option value="AI_ASSISTED">AI Assisted</option></select></label>{origin === "AI_ASSISTED" ? <label>Your strategy idea<textarea required rows={5} placeholder="Describe the behavior, timing, and risk preferences; the selected instrument remains fixed…" value={description} onChange={event => setDescription(event.target.value)} /></label> : <label>Optional strategy focus<textarea rows={5} placeholder="For example: conservative intraday momentum with tight invalidation" value={description} onChange={event => setDescription(event.target.value)} /></label>}</div><p className="muted">AI Generated uses the Strategy Researcher to develop evidence-cited families. AI Assisted uses your idea and the Strategy Assistant. Deterministic holdout, policy, and risk gates decide whether a version can be promoted.</p><button className="btn primary" disabled={create.isPending || !researchContext.data?.ready}>{create.isPending ? "Queuing…" : "Generate strategy"}</button></form>
     {message && <p className="notice">{message}</p>}
+    {drafts.data?.some(item => item.trade_setup) ? <section className="section-stack">
+      <h2>Strategy trade setups</h2>
+      <div className="grid">{drafts.data.filter(item => item.trade_setup).map(item => <article className="card" key={item.id}>
+        <h3>{String((item.research_basis as { instrument?: string } | undefined)?.instrument ?? "Trade setup")}</h3>
+        <TradeSetupSummary setup={item.trade_setup as StrategyTradeSetup} />
+      </article>)}</div>
+    </section> : null}
 
     <section className="section-stack"><h2>Strategy proposals</h2><p className="muted">Review the family, rules, evidence, and breakdown. You may Accept, Edit after approval, or Reject; Similarity screening runs before a permanent version is created. The preliminary unseen holdout screen is evidence only and never replaces formal validation.</p>{drafts.isPending ? <p>Loading strategy research…</p> : drafts.data?.length ? <div className="grid">{drafts.data.map(item => {
       const proposed = (item.proposed_specification as Record<string, unknown> | null) ?? (item.specification as Record<string, unknown> | null);

@@ -28,6 +28,10 @@ celery_app.conf.update(
         "apps.worker.app.tasks.execution",
     ),
     beat_schedule={
+        "top-pair-strategy-recovery": {
+            "task": "apps.worker.app.tasks.strategies.resume_top_pair_research",
+            "schedule": 60.0,
+        },
         "per-account-autonomous-research": {
             "task": "apps.worker.app.tasks.research.schedule_research_cycles",
             "schedule": crontab(minute="*"),

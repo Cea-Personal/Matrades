@@ -18,6 +18,44 @@ from packages.shared.store import ResourceRecord, ResourceStore
 router = APIRouter(prefix="/automation", tags=["Automation"])
 
 
+@router.get("/equity-history")
+async def equity_history(
+    account_id: UUID,
+    actor: Annotated[Actor, Depends(current_actor)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Expose recorded broker equity for one owned account, without polling the broker."""
+    account = await ResourceStore(db).get("account", account_id, actor.owner_id)
+    if account is None or account.state == "DELETED":
+        raise HTTPException(status_code=404, detail="account not found")
+    snapshots = list(
+        (
+            await db.scalars(
+                select(ResourceRecord)
+                .where(
+                    ResourceRecord.kind == "broker_snapshot",
+                    ResourceRecord.owner_id == actor.owner_id,
+                    ResourceRecord.data["account_id"].as_string() == str(account_id),
+                    ResourceRecord.state != "DELETED",
+                )
+                .order_by(ResourceRecord.created_at.desc())
+                .limit(120)
+            )
+        ).all()
+    )
+    return {
+        "account_id": str(account_id),
+        "currency": account.data.get("currency"),
+        "points": [
+            {
+                "id": str(item.id),
+                **{key: item.data.get(key) for key in ("observed_at", "equity", "balance")},
+            }
+            for item in reversed(snapshots)
+        ],
+    }
+
+
 @router.get("/trade-plans")
 async def list_trade_plans(
     actor: Annotated[Actor, Depends(current_actor)],
@@ -280,9 +318,7 @@ async def set_account_kill_switch(
     if previous is not None and previous.active and not active:
         await current_broker_snapshot(db, actor.owner_id, account_id)
     data = update_kill_switch(
-        KillSwitchState(
-            scope="ACCOUNT", account_id=account_id, active=active, reason=reason
-        ),
+        KillSwitchState(scope="ACCOUNT", account_id=account_id, active=active, reason=reason),
         previous=previous,
         step_up_verified=True,
         health_verified=health_verified,

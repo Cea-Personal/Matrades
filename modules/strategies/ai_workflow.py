@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -65,6 +66,31 @@ STRATEGY_SCHEMA: dict[str, Any] = {
         "sessions": {"type": "array", "items": {"type": "string"}},
         "event_rules": {"type": "array", "items": {"type": "string"}},
         "risk_per_trade": {"type": "string"},
+        "trade_rules": {
+            "type": "object",
+            "properties": {
+                "direction": {"type": "string", "enum": ["LONG", "SHORT"]},
+                "entry_method": {"type": "string", "enum": ["NEXT_BAR_OPEN"]},
+                "stop_volatility_multiple": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 10,
+                },
+                "take_profit_r_multiples": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 5,
+                    "items": {"type": "number", "exclusiveMinimum": 0},
+                },
+            },
+            "required": [
+                "direction",
+                "entry_method",
+                "stop_volatility_multiple",
+                "take_profit_r_multiples",
+            ],
+            "additionalProperties": False,
+        },
         "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
     },
     "required": [
@@ -85,6 +111,7 @@ STRATEGY_SCHEMA: dict[str, Any] = {
         "sessions",
         "event_rules",
         "risk_per_trade",
+        "trade_rules",
         "parameters",
     ],
     "additionalProperties": False,
@@ -194,6 +221,13 @@ class StrategyGenerationWorkflow:
                     "supported_operators": sorted(SUPPORTED_OPERATORS),
                     "human_approval_required": True,
                     "do_not_select_winner": True,
+                    "price_protection": (
+                        "Provide trade_rules for each hypothesis: LONG or SHORT, NEXT_BAR_OPEN, "
+                        "stop distance as a multiple of the mean high-low range of the last "
+                        "five bars, and increasing take-profit reward/risk multiples. "
+                        "Targets close equal fractions. These rules govern simulated price "
+                        "protection; stop_loss and take_profit describe the rationale conditions."
+                    ),
                 },
             },
             STRATEGY_GENERATION_SCHEMA,
@@ -224,6 +258,8 @@ class StrategyGenerationWorkflow:
             )
             if specification.instruments != [instrument]:
                 raise ValueError("strategy hypothesis must use only the approved instrument")
+            if specification.trade_rules is None:
+                raise ValueError("strategy hypothesis requires explicit price protection rules")
             conditions = [
                 *specification.entry,
                 *specification.confirmations,
@@ -238,6 +274,15 @@ class StrategyGenerationWorkflow:
                 for item in conditions
             ):
                 raise ValueError("strategy hypothesis uses an unsupported evaluator rule")
+            for condition in conditions:
+                if str(condition.value) in SUPPORTED_FEATURES:
+                    continue
+                try:
+                    finite = Decimal(str(condition.value)).is_finite()
+                except InvalidOperation:
+                    finite = False
+                if not finite:
+                    raise ValueError("strategy rule must compare a feature or finite number")
             hypotheses.append(
                 StrategyHypothesis(
                     hypothesis_id=identifier,

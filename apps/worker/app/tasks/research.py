@@ -14,6 +14,7 @@ from adapters.market_data.mt5_research import Mt5ResearchDataProvider
 from adapters.market_data.research import LiveResearchDataProvider
 from adapters.news.forex_factory import DEFAULT_FOREX_FACTORY_FEED, fetch_forex_factory_events
 from apps.worker.app.celery_app import celery_app
+from apps.worker.app.tasks.strategies import queue_top_pair_strategies
 from modules.agents.rpc import OwnerScopedAgentGateway, RedisAgentGateway
 from modules.connections.models import ConnectionProvider, MarketDataCapability, ProviderBinding
 from modules.connections.resolution import find_connection, resolve_connection
@@ -274,6 +275,9 @@ async def _execute_research_cycle(run_id: UUID) -> dict:
                         "research_run_id": str(typed_run.id),
                         "account_id": str(typed_run.account_id),
                         "lane": lane_result.lane.model_dump(mode="json"),
+                        "connection_binding_id": (
+                            str(lane_result.binding_id) if lane_result.binding_id else None
+                        ),
                         "candidate": candidate.model_dump(mode="json"),
                         "ranked_candidates": [
                             item.model_dump(mode="json") for item in lane_result.ranked_candidates
@@ -373,10 +377,14 @@ def run_research_cycle(run_id: str) -> dict:
     """Run provider discovery and agent review for an already-persisted run."""
     parsed_id = UUID(run_id)
     try:
-        return asyncio.run(_execute_research_cycle(parsed_id))
+        result = asyncio.run(_execute_research_cycle(parsed_id))
     except Exception as exc:
         asyncio.run(_mark_failed(parsed_id, exc))
         raise
+    # Market evidence is committed before downstream jobs are dispatched.
+    # The periodic dispatcher also recovers a broker outage at this boundary.
+    queue_top_pair_strategies.delay(run_id)
+    return result
 
 
 async def _mark_failed(run_id: UUID, error: Exception) -> None:

@@ -1,0 +1,4 @@
+# Matrades uses the Codex-native orchestrator and specialist subagents.
+[agents]
+enabled = true
+max_concurrent_threads_per_session = 8

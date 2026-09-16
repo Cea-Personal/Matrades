@@ -10,13 +10,18 @@ from typing import Annotated
 from uuid import UUID
 from xml.etree import ElementTree
 
+import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from adapters.blob_store.local import LocalBlobStore
+from adapters.reranking.cohere import DEFAULT_MODEL as COHERE_MODEL
+from adapters.reranking.cohere import cohere_rerank
 from apps.api.app.dependencies import current_actor, get_db, require_roles, require_step_up
+from modules.connections.models import ConnectionProvider
+from modules.connections.resolution import resolve_connection
 from modules.identity.authorization import Actor, Role
 from modules.knowledge.assistant import KnowledgeAssistant, KnowledgeQuestion
 from modules.knowledge.ingestion import build_source_data
@@ -27,9 +32,8 @@ from modules.knowledge.openai_embeddings import (
     embed_texts_for_owner,
     openai_embeddings,
 )
+from modules.knowledge.reranking import RerankingConfigurationInput, rerank_for_owner
 from modules.knowledge.youtube_ingestion import ingest_youtube_discovery
-from modules.connections.models import ConnectionProvider
-from modules.connections.resolution import resolve_connection
 from modules.research.scheduling import default_schedule, next_run_at, normalize_schedule
 from modules.security.platform import validate_upload
 from packages.shared.config import get_settings
@@ -57,7 +61,7 @@ class SourceInput(BaseModel):
 
 
 class SearchInput(BaseModel):
-    query: str = Field(min_length=1)
+    query: str = Field(min_length=1, max_length=4000)
     category: str | None = None
     tags: list[str] = Field(default_factory=list)
     source_date_from: str | None = None
@@ -255,9 +259,7 @@ async def reprocess_source(
     item = await store.get("knowledge_source", source_id, actor.owner_id)
     if item is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "knowledge source not found")
-    data = await embed_source_data(
-        db, actor.owner_id, _document_data(payload, item.version + 1)
-    )
+    data = await embed_source_data(db, actor.owner_id, _document_data(payload, item.version + 1))
     updated = await store.update(
         item,
         data,
@@ -383,7 +385,7 @@ async def search(
                 }
             )
     hits.sort(key=lambda hit: (-hit["score"], hit["source_name"], hit["segment_ordinal"]))
-    hits = hits[: payload.limit]
+    hits, reranking = await rerank_for_owner(db, actor.owner_id, payload.query, hits, payload.limit)
     audit = await ResourceStore(db).audit(
         actor.owner_id,
         actor.actor_id,
@@ -393,6 +395,7 @@ async def search(
         {
             "query_hash": hashlib.sha256(payload.query.encode()).hexdigest(),
             "result_segment_ids": [hit["segment_id"] for hit in hits],
+            "reranking": reranking,
         },
     )
     return {
@@ -400,6 +403,7 @@ async def search(
         "may_replace_facts": False,
         "retrieval_audit_id": str(audit.id),
         "citations": hits,
+        "reranking": reranking,
     }
 
 
@@ -444,11 +448,100 @@ async def assistant(
             owner_id=actor.owner_id, question=payload.question, active_trade=active_trade
         ),
         retrieval_hits,
+        degraded=result["reranking"]["status"] == "DEGRADED",
     )
     return answer.model_dump(mode="json") | {
         "authority": result["authority"],
         "retrieval_audit_id": result["retrieval_audit_id"],
+        "reranking": result["reranking"],
     }
+
+
+@router.get("/reranking-configuration")
+async def get_reranking_configuration(
+    actor: Annotated[Actor, Depends(current_actor)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    records = await ResourceStore(db).list("knowledge_reranking_configuration", actor.owner_id)
+    if not records:
+        return {
+            "configured": False,
+            "provider": "COHERE",
+            "connection_id": None,
+            "model": COHERE_MODEL,
+            "candidate_limit": 50,
+            "verified_at": None,
+        }
+    return {"configured": True, **records[0].data}
+
+
+@router.put("/reranking-configuration")
+async def save_reranking_configuration(
+    payload: RerankingConfigurationInput,
+    actor: Annotated[Actor, Depends(require_roles(Role.OWNER, Role.OPERATOR))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    try:
+        connection = await resolve_connection(db, actor.owner_id, payload.connection_id)
+        if connection.profile.provider != ConnectionProvider.COHERE or not connection.secret:
+            raise ValueError("invalid reranking connection")
+    except (LookupError, RuntimeError, ValueError) as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Select an active Cohere connection with an encrypted API key belonging to this owner.",
+        ) from exc
+    try:
+        await cohere_rerank(
+            connection.secret,
+            "What is knowledge retrieval?",
+            ["Knowledge retrieval finds relevant evidence for a question."],
+            model=payload.model,
+            top_n=1,
+        )
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Cohere verification failed. Check the API key, model access and availability.",
+        ) from exc
+    store = ResourceStore(db)
+    records = await store.list("knowledge_reranking_configuration", actor.owner_id)
+    data = {
+        **payload.model_dump(mode="json"),
+        "provider": "COHERE",
+        "verified_at": datetime.now(UTC).isoformat(),
+    }
+    if records:
+        record = await store.update(
+            records[0],
+            data,
+            actor_id=actor.actor_id,
+            event_type="knowledge_reranking.configuration_replaced",
+        )
+    else:
+        record = await store.create(
+            "knowledge_reranking_configuration",
+            actor.owner_id,
+            data,
+            actor_id=actor.actor_id,
+            event_type="knowledge_reranking.configuration_saved",
+        )
+    return {"configured": True, **record.data}
+
+
+@router.delete("/reranking-configuration")
+async def disable_reranking(
+    actor: Annotated[Actor, Depends(require_roles(Role.OWNER, Role.OPERATOR))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    store = ResourceStore(db)
+    for record in await store.list("knowledge_reranking_configuration", actor.owner_id):
+        await store.update(
+            record,
+            state="DELETED",
+            actor_id=actor.actor_id,
+            event_type="knowledge_reranking.disabled",
+        )
+    return await get_reranking_configuration(actor, db)
 
 
 @router.post("/youtube/scrape")
@@ -610,9 +703,7 @@ async def get_embedding_configuration(
     actor: Annotated[Actor, Depends(current_actor)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    records = await ResourceStore(db).list(
-        "knowledge_embedding_configuration", actor.owner_id
-    )
+    records = await ResourceStore(db).list("knowledge_embedding_configuration", actor.owner_id)
     if not records:
         return {
             "configured": False,
@@ -702,9 +793,7 @@ async def _activate_embedding_configuration(
     configuration = await _verify_and_reindex_embedding_configuration(payload, actor, db)
     store = ResourceStore(db)
     records = await store.list("knowledge_embedding_configuration", actor.owner_id)
-    current_version = (
-        int(records[0].data.get("configuration_version", 0)) if records else 0
-    )
+    current_version = int(records[0].data.get("configuration_version", 0)) if records else 0
     configuration = {
         **configuration,
         "configuration_version": current_version + 1,
@@ -808,9 +897,7 @@ async def health(
     embedding_configurations = await ResourceStore(db).list(
         "knowledge_embedding_configuration", actor.owner_id
     )
-    embedding_configuration = (
-        embedding_configurations[0].data if embedding_configurations else None
-    )
+    embedding_configuration = embedding_configurations[0].data if embedding_configurations else None
     return {
         "state": "HEALTHY",
         "authoritative": False,

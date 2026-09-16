@@ -9,6 +9,7 @@ from pydantic import AwareDatetime, BaseModel, Field
 
 from modules.backtesting.ledger import TradeResult, metrics
 from modules.backtesting.policy_simulation import simulate
+from modules.backtesting.protection import simulate_protected_trades
 from modules.backtesting.stress import monte_carlo
 from modules.backtesting.validation import walk_forward
 from packages.strategy_sdk.schema import Condition, StrategySpecification
@@ -28,6 +29,7 @@ class BacktestConfiguration(BaseModel):
     spread: Decimal = Field(default=Decimal("0"), ge=0)
     commission: Decimal = Field(default=Decimal("0"), ge=0)
     slippage: Decimal = Field(default=Decimal("0"), ge=0)
+    tick_size: Decimal | None = Field(default=None, gt=0)
     max_daily_loss: Decimal = Field(default=Decimal("1000000"), gt=0)
     max_total_loss: Decimal = Field(default=Decimal("1000000"), gt=0)
 
@@ -83,7 +85,8 @@ class PointInTimeBacktester:
         entry_price: Decimal | None = None
         entry_index: int | None = None
         costs_paid = Decimal("0")
-        for index in range(1, len(candles) - 1):
+        legacy_indices = range(1, len(candles) - 1) if strategy.trade_rules is None else ()
+        for index in legacy_indices:
             candle = candles[index]
             window = [item.close for item in candles[max(0, index - 4) : index + 1]]
             mean = sum(window, Decimal("0")) / Decimal(len(window))
@@ -143,6 +146,11 @@ class PointInTimeBacktester:
             )
             costs_paid += round_trip_cost
 
+        if strategy.trade_rules is not None:
+            trades, attribution, costs_paid = simulate_protected_trades(
+                strategy, candles, configuration
+            )
+
         returns = [float(item.pnl / item.risk) for item in trades if item.risk > 0]
         trade_metrics = metrics(trades)
         try:
@@ -191,5 +199,6 @@ class PointInTimeBacktester:
                 "next_bar_execution": True,
                 "costs_applied": True,
                 "evaluator_version": strategy.evaluator_version,
+                "price_protection_simulated": strategy.trade_rules is not None,
             },
         )

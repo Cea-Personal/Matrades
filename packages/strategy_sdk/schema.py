@@ -15,6 +15,24 @@ class Condition(BaseModel):
     value: Decimal | str
 
 
+class TradeRules(BaseModel):
+    """Price protection evaluated identically in research and setup previews."""
+
+    direction: Literal["LONG", "SHORT"]
+    entry_method: Literal["NEXT_BAR_OPEN"] = "NEXT_BAR_OPEN"
+    stop_volatility_multiple: Decimal = Field(gt=0, le=10)
+    take_profit_r_multiples: list[Decimal] = Field(min_length=1, max_length=5)
+
+    @model_validator(mode="after")
+    def ordered_targets(self):
+        targets = self.take_profit_r_multiples
+        if any(not item.is_finite() or item <= 0 for item in targets):
+            raise ValueError("take-profit multiples must be finite and positive")
+        if targets != sorted(set(targets)):
+            raise ValueError("take-profit multiples must be strictly increasing")
+        return self
+
+
 class StrategySpecification(BaseModel):
     name: str
     origin: StrategyOrigin
@@ -46,6 +64,7 @@ class StrategySpecification(BaseModel):
     venue_instrument_id: str | None = None
     specification_version_id: str | None = None
     futures_contract_id: str | None = None
+    trade_rules: TradeRules | None = None
 
     @model_validator(mode="after")
     def bounds(self):

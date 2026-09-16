@@ -638,6 +638,8 @@ async def connection_providers(_: Annotated[Actor, Depends(current_actor)]):
                 ConnectionProvider.TWELVE_DATA,
                 ConnectionProvider.FRED,
                 ConnectionProvider.SERPAPI,
+                ConnectionProvider.OPENAI,
+                ConnectionProvider.COHERE,
                 ConnectionProvider.MT5_BRIDGE,
             },
         }

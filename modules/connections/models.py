@@ -24,6 +24,7 @@ class ConnectionProvider(StrEnum):
     FOREX_FACTORY = "FOREX_FACTORY"
     SERPAPI = "SERPAPI"
     OPENAI = "OPENAI"
+    COHERE = "COHERE"
     MT5_BRIDGE = "MT5_BRIDGE"
 
 
@@ -39,6 +40,7 @@ PROVIDER_LABELS = {
     ConnectionProvider.FOREX_FACTORY: "Forex Factory calendar scraper",
     ConnectionProvider.SERPAPI: "SerpApi + YouTube transcript ingestion",
     ConnectionProvider.OPENAI: "OpenAI",
+    ConnectionProvider.COHERE: "Cohere Rerank",
     ConnectionProvider.MT5_BRIDGE: "MT5 Bridge",
 }
 
@@ -80,6 +82,7 @@ class ConnectionProfile(BaseModel):
                 ConnectionProvider.FRED,
                 ConnectionProvider.SERPAPI,
                 ConnectionProvider.OPENAI,
+                ConnectionProvider.COHERE,
                 ConnectionProvider.MT5_BRIDGE,
             }
             and self.credential_id is None

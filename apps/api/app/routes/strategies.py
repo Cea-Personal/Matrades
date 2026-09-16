@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
@@ -15,16 +15,15 @@ from apps.api.app.dependencies import current_actor, get_db, require_roles
 from apps.worker.app.tasks.strategies import generate_strategy_draft, run_strategy_backtest
 from modules.backtesting.promotion import typed_promotable
 from modules.connections.models import ConnectionProvider
-from modules.connections.resolution import find_connection, resolve_connection
+from modules.connections.resolution import resolve_connection
 from modules.identity.authorization import Actor, Role
 from modules.knowledge.ingestion import build_source_data
 from modules.knowledge.openai_embeddings import embed_source_data
 from modules.strategies.compiler import compile_strategy
-from modules.strategies.evidence import resolve_approved_candidate
 from modules.strategies.fingerprints import fingerprint
 from modules.strategies.lifecycle import StrategyState, transition
+from modules.strategies.research_pipeline import resolve_strategy_basis
 from modules.strategies.similarity import compare
-from packages.shared.config import settings
 from packages.shared.store import ResourceStore
 from packages.strategy_sdk.schema import StrategySpecification
 from packages.strategy_sdk.taxonomy import StrategyOrigin
@@ -83,56 +82,23 @@ def _dispatch_backtest(run_id: UUID) -> None:
 
 
 async def _resolve_strategy_basis(db: AsyncSession, owner_id: UUID) -> dict[str, str]:
-    store = ResourceStore(db)
-    selections = [
-        item
-        for item in await store.list("market_selection", owner_id)
-        if item.state == "ACTIVE_MARKET_ANALYSIS"
-    ]
-    if not selections:
-        raise ValueError("a fresh typed autonomous market research lane is required")
-    selection = selections[0]
-    research_run = await store.get(
-        "research_run", UUID(str(selection.data["research_run_id"])), owner_id
-    )
-    if research_run is None:
-        raise ValueError("the typed market research run is unavailable")
-    candidate = resolve_approved_candidate(
-        selection.data,
-        research_run.data,
-        now=datetime.now(UTC),
-        max_age=timedelta(hours=settings.strategy_research_max_market_age_hours),
-    )
-    provider = (
-        ConnectionProvider.COINBASE
-        if candidate.category == "CRYPTO"
-        else ConnectionProvider.TWELVE_DATA
-    )
-    connection = await find_connection(db, owner_id, provider)
-    if connection is None:
-        raise ValueError(f"configure an active {provider.value} historical data connection first")
-    account = await store.get("account", UUID(candidate.account_id), owner_id)
-    if account is None or account.state == "DELETED":
-        raise ValueError("the market research account is unavailable")
-    return {
-        "market_selection_id": str(selection.id),
-        "market_research_run_id": str(research_run.id),
-        "account_id": candidate.account_id,
-        "instrument": candidate.instrument,
-        "category": candidate.category,
-        "market_observed_at": candidate.fingerprint.observed_at.isoformat(),
-        "historical_connection_id": str(connection.id),
-        "historical_provider": provider.value,
-    }
+    return await resolve_strategy_basis(db, owner_id)
 
 
 @router.get("")
 async def list_strategies(
     actor: Annotated[Actor, Depends(current_actor)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    market_research_run_id: UUID | None = None,
 ):
     records = await ResourceStore(db).list("strategy_draft", actor.owner_id)
-    return [item.public() for item in records]
+    return [
+        item.public()
+        for item in records
+        if market_research_run_id is None
+        or item.data.get("research_basis", {}).get("market_research_run_id")
+        == str(market_research_run_id)
+    ]
 
 
 @router.get("/versions")

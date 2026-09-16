@@ -102,6 +102,7 @@ class AgentRuntimeRouter:
                         client.invoke(
                             {
                                 "input": payload,
+                                "agent_role": agent.logical_id,
                                 "model": actual.model,
                                 "system": prompts.system,
                                 "user": prompts.user,

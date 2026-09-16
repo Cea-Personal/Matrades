@@ -31,6 +31,12 @@ def strategy(name: str) -> dict:
         "sessions": ["LONDON"],
         "event_rules": ["block_high_impact_events"],
         "risk_per_trade": "0.5",
+        "trade_rules": {
+            "direction": "LONG",
+            "entry_method": "NEXT_BAR_OPEN",
+            "stop_volatility_multiple": "1.5",
+            "take_profit_r_multiples": ["1", "2"],
+        },
         "parameters": {},
     }
 

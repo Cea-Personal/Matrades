@@ -22,6 +22,7 @@ def test_visible_connection_catalog_covers_data_sources_and_mt5() -> None:
         ConnectionProvider.FOREX_FACTORY,
         ConnectionProvider.SERPAPI,
         ConnectionProvider.OPENAI,
+        ConnectionProvider.COHERE,
         ConnectionProvider.MT5_BRIDGE,
     }
 

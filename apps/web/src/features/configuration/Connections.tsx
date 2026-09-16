@@ -18,6 +18,7 @@ const providers = [
   { id: "FOREX_FACTORY", label: "Forex Factory", credential: false, purpose: "news" },
   { id: "SERPAPI", label: "SerpApi + YouTube transcript ingestion", credential: true, purpose: "knowledge" },
   { id: "OPENAI", label: "OpenAI", credential: true, purpose: "knowledge_embedding" },
+  { id: "COHERE", label: "Cohere Rerank", credential: true, purpose: "knowledge_reranking" },
   { id: "MT5_BRIDGE", label: "MT5 Bridge", credential: true, purpose: "broker" },
 ] as const;
 
@@ -138,6 +139,7 @@ export function Connections() {
       <form className="card form-stack" onSubmit={submitConnection}><h2>2. Add connection</h2><label>Data source<select value={connection.provider} onChange={event => setConnection({ ...connection, provider: event.target.value as Provider, credential_id: "" })}>{providers.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label><label>Connection name<input required value={connection.name} onChange={event => setConnection({ ...connection, name: event.target.value })} /></label>
         {selectedProvider.credential ? <label>Encrypted credential<select required value={connection.credential_id} onChange={event => setConnection({ ...connection, credential_id: event.target.value })}><option value="">Select credential</option>{credentials.data?.filter(item => item.provider === connection.provider).map(item => <option key={item.id} value={item.id}>{String(item.name)} · {String(item.masked_suffix)}</option>)}</select></label> : <p className="muted">This source uses public read endpoints and needs no secret.</p>}
         {connection.provider === "TWELVE_DATA" ? <p className="muted">Connection testing validates the API key only and does not require a pair. Autonomous market research discovers and approves the instrument; only that selected pair is then requested from Twelve Data. Discovery universes are managed by the server configuration.</p> : null}
+        {connection.provider === "COHERE" ? <p className="muted">Testing makes a small, billable rerank request with synthetic text. After saving this connection, enable it under Knowledge → Cohere knowledge reranking. Queries and authorized candidate chunks are sent to Cohere only when reranking is enabled.</p> : null}
         {connection.provider === "COINBASE" ? <label>Crypto universe<input value={connection.crypto_universe} onChange={event => setConnection({ ...connection, crypto_universe: event.target.value })} /></label> : null}
         {["CALENDAR", "NEWS"].includes(connection.provider) ? <label>Provider base URL<input required type="url" placeholder="https://provider.example" value={connection.base_url} onChange={event => setConnection({ ...connection, base_url: event.target.value })} /></label> : null}
         {connection.provider === "FOREX_FACTORY" ? <label>Optional feed URL<input type="url" placeholder="Uses the maintained Forex Factory calendar feed by default" value={connection.feed_url} onChange={event => setConnection({ ...connection, feed_url: event.target.value })} /></label> : null}

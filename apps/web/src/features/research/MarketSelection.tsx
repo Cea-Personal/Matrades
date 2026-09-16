@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api, type Resource } from "@/lib/api";
+import { TopPairStrategies } from "@/features/strategies/TopPairStrategies";
 
 type Fingerprint = {
   regime: string;
@@ -67,7 +68,9 @@ export function MarketSelection() {
   });
   const editableSchedule = scheduleDraft?.account_id === selectedAccountId ? scheduleDraft : accountSchedule.data;
 
-  const typedLatest = typedRuns.data?.find(item => String(item.account_id) === selectedAccountId);
+  const typedLatest = typedRuns.data
+    ?.filter(item => String(item.account_id) === selectedAccountId)
+    .sort((left, right) => Date.parse(String(right.created_at)) - Date.parse(String(left.created_at)))[0];
   const latest = typedLatest;
   const typedResults = (typedLatest?.lane_results as TypedLaneResult[] | undefined) ?? [];
   const candidates = (typedLatest?.ranked_candidates as Candidate[] | undefined) ?? [];
@@ -147,6 +150,7 @@ export function MarketSelection() {
         <h3>Evidence</h3><ul>{[...item.evidence, ...item.agent_evidence].map((value, index) => <li key={`${index}-${value}`}>{value}</li>)}</ul>
 
       </article>)}</div>
+      <TopPairStrategies runId={latest.id} links={(latest.strategy_research as { instrument?: string; state: string; reason?: string }[] | undefined) ?? []} />
       <div className="actions"><span className="muted">Candidates are selected by the scheduled research cycle and passed to strategy research automatically.</span><button className="btn" disabled={runTyped.isPending} onClick={() => runTyped.mutate()}>Run typed matrix again</button></div>
     </> : <p className="empty">No persisted research run exists for {selectedAccountName}. Its scheduler will run automatically, or you can run it now.</p>}
 

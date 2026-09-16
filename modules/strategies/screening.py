@@ -45,8 +45,10 @@ def screen_hypotheses(
         reasons: list[str] = []
         if backtest.trade_count == 0:
             reasons.append("zero trades")
+        if net_profit <= 0:
+            reasons.append("non-positive net profit after costs")
         eligible = not reasons
-        score = Decimal(passed_gates * 100) + Decimal(backtest.trade_count * 10) + net_profit
+        score = Decimal(backtest.metrics["r"])
         results.append(
             HypothesisScreenResult(
                 hypothesis_id=hypothesis.hypothesis_id,
@@ -61,7 +63,9 @@ def screen_hypotheses(
         )
     eligible_results = [item for item in results if item.eligible]
     selected = (
-        sorted(eligible_results, key=lambda item: (-item.score, item.hypothesis_id))[0]
+        sorted(
+            eligible_results, key=lambda item: (-item.passed_gates, -item.score, item.hypothesis_id)
+        )[0]
         if eligible_results
         else None
     )

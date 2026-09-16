@@ -30,6 +30,7 @@ class ApprovedCandidate(BaseModel):
     venue_instrument_id: str | None = None
     specification_version_id: str | None = None
     quantity_unit: QuantityUnit | None = None
+    futures_contract_id: str | None = None
 
 
 class EvidenceReference(BaseModel):
@@ -60,6 +61,7 @@ class StrategyEvidencePack(BaseModel):
     references: list[EvidenceReference]
     asset_class: AssetClass | None = None
     instrument_type: InstrumentType | None = None
+    quantity_unit: QuantityUnit | None = None
     venue_instrument_id: str | None = None
     futures_contract_id: str | None = None
     specification_version_id: str | None = None
@@ -79,7 +81,11 @@ def resolve_approved_candidate(
         listing = dict(typed.get("listing", {}))
         fingerprint = dict(typed.get("fingerprint", {}))
         observed_at = datetime.fromisoformat(str(fingerprint["observed_at"]))
-        if observed_at.tzinfo is None or now - observed_at > max_age:
+        if now.tzinfo is None or observed_at.tzinfo is None:
+            raise ValueError("freshness evaluation requires aware timestamps")
+        if observed_at > now + timedelta(minutes=5):
+            raise ValueError("typed market fingerprint is future-dated")
+        if now - observed_at > max_age:
             raise ValueError("typed market fingerprint is stale; rerun market research")
         category = {
             "FOREX": "FOREX",
@@ -120,6 +126,7 @@ def resolve_approved_candidate(
                 str(specification.get("id")) if specification.get("id") else None
             ),
             quantity_unit=specification.get("quantity_unit"),
+            futures_contract_id=listing.get("futures_contract_id"),
         )
     if selection.get("action") == "NO_TRADE" or not selection.get("selected"):
         raise ValueError("an approved market selection with at least one instrument is required")

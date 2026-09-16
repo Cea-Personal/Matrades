@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -13,9 +14,15 @@ class CodexAppServerClient:
 
     runtime_type = "CODEX_APP_SERVER"
 
-    def __init__(self, binary: str = "codex", cwd: Path | None = None) -> None:
+    def __init__(
+        self,
+        binary: str = "codex",
+        cwd: Path | None = None,
+        native_agents_dir: Path | None = None,
+    ) -> None:
         self.binary = binary
         self.cwd = cwd or Path.cwd()
+        self.native_agents_dir = native_agents_dir or self.cwd / ".codex" / "agents"
         self.process: asyncio.subprocess.Process | None = None
         self._request_id = 0
         self._lock = asyncio.Lock()
@@ -68,11 +75,16 @@ class CodexAppServerClient:
         async with self._lock:
             await self.start()
             model = str(payload.get("model", ""))
+            logical_id = str(payload.get("agent_role", "")).strip()
             thread = await self._request(
                 "thread/start",
                 {
                     "model": model,
                     "cwd": str(self.cwd),
+                    # The application owns the top-level orchestration contract. The
+                    # requested logical role is then delegated through Codex's native
+                    # spawnAgent tool, which resolves its project-scoped TOML role.
+                    "developerInstructions": self._orchestrator_instructions(),
                     "approvalPolicy": "never",
                     # Codex App Server uses kebab-case sandbox policy values.
                     # Keep this read-only: research agents must not write files
@@ -83,7 +95,18 @@ class CodexAppServerClient:
                 },
             )
             thread_id = thread["thread"]["id"]
+            delegation = ""
+            if logical_id and logical_id != "orchestrator":
+                delegation = (
+                    "NATIVE SUBAGENT DELEGATION:\n"
+                    f"Delegate this request to exactly one Codex-native custom agent named "
+                    f"`{logical_id}` using `spawnAgent`. Include the complete structured input, "
+                    "the system and user contracts, and the output schema in the child prompt. "
+                    "Wait for the child to finish, then return the child's JSON object unchanged. "
+                    "Do not answer the specialist request yourself.\n\n"
+                )
             prompt = (
+                delegation +
                 f"SYSTEM CONTRACT:\n{payload.get('system', '')}\n\n"
                 f"USER CONTRACT:\n{payload.get('user', '')}\n\n"
                 "Return only one JSON object matching the requested output schema. "
@@ -145,6 +168,26 @@ class CodexAppServerClient:
             if not isinstance(result, dict):
                 raise ValueError("Codex response must be a JSON object")
             return result
+
+    def _orchestrator_instructions(self) -> str:
+        """Load the project-scoped native orchestrator role for the parent thread."""
+        path = self.native_agents_dir / "orchestrator.toml"
+        try:
+            with path.open("rb") as stream:
+                config = tomllib.load(stream)
+            instructions = config.get("developer_instructions")
+            if isinstance(instructions, str) and instructions.strip():
+                return instructions
+        except (OSError, tomllib.TOMLDecodeError):
+            # Keep the runtime usable when an older deployment has not mounted the
+            # project configuration yet; native child delegation will fail visibly
+            # rather than silently changing the logical role.
+            pass
+        return (
+            "Act as the Matrades orchestrator. Use Codex-native spawnAgent for every requested "
+            "specialist role, wait for the child result, preserve the requested JSON schema, "
+            "and never perform broker, risk, policy, authorization, or file mutations."
+        )
 
     async def _request(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         self._request_id += 1
