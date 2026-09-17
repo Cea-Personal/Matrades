@@ -21,11 +21,15 @@ RUN dpkg --add-architecture i386 && \
     curl -fsSL https://dl.winehq.org/wine-builds/winehq.key | gpg --dearmor -o /etc/apt/keyrings/winehq-archive.key && \
     echo 'deb [signed-by=/etc/apt/keyrings/winehq-archive.key] https://dl.winehq.org/wine-builds/debian bookworm main' > /etc/apt/sources.list.d/winehq.list && \
     apt-get update && \
-    apt-get install -y --install-recommends winehq-stable && \
+    apt-get install -y --install-recommends \
+        winehq-stable \
+        wine-stable-amd64 \
+        wine-stable-i386:i386 && \
     rm -rf /var/lib/apt/lists/*
 
 # Fail the image build early if Wine's loader is not actually available.
-RUN wine --version
+RUN wine --version && \
+    test -n "$(find /usr/lib -type f -name kernel32.dll -print -quit)"
 
 WORKDIR /app
 COPY . /app
