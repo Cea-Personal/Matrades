@@ -10,8 +10,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from traderx.identity.authorization import Actor, Role
-from traderx.integrations.model import Integration
 from traderx.integrations.llm_profiles import model_prompt_profile
+from traderx.integrations.model import Integration
 from traderx.jobs.model import BackgroundJob
 from traderx.market_data.model import Instrument
 from traderx.market_research.model import (

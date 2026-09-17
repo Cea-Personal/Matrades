@@ -3,13 +3,13 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { ResearchBacktest, type BacktestEvidence } from "./ResearchBacktest";
-import { AiStrategyResearch, type AiStrategyResearchReport } from "./AiStrategyResearch";
+import { AiStrategyResearch, type AiStrategyResearchReport, type LiteLlmModelOption } from "./AiStrategyResearch";
 import { StrategyVersions, type StrategySummary, type StrategyVersionSummary } from "./StrategyVersions";
 import { ValidationReport, type ValidationEvidence } from "./ValidationReport";
 
 type ActiveMarket = { instrument_id: string; symbol: string; category: string };
 type ApiProblem = { detail?: string; title?: string };
-type LiteLlmModel = { id: string; alias: string };
+type LiteLlmModel = { id: string; alias: string; provider_model: string };
 
 function problemMessage(result: ApiProblem): string {
   return result.detail ?? result.title ?? "TraderX could not complete the strategy operation.";
@@ -28,7 +28,7 @@ export function StrategiesWorkspace() {
   const [backtestJobId, setBacktestJobId] = useState<string>();
   const [validation, setValidation] = useState<ValidationEvidence>();
   const [aiResearch, setAiResearch] = useState<AiStrategyResearchReport>();
-  const [modelAliases, setModelAliases] = useState<string[]>([]);
+  const [modelAliases, setModelAliases] = useState<LiteLlmModelOption[]>([]);
   const [fullModelAlias, setFullModelAlias] = useState("");
   const [manualModelAlias, setManualModelAlias] = useState("");
   const [busy, setBusy] = useState(false);
@@ -49,10 +49,10 @@ export function StrategiesWorkspace() {
       setStrategies(loaded);
       if (aliasesResponse.ok) {
         const aliases = (await result<{ items?: LiteLlmModel[] }>(aliasesResponse)).items ?? [];
-        const values = aliases.map((item) => item.alias).sort();
+        const values = aliases.map((item) => ({ alias: item.alias, provider_model: item.provider_model || "Model ID unavailable" })).sort((left, right) => left.alias.localeCompare(right.alias));
         setModelAliases(values);
-        setFullModelAlias((current) => values.includes(current) ? current : (values[0] ?? ""));
-        setManualModelAlias((current) => values.includes(current) ? current : (values[0] ?? ""));
+        setFullModelAlias((current) => values.some((item) => item.alias === current) ? current : (values[0]?.alias ?? ""));
+        setManualModelAlias((current) => values.some((item) => item.alias === current) ? current : (values[0]?.alias ?? ""));
       }
       if (latestResearchResponse.ok) {
         const latest = await result<{ job: AiStrategyResearchReport["job"] | null; result: AiStrategyResearchReport["result"] | null }>(latestResearchResponse);

@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 
 type ActiveMarket = { instrument_id: string; symbol: string; category: string };
+export type LiteLlmModelOption = { alias: string; provider_model: string };
 
 export type AiStrategyResearchReport = {
   job: { id: string; state: string; progress: { message?: string }; error_code?: string };
@@ -55,7 +56,7 @@ export function AiStrategyResearch({
 }: {
   activeMarkets: ActiveMarket[];
   busy: boolean;
-  modelAliases: string[];
+  modelAliases: LiteLlmModelOption[];
   fullModelAlias: string;
   manualModelAlias: string;
   report?: AiStrategyResearchReport;
@@ -85,7 +86,7 @@ export function AiStrategyResearch({
       })}
     </div>
     <label htmlFor="full-ai-strategy-model-alias">Full AI strategy-research model alias<select id="full-ai-strategy-model-alias" onChange={(event) => onFullModelAliasChange(event.target.value)} value={fullModelAlias}>
-      {modelAliases.length ? modelAliases.map((alias) => <option key={alias} value={alias}>{alias}</option>) : <option value="">No configured LiteLLM aliases</option>}
+      {modelAliases.length ? modelAliases.map((model) => <option key={model.alias} value={model.alias}>{model.alias} · {model.provider_model}</option>) : <option value="">No configured LiteLLM aliases</option>}
     </select></label>
     <p className="field-hint">This alias is pinned to the individual strategy-research job. Select a different alias before either research path if desired.</p>
     {missing.length ? <p className="workspace-notice">Activate one eligible market for: {missing.join(", ")}, then return here.</p> : null}
@@ -102,7 +103,7 @@ export function AiStrategyResearch({
         {activeMarkets.map((market) => <option key={market.instrument_id} value={market.instrument_id}>{market.category} · {market.symbol}</option>)}
       </select></label>
       <label htmlFor="manual-ai-strategy-model-alias">Manual idea model alias<select id="manual-ai-strategy-model-alias" onChange={(event) => onManualModelAliasChange(event.target.value)} value={manualModelAlias}>
-        {modelAliases.length ? modelAliases.map((alias) => <option key={alias} value={alias}>{alias}</option>) : <option value="">No configured LiteLLM aliases</option>}
+        {modelAliases.length ? modelAliases.map((model) => <option key={model.alias} value={model.alias}>{model.alias} · {model.provider_model}</option>) : <option value="">No configured LiteLLM aliases</option>}
       </select></label>
       <p className="field-hint">This model alias is pinned only to this manual strategy-idea research job.</p>
       <label htmlFor="strategy-idea-description">Your strategy description<textarea id="strategy-idea-description" minLength={16} onChange={(event) => setIdeaDescription(event.target.value)} placeholder="Describe the market behavior, setup, timing, and conditions you want researched." required value={ideaDescription} /></label>

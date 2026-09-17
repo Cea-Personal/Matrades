@@ -4,20 +4,27 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-PROMPT_TEMPLATE_VERSION = "market-advisory-v1"
-OUTPUT_SCHEMA_VERSION = "market-advisory-v1"
+PROMPT_TEMPLATE_VERSION = "independent-market-advisory-v2"
+OUTPUT_SCHEMA_VERSION = "independent-market-advisory-v2"
 INFERENCE_POLICY_VERSION = "bounded-no-tools-v1"
 
 
 class MarketAdvisoryAnalysis(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    summary: str = Field(min_length=1, max_length=2000)
+    summary: str = Field(
+        min_length=1,
+        max_length=2000,
+        description="Independent market thesis grounded only in the supplied integration evidence.",
+    )
     # OpenAI-compatible strict JSON schemas require every property to be listed
     # in `required`.  The model must return empty arrays when no item applies.
     anomalies: list[str] = Field(max_length=20)
     cautions: list[str] = Field(max_length=20)
-    method_proposals: list[str] = Field(max_length=20)
+    method_proposals: list[str] = Field(
+        max_length=20,
+        description="Independent research hypotheses or follow-up checks; never trading instructions.",
+    )
 
 
 _PROHIBITED_EVIDENCE_KEYS = {

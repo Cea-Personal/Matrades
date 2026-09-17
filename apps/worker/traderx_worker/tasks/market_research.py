@@ -26,7 +26,9 @@ from traderx.integrations.providers.openai_responses import OpenAIResponsesAdapt
 from traderx.jobs.model import BackgroundJob, JobState
 from traderx.market_data.ingestion import ProviderBatch, persist_provider_observations
 from traderx.market_data.model import (
+    CalendarCoverage,
     DataSetManifest,
+    EconomicEvent,
     Instrument,
     InstrumentAlias,
     MarketObservation,
@@ -45,7 +47,6 @@ from traderx.market_data.source_evidence import (
 from traderx.market_research.coordinator import claim_category_run, record_category_outcome
 from traderx.market_research.llm_analysis import retry_advisory_analysis, run_advisory_analysis
 from traderx.market_research.model import (
-    CandidateAssessment,
     CoordinatedMarketResearchRun,
     MarketResearchRun,
 )
@@ -224,33 +225,37 @@ def run_coordinated_category(self: object, category_run_id: str) -> dict[str, st
                 existing_run=run,
                 source_selection=source_selection,
             )
-            if evaluated.state == "COMPLETED":
-                port = _analysis_port(database, evaluated)
-                if port is None:
-                    evaluated.llm_analysis_state = "UNAVAILABLE"
-                    notify_market_research_owners(
+            advisory_evidence = _independent_advisory_evidence(database, evaluated)
+            evaluated.source_manifest = {
+                **evaluated.source_manifest,
+                "independent_advisory_evidence": advisory_evidence,
+            }
+            port = _analysis_port(database, evaluated)
+            if port is None:
+                evaluated.llm_analysis_state = "UNAVAILABLE"
+                notify_market_research_owners(
+                    database,
+                    kind="LLM_UNAVAILABLE",
+                    subject_id=str(evaluated.id),
+                    payload={
+                        "category": evaluated.category,
+                        "failure_reason": "PINNED_MODEL_INTEGRATION_UNAVAILABLE",
+                        "retry_eligible": True,
+                        "authoritative": False,
+                    },
+                    created_at=utc_now(),
+                )
+            else:
+                try:
+                    run_advisory_analysis(
                         database,
-                        kind="LLM_UNAVAILABLE",
-                        subject_id=str(evaluated.id),
-                        payload={
-                            "category": evaluated.category,
-                            "failure_reason": "PINNED_MODEL_INTEGRATION_UNAVAILABLE",
-                            "retry_eligible": True,
-                            "authoritative": False,
-                        },
-                        created_at=utc_now(),
+                        evaluated,
+                        port,
+                        evidence=advisory_evidence,
+                        now=utc_now(),
                     )
-                else:
-                    try:
-                        run_advisory_analysis(
-                            database,
-                            evaluated,
-                            port,
-                            evidence=_advisory_evidence(database, evaluated),
-                            now=utc_now(),
-                        )
-                    finally:
-                        _close_port(port)
+                finally:
+                    _close_port(port)
             outcome = "BLOCKED" if evaluated.state == "BLOCKED" else "RECOMMENDED"
             record_category_outcome(
                 database,
@@ -342,7 +347,7 @@ def retry_pinned_analysis(self: object, category_run_id: str) -> dict[str, str]:
                     database,
                     run,
                     port,
-                    evidence=_advisory_evidence(database, run),
+                    evidence=_independent_advisory_evidence(database, run),
                     now=utc_now(),
                 )
                 status = attempt.state
@@ -900,32 +905,113 @@ def _credentials(database: Session, integration: Integration) -> dict[str, objec
     ).decrypt(encrypted)
 
 
-def _advisory_evidence(database: Session, run: MarketResearchRun) -> dict[str, object]:
-    assessments = list(
+def _independent_advisory_evidence(database: Session, run: MarketResearchRun) -> dict[str, object]:
+    """Build an LLM input from integrations, never deterministic candidate outputs."""
+
+    parent = database.get(CoordinatedMarketResearchRun, run.coordinated_run_id) if run.coordinated_run_id else None
+    instruments = list(
         database.scalars(
-            select(CandidateAssessment)
-            .where(CandidateAssessment.research_run_id == run.id)
-            .order_by(CandidateAssessment.rank, CandidateAssessment.id)
+            select(Instrument)
+            .where(Instrument.category == run.category, Instrument.status != "QUARANTINED")
+            .order_by(Instrument.symbol)
+            .limit(40)
         )
     )
-    parent = database.get(CoordinatedMarketResearchRun, run.coordinated_run_id) if run.coordinated_run_id else None
+    instrument_ids = [instrument.id for instrument in instruments]
+    observations = list(
+        database.scalars(
+            select(MarketObservation)
+            .where(MarketObservation.instrument_id.in_(instrument_ids))
+            .order_by(MarketObservation.observed_at.desc())
+            .limit(160)
+        )
+    ) if instrument_ids else []
+    observed: list[dict[str, object]] = []
+    seen: set[tuple[UUID, str, str]] = set()
+    for observation in observations:
+        identity = (observation.instrument_id, observation.provider, observation.capability)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        observed.append(
+            {
+                "instrument_id": str(observation.instrument_id),
+                "provider": observation.provider,
+                "provider_symbol": observation.provider_symbol,
+                "venue": observation.venue,
+                "capability": observation.capability,
+                "semantics": observation.semantics,
+                "source_role": observation.source_role,
+                "observed_at": observation.observed_at.isoformat(),
+                "received_at": observation.received_at.isoformat(),
+                "ohlcv": {
+                    "open": str(observation.open) if observation.open is not None else None,
+                    "high": str(observation.high) if observation.high is not None else None,
+                    "low": str(observation.low) if observation.low is not None else None,
+                    "close": str(observation.close) if observation.close is not None else None,
+                    "volume": str(observation.volume) if observation.volume is not None else None,
+                    "spread": str(observation.spread) if observation.spread is not None else None,
+                },
+                "measures": observation.measures,
+                "quality": observation.quality,
+                "complete": observation.complete,
+                "conflict_state": observation.conflict_state,
+            }
+        )
+    now = utc_now()
+    events = list(
+        database.scalars(
+            select(EconomicEvent)
+            .where(
+                EconomicEvent.status != "CANCELLED",
+                EconomicEvent.event_at >= now - timedelta(days=1),
+                EconomicEvent.event_at <= now + timedelta(days=14),
+            )
+            .order_by(EconomicEvent.event_at)
+            .limit(80)
+        )
+    )
     return {
+        "evidence_mode": "INDEPENDENT_INTEGRATION_SNAPSHOT",
         "category": run.category,
         "research_brief": parent.research_brief if parent and parent.research_brief else None,
-        "methodology_version": run.method_version,
-        "deterministic_result_hash": run.deterministic_result_hash,
-        "source_manifest": run.source_manifest,
-        "fallback_path": run.fallback_path,
-        "candidates": [
+        "integration_instruments": [
             {
-                "instrument_id": str(item.instrument_id),
-                "eligible": item.eligible,
-                "components": item.components,
-                "score": str(item.score) if item.score is not None else None,
-                "rank": item.rank,
-                "reason_codes": item.gate_evidence.get("reason_codes", []),
+                "instrument_id": str(instrument.id),
+                "symbol": instrument.symbol,
+                "display_name": instrument.display_name,
+                "trading_hours": instrument.trading_hours,
+                "contract_spec": instrument.contract_spec,
             }
-            for item in assessments
+            for instrument in instruments
+        ],
+        "integration_observations": observed,
+        "economic_calendar": [
+            {
+                "event_at": event.event_at.isoformat(),
+                "canonical_type": event.canonical_type,
+                "impact": event.impact,
+                "currency_or_region": event.currency_or_region,
+                "affected_categories": event.affected_categories,
+                "affected_instruments": event.affected_instruments,
+                "status": event.status,
+                "source_provider": event.source_provider,
+                "source_origin": event.source_origin,
+                "source_url": event.source_url,
+                "payload": event.payload,
+            }
+            for event in events
+            if not event.affected_categories or run.category in event.affected_categories
+        ],
+        "calendar_coverage": [
+            {
+                "source_provider": coverage.source_provider,
+                "status": coverage.status,
+                "covered_through": coverage.covered_through.isoformat() if coverage.covered_through else None,
+                "last_success_at": coverage.last_success_at.isoformat() if coverage.last_success_at else None,
+                "source_url": coverage.source_url,
+            }
+            for coverage in database.scalars(select(CalendarCoverage).order_by(CalendarCoverage.source_provider))
         ],
     }
 

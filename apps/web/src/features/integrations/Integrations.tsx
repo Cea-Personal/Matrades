@@ -67,7 +67,13 @@ type ExperimentalCalendarEvent = {
   official_url: string;
 };
 
-type LiteLlmModel = { id: string; alias: string };
+type LiteLlmModel = {
+  id: string;
+  alias: string;
+  provider_model: string;
+  system_message?: string | null;
+  user_message?: string | null;
+};
 
 const providerNames: Record<string, string> = {
   TWELVE_DATA: "Twelve Data",
@@ -466,6 +472,8 @@ function ResearchProviders() {
           provider_model: form.get("litellm-provider-model"),
           provider_api_key: form.get("litellm-provider-api-key"),
           provider_api_base: form.get("litellm-provider-api-base") || undefined,
+          system_message: form.get("litellm-system-message") || undefined,
+          user_message: form.get("litellm-user-message") || undefined,
           reason: form.get("litellm-reason")
         })
       });
@@ -490,6 +498,23 @@ function ResearchProviders() {
       setMessage(`LiteLLM model ${model.alias} was removed from the private gateway.`);
       await loadLiteLlmModels();
     } catch { setError("TraderX could not remove the LiteLLM model alias."); }
+    finally { setBusy(false); }
+  }
+
+  async function updateLiteLlmPrompts(event: FormEvent<HTMLFormElement>, model: LiteLlmModel) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setBusy(true); setError(undefined); setMessage(undefined);
+    try {
+      const response = await fetch(`/api/v1/integrations/litellm/models/${encodeURIComponent(model.id)}/prompt-profile`, {
+        method: "PUT", credentials: "same-origin", headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({ system_message: form.get("system-message") || undefined, user_message: form.get("user-message") || undefined, reason: form.get("reason") })
+      });
+      const result = await response.json() as ApiProblem;
+      if (!response.ok) { setError(messageFor(result)); return; }
+      setMessage(`Prompt profile for ${model.alias} was saved. It applies to future model calls.`);
+      await loadLiteLlmModels();
+    } catch { setError("TraderX could not save the model prompt profile."); }
     finally { setBusy(false); }
   }
 
@@ -668,12 +693,15 @@ function ResearchProviders() {
           </div>
           <label>Provider API key<input autoComplete="new-password" name="litellm-provider-api-key" required type="password" /></label>
           <label>Provider API base (optional)<input name="litellm-provider-api-base" placeholder="https://api.example.com/v1" type="url" /></label>
+          <label>System message (optional)<textarea maxLength={6000} name="litellm-system-message" placeholder="Define the model's role, analysis focus, and communication style. TraderX safety and no-order controls always remain in force." /></label>
+          <label>User message (optional)<textarea maxLength={6000} name="litellm-user-message" placeholder="Add the recurring task instruction you want sent alongside TraderX's normalized evidence." /></label>
+          <p className="field-hint">These messages are saved in TraderX for this alias and sent only to the selected model. They cannot override source evidence, schemas, safety gates, or the no-order rule.</p>
           <label>Reason<textarea minLength={8} name="litellm-reason" required /></label>
           <button disabled={busy || liteLlmGatewayState !== "HEALTHY"} type="submit">Save LiteLLM model</button>
         </form>
         <div className="integration-form-actions"><h4>Configured aliases</h4><button className="secondary-button" disabled={busy} onClick={() => void loadLiteLlmModels()} type="button">Refresh models</button></div>
         {liteLlmGatewayState === "HEALTHY" && liteLlmModels.length === 0 ? <p className="empty-state">No model aliases configured yet.</p> : null}
-        {liteLlmModels.length ? <div className="integration-list">{liteLlmModels.map((model) => <article className="integration-card" key={model.id}><div><strong>{model.alias}</strong><small>Private gateway model alias</small></div><button className="danger-button" disabled={busy} onClick={() => void removeLiteLlmModel(model)} type="button">Remove model</button></article>)}</div> : null}
+        {liteLlmModels.length ? <div className="integration-list">{liteLlmModels.map((model) => <article className="integration-card" key={model.id}><div><strong>{model.alias}</strong><small>Provider model ID · {model.provider_model}</small><small>Gateway ID · {model.id}</small><small>System message {model.system_message ? "configured" : "not configured"} · User message {model.user_message ? "configured" : "not configured"}</small></div><button className="danger-button" disabled={busy} onClick={() => void removeLiteLlmModel(model)} type="button">Remove model</button><details><summary>Configure prompt messages</summary><form className="setup-form" onSubmit={(event) => void updateLiteLlmPrompts(event, model)}><label>System message<textarea defaultValue={model.system_message ?? ""} maxLength={6000} name="system-message" placeholder="Define the role and analytical focus." /></label><label>User message<textarea defaultValue={model.user_message ?? ""} maxLength={6000} name="user-message" placeholder="Add the recurring task instruction." /></label><label>Reason<textarea minLength={8} name="reason" required /></label><button disabled={busy} type="submit">Save prompt messages</button></form></details></article>)}</div> : null}
       </section> : null}
       <section className="setup-card" aria-labelledby="experimental-scraper-heading">
         <p className="section-kicker">Experimental provider</p>

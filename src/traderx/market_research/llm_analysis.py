@@ -10,6 +10,8 @@ from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from traderx.integrations.llm_profiles import model_prompt_profile, with_owner_system_message
+from traderx.integrations.model import Integration
 from traderx.integrations.ports import LlmAnalysisPort, LlmAnalysisRequest, LlmAnalysisResponse
 from traderx.market_research.events import (
     LLM_ANALYSIS_COMPLETED,
@@ -85,6 +87,12 @@ def _attempt_analysis(
         raise ValueError("coordinated market research run does not exist")
     pin = _required_pin(parent)
     prompt_evidence = minimized_prompt_evidence(evidence)
+    integration = database.get(Integration, parent.llm_integration_id) if parent.llm_integration_id else None
+    profile = (
+        model_prompt_profile(integration.configuration, pin["exact_model_id"])
+        if integration is not None
+        else {}
+    )
     request = LlmAnalysisRequest(
         provider=pin["provider_key"],
         exact_model_id=pin["exact_model_id"],
@@ -93,6 +101,10 @@ def _attempt_analysis(
         inference_policy_version=pin["inference_policy_version"],
         evidence=prompt_evidence,
         store=False,
+        system_instruction=with_owner_system_message(
+            _market_system_instruction(), profile.get("system_message")
+        ),
+        user_instruction=profile.get("user_message"),
     )
     request_hash = _hash(
         {
@@ -102,6 +114,8 @@ def _attempt_analysis(
             "schema": request.output_schema_version,
             "inference": request.inference_policy_version,
             "evidence": request.evidence,
+            "system_instruction": request.system_instruction,
+            "user_instruction": request.user_instruction,
         }
     )
     last: LlmAnalysisAttempt | None = None
@@ -213,6 +227,19 @@ def _attempt_analysis(
     )
     database.flush()
     return last
+
+
+def _market_system_instruction() -> str:
+    return (
+        "You are TraderX's independent market advisory analyst. Form your own market thesis from "
+        "the supplied, provenance-labelled integration evidence: MT5 broker data, Twelve Data, "
+        "Coinbase Exchange, and economic-calendar records where available. Do not use, infer, or "
+        "restate deterministic eligibility, ranking, active-market, or strategy decisions; those are "
+        "not included in your evidence. Identify source gaps or conflicts explicitly rather than "
+        "inventing facts. Your output remains advisory: it cannot alter safety gates, rankings, "
+        "assignments, risk controls, or orders. A supplied research brief sets focus only. Return "
+        "every required schema key and use empty arrays where the schema requires them."
+    )
 
 
 def _required_pin(parent: CoordinatedMarketResearchRun) -> dict[str, str]:

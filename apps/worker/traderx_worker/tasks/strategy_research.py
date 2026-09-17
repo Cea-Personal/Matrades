@@ -11,8 +11,8 @@ from sqlalchemy.orm import Session
 
 from traderx.identity.authorization import Actor, Role
 from traderx.integrations.crypto import EncryptedSecret, SecretBox
-from traderx.integrations.model import CredentialVersion, Integration
 from traderx.integrations.llm_profiles import with_owner_system_message
+from traderx.integrations.model import CredentialVersion, Integration
 from traderx.integrations.ports import LlmAnalysisPort, LlmAnalysisRequest
 from traderx.integrations.providers.anthropic_messages import AnthropicMessagesAdapter
 from traderx.integrations.providers.litellm_proxy import LiteLlmProxyAdapter
