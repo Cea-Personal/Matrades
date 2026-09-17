@@ -2,6 +2,7 @@ from pathlib import Path
 import tomllib
 
 from modules.agents.registry import REQUIRED_AGENT_IDS
+from modules.agents.model_assignments import default_profile
 
 
 ROOT = Path(__file__).parents[2]
@@ -20,6 +21,9 @@ def test_project_defines_one_read_only_native_agent_for_each_logical_role():
         and definition["description"].strip()
         and definition["developer_instructions"].strip()
         and definition["sandbox_mode"] == "read-only"
+        and definition["model"] == default_profile(logical_id).model
+        and definition["model_reasoning_effort"]
+        == default_profile(logical_id).parameters["reasoning_effort"]
         for logical_id, definition in definitions.items()
     )
 

@@ -1,5 +1,7 @@
 name = "trade_monitor"
 description = "Interprets reconciled active-position evidence without issuing commands."
+model = "gpt-5.6-luna"
+model_reasoning_effort = "low"
 sandbox_mode = "read-only"
 developer_instructions = """
 ROLE

@@ -4,12 +4,13 @@ import asyncio
 import json
 import logging
 import signal
-from uuid import NAMESPACE_URL, UUID, uuid5
+from uuid import UUID
 
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
 from modules.agents.models import AgentDefinition, ModelProfile, RuntimeType
+from modules.agents.model_assignments import default_profile
 from modules.agents.permissions import PermissionSet
 from modules.agents.prompts import PromptSet, resolve_prompts
 from modules.agents.registry import REQUIRED_AGENT_IDS
@@ -36,16 +37,9 @@ PLATFORM_PROMPTS = PromptSet(
 )
 
 
-def _default_profile() -> ModelProfile:
+def _default_profile(logical_id: str | None = None) -> ModelProfile:
     settings = get_settings()
-    return ModelProfile(
-        id=uuid5(NAMESPACE_URL, "matrades:codex-default"),
-        name="Matrades Codex default",
-        runtime=RuntimeType.CODEX_APP_SERVER,
-        provider="openai",
-        model=settings.default_codex_model,
-        capabilities={"structured_output", "reasoning"},
-    )
+    return default_profile(logical_id, fallback_model=settings.default_codex_model)
 
 
 async def publish_codex_heartbeat(router: AgentRuntimeRouter, stopped: asyncio.Event) -> None:
@@ -108,6 +102,9 @@ async def serve_agent_requests(
                     store = ResourceStore(db)
                     default = _default_profile()
                     profiles = {default.id: default}
+                    for agent_id in REQUIRED_AGENT_IDS:
+                        profile = _default_profile(agent_id)
+                        profiles[profile.id] = profile
                     for item in await store.list("agent_profile", owner_id):
                         profile = ModelProfile.model_validate(item.data)
                         profiles[profile.id] = profile
@@ -120,7 +117,9 @@ async def serve_agent_requests(
                         agents[configured.logical_id] = configured
                     agent = agents[logical_id]
                     if agent.profile_id is None:
-                        agent = agent.model_copy(update={"profile_id": default.id})
+                        agent = agent.model_copy(
+                            update={"profile_id": _default_profile(logical_id).id}
+                        )
                     orchestrator = agents["orchestrator"]
                     prompts = resolve_prompts(
                         PromptSet(agent.system_prompt_override, agent.user_prompt_override),

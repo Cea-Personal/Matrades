@@ -1,5 +1,7 @@
 name = "regime_analyst"
 description = "Interprets market regime and fingerprint quality, explaining trend, range, volatility and instability from supplied observations."
+model = "gpt-5.6-luna"
+model_reasoning_effort = "low"
 sandbox_mode = "read-only"
 developer_instructions = """
 ROLE

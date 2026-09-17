@@ -33,7 +33,12 @@ from modules.knowledge.openai_embeddings import (
     openai_embeddings,
 )
 from modules.knowledge.reranking import RerankingConfigurationInput, rerank_for_owner
-from modules.knowledge.youtube_ingestion import ingest_youtube_discovery
+from modules.knowledge.youtube import YouTubeVideo
+from modules.knowledge.youtube_ingestion import (
+    discover_youtube_videos,
+    ingest_youtube_discovery,
+    ingest_youtube_transcripts,
+)
 from modules.research.scheduling import default_schedule, next_run_at, normalize_schedule
 from modules.security.platform import validate_upload
 from packages.shared.config import get_settings
@@ -590,6 +595,148 @@ async def scrape_youtube(
         "provider_requested_at": requested_at,
         "completed_at": completed_at,
     }
+
+
+@router.post("/youtube/search", status_code=status.HTTP_201_CREATED)
+async def search_youtube_videos(
+    payload: YouTubeScrapeInput,
+    actor: Annotated[Actor, Depends(require_roles(Role.OWNER, Role.OPERATOR))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Run only SerpApi discovery and persist its bounded results for review."""
+    requested_at = datetime.now(UTC).isoformat()
+    try:
+        videos = await discover_youtube_videos(
+            db, actor.owner_id, query=payload.query, limit=payload.limit
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    store = ResourceStore(db)
+    run = await store.create(
+        "youtube_discovery_run",
+        actor.owner_id,
+        {
+            **payload.model_dump(mode="json"),
+            "trigger": "MANUAL_SEARCH",
+            "provider": "SERPAPI",
+            "discovery_stage": "SEARCH_COMPLETED",
+            "provider_requested_at": requested_at,
+            "discovered_videos": [
+                {
+                    "video_id": video.video_id,
+                    "url": video.url,
+                    "title": video.title,
+                    "description": video.description,
+                }
+                for video in videos
+            ],
+        },
+        state="SEARCHED",
+        actor_id=actor.actor_id,
+        event_type="knowledge_youtube.search.completed",
+    )
+    return {
+        "run_id": str(run.id),
+        "state": run.state,
+        "query": payload.query,
+        "discovered": len(videos),
+        "videos": run.data["discovered_videos"],
+        "provider_requested_at": requested_at,
+    }
+
+
+@router.post("/youtube/runs/{run_id}/transcripts")
+async def ingest_youtube_run_transcripts(
+    run_id: UUID,
+    actor: Annotated[Actor, Depends(require_roles(Role.OWNER, Role.OPERATOR))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Fetch transcripts only for videos persisted by the search stage."""
+    store = ResourceStore(db)
+    run = await store.get("youtube_discovery_run", run_id, actor.owner_id)
+    if run is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "YouTube search run not found")
+    if run.state in {"SUCCEEDED", "PARTIAL"}:
+        return {"run_id": str(run.id), **run.data, "state": run.state, "already_processed": True}
+    if run.state != "SEARCHED":
+        raise HTTPException(status.HTTP_409_CONFLICT, "run is not ready for transcript ingestion")
+    videos = [YouTubeVideo(**item) for item in run.data.get("discovered_videos", [])]
+    requested_at = datetime.now(UTC).isoformat()
+    await store.update(
+        run,
+        {
+            **run.data,
+            "transcript_requested_at": requested_at,
+            "discovery_stage": "TRANSCRIPTS_RUNNING",
+        },
+        state="TRANSCRIPTS_RUNNING",
+        actor_id=actor.actor_id,
+        event_type="knowledge_youtube.transcripts.requested",
+    )
+    try:
+        result = await ingest_youtube_transcripts(
+            db,
+            actor.owner_id,
+            videos,
+            languages=list(run.data.get("languages", ["en"])),
+            category=str(run.data.get("category", "trading")),
+            actor_id=actor.actor_id,
+        )
+    except Exception as exc:  # noqa: BLE001 - preserve a failed run and provider-neutral error
+        await store.update(
+            run,
+            {
+                **run.data,
+                "transcript_completed_at": datetime.now(UTC).isoformat(),
+                "error": type(exc).__name__,
+            },
+            state="FAILED",
+            actor_id=actor.actor_id,
+            event_type="knowledge_youtube.transcripts.failed",
+        )
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, "YouTube transcript ingestion failed"
+        ) from exc
+    completed_at = datetime.now(UTC).isoformat()
+    state = "PARTIAL" if result["failed"] else "SUCCEEDED"
+    await store.update(
+        run,
+        {
+            **run.data,
+            **result,
+            "transcript_completed_at": completed_at,
+            "discovery_stage": "TRANSCRIPTS_INGESTED",
+        },
+        state=state,
+        actor_id=actor.actor_id,
+        event_type="knowledge_youtube.transcripts.completed",
+    )
+    return {
+        "run_id": str(run.id),
+        "state": state,
+        "query": run.data["query"],
+        "discovery_stage": "TRANSCRIPTS_INGESTED",
+        **result,
+        "transcript_completed_at": completed_at,
+    }
+
+
+@router.get("/youtube/runs")
+async def list_youtube_discovery_runs(
+    actor: Annotated[Actor, Depends(current_actor)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Return search/transcript stage history without returning transcript bodies."""
+    return [
+        {
+            **item.public(),
+            "discovered_videos": [
+                {key: value for key, value in video.items() if key != "description"}
+                for video in item.data.get("discovered_videos", [])
+            ],
+        }
+        for item in await ResourceStore(db).list("youtube_discovery_run", actor.owner_id)
+    ][:20]
 
 
 @router.get("/youtube/schedule")

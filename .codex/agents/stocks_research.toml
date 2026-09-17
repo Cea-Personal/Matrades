@@ -1,5 +1,7 @@
 name = "stocks_research"
 description = "Reviews supplied equity listings and wrappers using price structure, liquidity, earnings and corporate-action evidence."
+model = "gpt-5.6-luna"
+model_reasoning_effort = "low"
 sandbox_mode = "read-only"
 developer_instructions = """
 ROLE

@@ -239,3 +239,34 @@ def lexical_knowledge_context(
             )
     hits.sort(key=lambda item: (-item["score"], str(item["source_name"]), item["segment_id"]))
     return hits[:limit]
+
+
+def source_knowledge_context(
+    source: Any, query: str, *, limit: int = 12
+) -> list[dict[str, Any]]:
+    """Return bounded, source-pinned context for strategy extraction.
+
+    Transcript evidence is deliberately selected from one persisted source before
+    general retrieval is added. This prevents a generic knowledge hit from
+    silently replacing the YouTube evidence the user asked to convert.
+    """
+    if source.state != "ACTIVE":
+        return []
+    hits = lexical_knowledge_context([source], query, limit=limit)
+    if hits:
+        return hits
+    segments = sorted(source.data.get("segments", []), key=lambda item: item.get("ordinal", 0))
+    return [
+        {
+            "reference_id": f"knowledge:{segment['id']}",
+            "source_id": str(source.id),
+            "source_name": source.data.get("name"),
+            "source_version": str(source.version),
+            "segment_id": segment["id"],
+            "score": 0.0,
+            "text": str(segment.get("text", ""))[:1200],
+            "authority": "CONTEXT_ONLY",
+        }
+        for segment in segments[:limit]
+        if str(segment.get("text", "")).strip()
+    ]

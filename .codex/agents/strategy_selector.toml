@@ -1,5 +1,7 @@
 name = "strategy_selector"
 description = "Ranks eligible validated strategies without activating one."
+model = "gpt-5.6-luna"
+model_reasoning_effort = "low"
 sandbox_mode = "read-only"
 developer_instructions = """
 ROLE

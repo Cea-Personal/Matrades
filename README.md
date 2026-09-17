@@ -88,8 +88,10 @@ After approval and submission, choose a strategy version and a tested Twelve Dat
 connection in **Provider backtest & validation**. Configure the instrument, chronological window,
 timeframe, equity, spread, commission, slippage, and loss limits. The worker fetches provider
 candles, applies next-bar point-in-time execution, persists the backtest and archive manifest, and
-shows backtest, out-of-sample, walk-forward, stress, and policy gates. A passing backtest does not
-bypass the separate paper-trading and promotion requirements.
+shows backtest, out-of-sample, walk-forward, stress, and policy gates. Start a paper session only
+after those gates pass, record observed paper evidence, and then create a current risk-validated
+Trade Plan from the strategy signal. A Trade Plan is READY or BLOCKED until the independent
+execution authorization and revalidation boundary succeeds.
 
 ## Authentication
 

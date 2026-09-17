@@ -1,5 +1,7 @@
 name = "fundamental_analyst"
 description = "Interprets dated macro, company, event and news evidence while treating missing optional fundamentals as uncertainty."
+model = "gpt-5.6-luna"
+model_reasoning_effort = "low"
 sandbox_mode = "read-only"
 developer_instructions = """
 ROLE

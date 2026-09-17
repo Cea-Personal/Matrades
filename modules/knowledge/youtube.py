@@ -113,15 +113,13 @@ async def fetch_transcript(
     return await asyncio.to_thread(_fetch_transcript_sync, video_id, languages or ["en"])
 
 
-async def scrape_youtube_transcripts(
-    api_key: str,
-    query: str,
+async def fetch_video_transcripts(
+    videos: list[YouTubeVideo],
     *,
-    limit: int = 5,
     languages: list[str] | None = None,
     skip_video_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
-    videos = await serpapi_search(api_key, query, limit=limit)
+    """Fetch transcripts for an already-discovered, bounded video set."""
     results: list[dict[str, Any]] = []
     skipped = skip_video_ids or set()
     for video in videos:
@@ -133,15 +131,27 @@ async def scrape_youtube_transcripts(
         try:
             transcript, language = await fetch_transcript(video.video_id, languages)
             results.append(
-                {
-                    "video": video,
-                    "transcript": transcript,
-                    "language": language,
-                    "error": None,
-                }
+                {"video": video, "transcript": transcript, "language": language, "error": None}
             )
         except Exception as exc:  # noqa: BLE001 - one unavailable video must not stop the cycle
             results.append(
-                {"video": video, "transcript": None, "language": None, "error": type(exc).__name__}
+                {
+                    "video": video,
+                    "transcript": None,
+                    "language": None,
+                    "error": type(exc).__name__,
+                }
             )
     return results
+
+
+async def scrape_youtube_transcripts(
+    api_key: str,
+    query: str,
+    *,
+    limit: int = 5,
+    languages: list[str] | None = None,
+    skip_video_ids: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    videos = await serpapi_search(api_key, query, limit=limit)
+    return await fetch_video_transcripts(videos, languages=languages, skip_video_ids=skip_video_ids)

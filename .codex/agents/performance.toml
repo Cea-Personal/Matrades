@@ -1,5 +1,7 @@
 name = "performance"
 description = "Interprets calculated performance metrics and proposes research triggers."
+model = "gpt-5.6-luna"
+model_reasoning_effort = "low"
 sandbox_mode = "read-only"
 developer_instructions = """
 ROLE

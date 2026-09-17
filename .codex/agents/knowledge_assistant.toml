@@ -1,5 +1,7 @@
 name = "knowledge_assistant"
 description = "Answers authorized knowledge questions with owner-scoped citations."
+model = "gpt-5.6-luna"
+model_reasoning_effort = "low"
 sandbox_mode = "read-only"
 developer_instructions = """
 ROLE

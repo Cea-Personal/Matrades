@@ -84,6 +84,25 @@ def test_mt5_ea_and_bridge_service_are_shipped():
     )
 
 
+def test_mt5_desktop_autostart_is_documented_as_a_session_gate():
+    runtime = Path("modules/mt5/desktop_runtime.py").read_text()
+    auth = Path("apps/api/app/routes/auth.py").read_text()
+    env = Path(".env.example").read_text()
+    compose = Path("infra/compose/compose.yaml").read_text()
+    assert all(
+        value in runtime + auth + env
+        for value in (
+            "MATRADES_MT5_TERMINAL_PATH",
+            "MATRADES_MT5_AUTO_START_ENABLED",
+            "MATRADES_MT5_RUNTIME_CONTROL_URL",
+            "MATRADES_MT5_RUNTIME_CONTROL_TOKEN",
+            "ensure_mt5_started",
+            "503",
+        )
+    )
+    assert "runtime/start" in compose or "MATRADES_MT5_RUNTIME_CONTROL_TOKEN" in compose
+
+
 def test_agent_registry_ui_exposes_test_all_and_execution_feedback():
     text = Path("apps/web/src/features/agents/AgentConfiguration.tsx").read_text()
     assert all(value in text for value in ("Test all logical agents", "execution", "Test"))

@@ -26,6 +26,7 @@ from modules.strategies.evidence import (
     historical_summary,
     lexical_knowledge_context,
     resolve_approved_candidate,
+    source_knowledge_context,
     split_research_history,
 )
 from modules.strategies.lifecycle import StrategyState
@@ -179,6 +180,33 @@ async def _generate_strategy(run_id: UUID) -> dict:
                 }
             )
         knowledge_sources = await store.list("knowledge_source", owner_id)
+        transcript_sources = [
+            item
+            for item in knowledge_sources
+            if item.data.get("source_kind") == "YOUTUBE_TRANSCRIPT"
+            and item.state == "ACTIVE"
+        ]
+        pinned_source_id = run.data.get("knowledge_source_id")
+        if pinned_source_id:
+            transcript_sources = [
+                item for item in transcript_sources if str(item.id) == str(pinned_source_id)
+            ]
+            if not transcript_sources:
+                raise RuntimeError("pinned YouTube transcript evidence is unavailable")
+        transcript_query = " ".join(
+            (
+                candidate.instrument,
+                candidate.category,
+                candidate.fingerprint.regime,
+                description,
+                "trading strategy entry exit stop loss take profit risk",
+            )
+        )
+        transcript_knowledge = [
+            hit
+            for source in transcript_sources[:8]
+            for hit in source_knowledge_context(source, transcript_query, limit=8)
+        ]
         knowledge = lexical_knowledge_context(
             knowledge_sources,
             " ".join(
@@ -190,7 +218,16 @@ async def _generate_strategy(run_id: UUID) -> dict:
                     "strategy risk entry exit",
                 )
             ),
+            limit=12,
         )
+        seen_knowledge: set[str] = set()
+        combined_knowledge = []
+        for item in [*transcript_knowledge, *knowledge]:
+            if item["reference_id"] in seen_knowledge:
+                continue
+            seen_knowledge.add(item["reference_id"])
+            combined_knowledge.append(item)
+        knowledge = combined_knowledge[:20]
 
     history_end = candidate.fingerprint.observed_at
     history_start = history_end - timedelta(days=settings.strategy_research_history_days)
@@ -347,6 +384,7 @@ async def _generate_strategy(run_id: UUID) -> dict:
                 "market_selection_id": str(selection_id),
                 "history_checksum": serialized_pack["historical_discovery"]["checksum"],
                 "knowledge_segment_ids": [item["segment_id"] for item in knowledge],
+                "youtube_transcript_source_ids": [str(item.id) for item in transcript_sources],
             },
         )
         serialized_pack["retrieval_audit_id"] = str(retrieval.id)
@@ -380,6 +418,21 @@ async def _generate_strategy(run_id: UUID) -> dict:
         tick_size=Decimal(str(tick)) if tick else None,
     )
     screening = screen_hypotheses(hypotheses, holdout, screening_configuration)
+    pipeline = {
+        "name": "youtube_transcript_to_trade_plan",
+        "stages": {
+            "youtube_transcript": "COMPLETED" if transcript_sources else "NOT_AVAILABLE",
+            "strategy_hypothesis": "COMPLETED",
+            "structured_strategy_rules": "COMPLETED",
+            "preliminary_backtest": "COMPLETED",
+            "formal_backtest": "WAITING_FOR_APPROVAL",
+            "validation": "WAITING_FOR_FORMAL_BACKTEST",
+            "paper_trading": "WAITING_FOR_VALIDATION",
+            "approved_trade_plan": "WAITING_FOR_PAPER_TRADING",
+        },
+        "youtube_transcript_source_ids": [str(item.id) for item in transcript_sources],
+        "knowledge_reference_ids": [item["reference_id"] for item in knowledge],
+    }
     details: dict
     if screening.selected_hypothesis_id is None:
         details = {
@@ -390,6 +443,10 @@ async def _generate_strategy(run_id: UUID) -> dict:
             "holdout_evidence": holdout_evidence,
             "hypotheses": [item.model_dump(mode="json") for item in hypotheses],
             "preliminary_screen": screening.model_dump(mode="json"),
+            "strategy_pipeline": {
+                **pipeline,
+                "stages": {**pipeline["stages"], "preliminary_backtest": "FAILED"},
+            },
             "trade_setup": {
                 "status": "NO_TRADE",
                 "entry": None,
@@ -459,6 +516,7 @@ async def _generate_strategy(run_id: UUID) -> dict:
                 "Conservative price-proportional spread and slippage; commission zero"
             ),
         },
+        "strategy_pipeline": pipeline,
         "selected_hypothesis_id": proposal.hypothesis_id,
         "proposed_specification": proposal.specification.model_dump(mode="json"),
         "breakdown": proposal.breakdown,
@@ -754,6 +812,15 @@ async def _run_backtest(run_id: UUID) -> dict:
                     "walk_forward": state == "PASSED",
                     "stress": state == "PASSED",
                     "policy": state == "PASSED",
+                },
+                "strategy_pipeline": {
+                    **strategy.data.get("strategy_pipeline", {}),
+                    "stages": {
+                        **strategy.data.get("strategy_pipeline", {}).get("stages", {}),
+                        "formal_backtest": state,
+                        "validation": state,
+                        "paper_trading": "READY" if state == "PASSED" else "BLOCKED",
+                    },
                 },
             },
             state=StrategyState.VALIDATING,

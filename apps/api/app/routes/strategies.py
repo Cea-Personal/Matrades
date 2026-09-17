@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
@@ -19,11 +19,16 @@ from modules.connections.resolution import resolve_connection
 from modules.identity.authorization import Actor, Role
 from modules.knowledge.ingestion import build_source_data
 from modules.knowledge.openai_embeddings import embed_source_data
+from modules.risk.authority import authoritative_risk_context
+from modules.risk.engine import RiskEngine
+from modules.risk.models import CandidateTrade, Direction
 from modules.strategies.compiler import compile_strategy
 from modules.strategies.fingerprints import fingerprint
 from modules.strategies.lifecycle import StrategyState, transition
 from modules.strategies.research_pipeline import resolve_strategy_basis
 from modules.strategies.similarity import compare
+from modules.trading.models import TradeConstruction
+from modules.trading.trade_plans import build_trade_plan
 from packages.shared.store import ResourceStore
 from packages.strategy_sdk.schema import StrategySpecification
 from packages.strategy_sdk.taxonomy import StrategyOrigin
@@ -34,6 +39,7 @@ router = APIRouter(prefix="/strategies", tags=["Strategies"])
 class DraftInput(BaseModel):
     origin: StrategyOrigin
     description: str | None = Field(default=None, max_length=5000)
+    knowledge_source_id: UUID | None = None
 
     @model_validator(mode="after")
     def assisted_description(self) -> DraftInput:
@@ -71,6 +77,43 @@ class BacktestInput(BaseModel):
 
 class TransitionInput(BaseModel):
     target: StrategyState
+
+
+class PaperTradingInput(BaseModel):
+    observation_start: AwareDatetime
+    observation_end: AwareDatetime
+    notes: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def chronological_window(self) -> PaperTradingInput:
+        if self.observation_start >= self.observation_end:
+            raise ValueError("paper-trading observation window must be chronological")
+        return self
+
+
+class PaperEvidenceInput(BaseModel):
+    trade_count: int = Field(ge=0)
+    net_profit: Decimal
+    profit_factor: Decimal = Field(ge=0)
+    max_drawdown: Decimal = Field(ge=0)
+    policy_passed: bool
+    source: str = Field(min_length=3, max_length=120)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class TradePlanInput(BaseModel):
+    """Current signal levels used to build a risk-validated, non-authorized plan."""
+
+    entry: Decimal | None = Field(default=None, gt=0)
+    stop_loss: Decimal | None = Field(default=None, gt=0)
+    take_profits: list[Decimal] | None = Field(default=None, min_length=1, max_length=5)
+    invalidation: str | None = Field(default=None, min_length=3, max_length=1000)
+
+    @model_validator(mode="after")
+    def ordered_levels(self) -> TradePlanInput:
+        if self.take_profits and any(item <= 0 for item in self.take_profits):
+            raise ValueError("take-profit prices must be positive")
+        return self
 
 
 def _dispatch_generation(run_id: UUID) -> None:
@@ -116,6 +159,15 @@ async def list_backtests(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     records = await ResourceStore(db).list("strategy_backtest", actor.owner_id)
+    return [item.public() for item in records]
+
+
+@router.get("/paper-trading")
+async def list_paper_trading_runs(
+    actor: Annotated[Actor, Depends(current_actor)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    records = await ResourceStore(db).list("strategy_paper_run", actor.owner_id)
     return [item.public() for item in records]
 
 
@@ -167,6 +219,33 @@ async def create_draft(
         basis = await _resolve_strategy_basis(db, actor.owner_id)
     except (KeyError, LookupError, RuntimeError, ValueError) as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    source = None
+    if payload.knowledge_source_id is not None:
+        source = await store.get("knowledge_source", payload.knowledge_source_id, actor.owner_id)
+        if source is None or source.state != "ACTIVE":
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "knowledge source not found")
+        if source.data.get("source_kind") != "YOUTUBE_TRANSCRIPT":
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "strategy extraction accepts indexed YouTube transcript sources only",
+            )
+        if not source.data.get("segments"):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "the selected transcript has no indexed segments",
+            )
+    research_basis = {
+        **basis,
+        **(
+            {
+                "knowledge_source_id": str(source.id),
+                "knowledge_source_name": source.data.get("name"),
+                "knowledge_source_kind": source.data.get("source_kind"),
+            }
+            if source is not None
+            else {}
+        ),
+    }
     draft = await store.create(
         "strategy_draft",
         actor.owner_id,
@@ -175,7 +254,8 @@ async def create_draft(
             "description": payload.description,
             "specification": None,
             "proposed_specification": None,
-            "research_basis": basis,
+            "research_basis": research_basis,
+            "knowledge_source_id": str(source.id) if source is not None else None,
             "revision": 1,
             "lifecycle_state": "QUEUED",
             "provenance": {
@@ -196,7 +276,8 @@ async def create_draft(
             "origin": payload.origin.value,
             "description": payload.description,
             "trigger": "USER",
-            **basis,
+            **research_basis,
+            "knowledge_source_id": str(source.id) if source is not None else None,
         },
         state="QUEUED",
         actor_id=actor.actor_id,
@@ -359,6 +440,13 @@ async def submit(
             "origin": draft.data["origin"],
             "lifecycle_state": StrategyState.IMPLEMENTED,
             "validation_evidence": {"compiler": True},
+            "strategy_pipeline": draft.data.get("strategy_pipeline", {}),
+            "knowledge_source_id": draft.data.get("knowledge_source_id"),
+            "transcript_evidence_refs": [
+                item.get("reference_id")
+                for item in draft.data.get("evidence_pack", {}).get("knowledge_context", [])
+                if item.get("reference_id")
+            ],
         },
         state=StrategyState.IMPLEMENTED,
         actor_id=actor.actor_id,
@@ -487,6 +575,278 @@ async def transition_strategy(
         event_type="strategy.lifecycle_transitioned",
     )
     return updated.public()
+
+
+@router.post("/{strategy_id}/paper-trading", status_code=status.HTTP_202_ACCEPTED)
+async def start_paper_trading(
+    strategy_id: UUID,
+    payload: PaperTradingInput,
+    actor: Annotated[Actor, Depends(require_roles(Role.OWNER, Role.OPERATOR))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Open a paper session only after the provider-backed validation gates pass."""
+    store = ResourceStore(db)
+    strategy = await store.get("strategy_version", strategy_id, actor.owner_id)
+    if strategy is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "strategy version not found")
+    if strategy.state != StrategyState.VALIDATING:
+        raise HTTPException(status.HTTP_409_CONFLICT, "strategy is not ready for paper trading")
+    evidence = dict(strategy.data.get("validation_evidence", {}))
+    if not all(
+        evidence.get(stage, False)
+        for stage in ("backtest", "out_of_sample", "walk_forward", "stress", "policy")
+    ):
+        raise HTTPException(status.HTTP_409_CONFLICT, "all formal validation gates must pass first")
+    existing = next(
+        (
+            item
+            for item in await store.list("strategy_paper_run", actor.owner_id)
+            if item.data.get("strategy_version_id") == str(strategy_id)
+            and item.state in {"QUEUED", "RUNNING"}
+        ),
+        None,
+    )
+    if existing is not None:
+        return existing.public()
+    paper_run = await store.create(
+        "strategy_paper_run",
+        actor.owner_id,
+        {
+            "strategy_version_id": str(strategy_id),
+            **payload.model_dump(mode="json"),
+            "trigger": "VALIDATION_GATE",
+            "evidence_class": "PAPER",
+        },
+        state="RUNNING",
+        actor_id=actor.actor_id,
+        event_type="strategy.paper_trading.started",
+    )
+    pipeline = {
+        **strategy.data.get("strategy_pipeline", {}),
+        "stages": {
+            **strategy.data.get("strategy_pipeline", {}).get("stages", {}),
+            "paper_trading": "RUNNING",
+        },
+    }
+    await store.update(
+        strategy,
+        {
+            **strategy.data,
+            "lifecycle_state": StrategyState.PAPER_TRADING,
+            "strategy_pipeline": pipeline,
+            "paper_run_id": str(paper_run.id),
+        },
+        state=StrategyState.PAPER_TRADING,
+        actor_id=actor.actor_id,
+        event_type="strategy.paper_trading.awaiting_evidence",
+    )
+    return paper_run.public()
+
+
+@router.post("/{strategy_id}/paper-trading/{paper_run_id}/complete")
+async def complete_paper_trading(
+    strategy_id: UUID,
+    paper_run_id: UUID,
+    payload: PaperEvidenceInput,
+    actor: Annotated[Actor, Depends(require_roles(Role.OWNER, Role.OPERATOR))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Record observed paper outcomes; the server, not the agent, decides the gate."""
+    store = ResourceStore(db)
+    strategy = await store.get("strategy_version", strategy_id, actor.owner_id)
+    paper_run = await store.get("strategy_paper_run", paper_run_id, actor.owner_id)
+    if strategy is None or paper_run is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "paper-trading run not found")
+    if paper_run.data.get("strategy_version_id") != str(strategy_id):
+        raise HTTPException(status.HTTP_409_CONFLICT, "paper run is linked to another strategy")
+    if strategy.state != StrategyState.PAPER_TRADING or paper_run.state not in {
+        "RUNNING",
+        "QUEUED",
+    }:
+        raise HTTPException(status.HTTP_409_CONFLICT, "paper-trading run is not active")
+    gates = {
+        "minimum_trade_count": payload.trade_count >= 10,
+        "positive_net_profit": payload.net_profit > 0,
+        "profit_factor": payload.profit_factor >= 1,
+        "policy": payload.policy_passed,
+    }
+    passed = all(gates.values())
+    evidence = {**strategy.data.get("validation_evidence", {}), "paper": passed}
+    pipeline = {
+        **strategy.data.get("strategy_pipeline", {}),
+        "stages": {
+            **strategy.data.get("strategy_pipeline", {}).get("stages", {}),
+            "paper_trading": "PASSED" if passed else "FAILED",
+            "approved_trade_plan": "READY_TO_CREATE" if passed else "BLOCKED",
+        },
+    }
+    updated_run = await store.update(
+        paper_run,
+        {
+            **paper_run.data,
+            **payload.model_dump(mode="json"),
+            "gates": gates,
+            "completed_at": datetime.now(UTC).isoformat(),
+        },
+        state="PASSED" if passed else "FAILED",
+        actor_id=actor.actor_id,
+        event_type="strategy.paper_trading.completed",
+    )
+    updated_strategy = await store.update(
+        strategy,
+        {
+            **strategy.data,
+            "lifecycle_state": StrategyState.APPROVED if passed else StrategyState.DEGRADED,
+            "validation_evidence": evidence,
+            "strategy_pipeline": pipeline,
+        },
+        state=StrategyState.APPROVED if passed else StrategyState.DEGRADED,
+        actor_id=actor.actor_id,
+        event_type="strategy.paper_validation.completed",
+    )
+    return {
+        "paper_run": updated_run.public(),
+        "strategy": updated_strategy.public(),
+        "gates": gates,
+    }
+
+
+@router.post("/{strategy_id}/trade-plans", status_code=status.HTTP_201_CREATED)
+async def create_approved_trade_plan(
+    strategy_id: UUID,
+    payload: TradePlanInput,
+    actor: Annotated[Actor, Depends(require_roles(Role.OWNER, Role.OPERATOR))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Create a current, risk-validated Trade Plan without authorizing execution."""
+    store = ResourceStore(db)
+    strategy = await store.get("strategy_version", strategy_id, actor.owner_id)
+    if strategy is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "strategy version not found")
+    if strategy.state != StrategyState.APPROVED or not strategy.data.get(
+        "validation_evidence", {}
+    ).get("paper"):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "paper validation must approve the strategy first",
+        )
+    specification = StrategySpecification.model_validate(strategy.data["specification"])
+    draft = await store.get(
+        "strategy_draft", UUID(str(strategy.data["strategy_id"])), actor.owner_id
+    )
+    if draft is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "strategy research draft is unavailable")
+    setup = dict(draft.data.get("trade_setup") or {})
+    raw_targets = payload.take_profits or [
+        Decimal(str(item["price"]))
+        for item in setup.get("take_profits", [])
+        if isinstance(item, dict) and item.get("price") is not None
+    ]
+    entry = payload.entry or (Decimal(str(setup["entry"])) if setup.get("entry") else None)
+    stop_loss = payload.stop_loss or (
+        Decimal(str(setup["stop_loss"])) if setup.get("stop_loss") else None
+    )
+    invalidation = payload.invalidation or str(
+        setup.get("invalidation") or "strategy invalidation"
+    )
+    if entry is None or stop_loss is None or not raw_targets:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "a fresh strategy signal with entry, stop loss, and targets is required",
+        )
+    basis = dict(draft.data.get("research_basis", {}))
+    required = ("account_id", "market_selection_id", "category")
+    if any(not basis.get(key) for key in required):
+        raise HTTPException(status.HTTP_409_CONFLICT, "typed market strategy basis is incomplete")
+    typed = (
+        specification.asset_class,
+        specification.instrument_type,
+        specification.quantity_unit,
+        specification.venue_instrument_id,
+        specification.specification_version_id,
+    )
+    if any(value is None for value in typed):
+        raise HTTPException(status.HTTP_409_CONFLICT, "typed instrument identity is required")
+    direction = (
+        Direction.BUY
+        if specification.trade_rules and specification.trade_rules.direction == "LONG"
+        else Direction.SELL
+    )
+    distance = abs(entry - stop_loss)
+    if distance <= 0:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "entry and stop loss must differ")
+    candidate = CandidateTrade(
+        instrument=specification.instruments[0],
+        direction=direction,
+        market_category=str(basis["category"]).lower(),
+        requested_size=Decimal("1"),
+        entry_price=entry,
+        stop_loss=stop_loss,
+        risk_per_unit=distance,
+        asset_class=specification.asset_class,
+        instrument_type=specification.instrument_type,
+        venue_instrument_id=UUID(str(specification.venue_instrument_id)),
+        specification_version_id=UUID(str(specification.specification_version_id)),
+        quantity_unit=specification.quantity_unit,
+    )
+    try:
+        context = await authoritative_risk_context(
+            db, actor.owner_id, UUID(str(basis["account_id"])), candidate
+        )
+        risk = RiskEngine().evaluate(context, candidate)
+    except (LookupError, RuntimeError, ValueError) as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    construction = TradeConstruction(
+        instrument=candidate.instrument,
+        direction=candidate.direction,
+        entry=entry,
+        stop_loss=stop_loss,
+        targets=raw_targets,
+        invalidation=invalidation,
+        # Keep the construction structurally valid for a BLOCKED plan; the
+        # builder replaces this with zero when risk authority hard-blocks it.
+        approved_size=risk.approved_size if risk.approved_size > 0 else Decimal("1"),
+        quantity_unit=specification.quantity_unit,
+        asset_class=specification.asset_class,
+        instrument_type=specification.instrument_type,
+        venue_instrument_id=candidate.venue_instrument_id,
+        specification_version_id=candidate.specification_version_id,
+    )
+    plan = build_trade_plan(
+        owner_id=actor.owner_id,
+        account_id=UUID(str(basis["account_id"])),
+        construction=construction,
+        strategy_version_id=strategy_id,
+        market_fingerprint_id=UUID(str(basis["market_selection_id"])),
+        risk=risk,
+        evidence_refs=tuple(
+            [f"strategy:{strategy_id}", *[str(item) for item in draft.data.get("evidence", [])]]
+        ),
+        expires_at=datetime.now(UTC) + timedelta(minutes=10),
+    )
+    record = await store.create(
+        "trade_plan",
+        actor.owner_id,
+        plan.model_dump(mode="json"),
+        state=plan.state.value,
+        record_id=plan.id,
+        actor_id=actor.actor_id,
+        event_type="strategy.approved_trade_plan.created",
+    )
+    pipeline = {
+        **strategy.data.get("strategy_pipeline", {}),
+        "stages": {
+            **strategy.data.get("strategy_pipeline", {}).get("stages", {}),
+            "approved_trade_plan": plan.state.value,
+        },
+    }
+    await store.update(
+        strategy,
+        {**strategy.data, "approved_trade_plan_id": str(plan.id), "strategy_pipeline": pipeline},
+        actor_id=actor.actor_id,
+        event_type="strategy.approved_trade_plan.linked",
+    )
+    return record.public()
 
 
 @router.post("/promote/{strategy_id}")

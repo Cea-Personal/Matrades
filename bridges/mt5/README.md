@@ -1,5 +1,38 @@
 # MT5 bridge on macOS + Wine
 
+When Matrades is running on the same host as Wine, it can start the configured MT5 terminal
+automatically before issuing a new authenticated session. Set these environment variables to the
+actual installation:
+
+```bash
+MATRADES_MT5_AUTO_START_ENABLED=true
+MATRADES_MT5_WINE_BINARY=wine
+MATRADES_MT5_WINEBOOT_BINARY=wineboot
+MATRADES_MT5_WINE_PREFIX="$HOME/.wine-matrades"
+MATRADES_MT5_TERMINAL_PATH="$HOME/.wine-matrades/drive_c/Program Files/MetaTrader 5/terminal64.exe"
+MATRADES_MT5_STARTUP_TIMEOUT_SECONDS=30
+```
+
+The launcher uses argument arrays rather than a shell, initializes the Wine prefix when needed,
+starts `terminal64.exe` if it is not already running, waits for the process to be alive, and only
+then allows the MFA session endpoint to persist a session. If a configured terminal cannot start,
+the endpoint returns `503` and does not create a session. An unset terminal path leaves the API
+usable for non-desktop deployments.
+
+For a cloud deployment, run this bridge process on the same VM/container host as Wine and MT5 and
+configure the API to call its protected runtime controller:
+
+```bash
+MATRADES_MT5_RUNTIME_CONTROL_URL=https://mt5-runtime.example.com/runtime/start
+MATRADES_MT5_RUNTIME_CONTROL_TOKEN=replace-with-a-long-random-runtime-token
+```
+
+Set the same runtime token on the cloud bridge, keep `/runtime/start` private behind the cloud
+network or an HTTPS ingress, and configure the bridge host with its own `MATRADES_MT5_WINE_*` and
+`MATRADES_MT5_TERMINAL_PATH` values. The API then requests startup remotely; it never tries to
+launch Wine locally. Docker containers still cannot launch a separate host’s Wine process, so the
+controller must run where the cloud Wine/MT5 installation exists.
+
 Matrades authenticates every bridge request with HMAC-SHA256. The signed bytes are:
 
 ```text

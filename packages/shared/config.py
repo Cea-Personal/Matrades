@@ -28,6 +28,14 @@ class Settings(BaseSettings):
     codex_enabled: bool = True
     codex_binary: str = "codex"
     default_codex_model: str = "gpt-5.6-terra"
+    mt5_auto_start_enabled: bool = True
+    mt5_wine_binary: str = "wine"
+    mt5_wineboot_binary: str = "wineboot"
+    mt5_wine_prefix: Path | None = None
+    mt5_terminal_path: Path | None = None
+    mt5_startup_timeout_seconds: int = Field(default=30, ge=3, le=180)
+    mt5_runtime_control_url: str | None = None
+    mt5_runtime_control_token: SecretStr | None = None
     litellm_enabled: bool = False
     litellm_url: str = "http://localhost:4000"
     litellm_api_key: SecretStr | None = None

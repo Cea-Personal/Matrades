@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from time import monotonic
 from typing import Annotated, Any
-from uuid import NAMESPACE_URL, UUID, uuid5
+from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -21,6 +21,7 @@ from modules.agents.models import (
     ModelProfile,
     RuntimeType,
 )
+from modules.agents.model_assignments import default_profile
 from modules.agents.permissions import PermissionSet
 from modules.agents.prompts import PromptSet, resolve_prompts
 from modules.agents.registry import REQUIRED_AGENT_IDS
@@ -75,20 +76,16 @@ async def _saved_runtime_settings(store: ResourceStore, owner_id: UUID) -> dict[
     }
 
 
-def _default_profile() -> ModelProfile:
-    return ModelProfile(
-        id=uuid5(NAMESPACE_URL, "matrades:codex-default"),
-        name="Matrades Codex default",
-        runtime=RuntimeType.CODEX_APP_SERVER,
-        provider="openai",
-        model=get_settings().default_codex_model,
-        capabilities={"structured_output", "reasoning"},
-    )
+def _default_profile(logical_id: str | None = None) -> ModelProfile:
+    return default_profile(logical_id, fallback_model=get_settings().default_codex_model)
 
 
 async def _profiles(store: ResourceStore, owner_id: UUID) -> dict[UUID, ModelProfile]:
     default = _default_profile()
     result = {default.id: default}
+    for logical_id in REQUIRED_AGENT_IDS:
+        profile = _default_profile(logical_id)
+        result[profile.id] = profile
     for item in await store.list("agent_profile", owner_id):
         profile = ModelProfile.model_validate(item.data)
         result[profile.id] = profile
@@ -111,7 +108,17 @@ async def list_agents(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     agents = await _agents(ResourceStore(db), actor.owner_id)
-    return [agents[logical_id].model_dump(mode="json") for logical_id in REQUIRED_AGENT_IDS]
+    return [
+        {
+            **agents[logical_id].model_dump(mode="json"),
+            "recommended_profile_id": str(_default_profile(logical_id).id),
+            "recommended_model": _default_profile(logical_id).model,
+            "recommended_reasoning_effort": _default_profile(logical_id).parameters[
+                "reasoning_effort"
+            ],
+        }
+        for logical_id in REQUIRED_AGENT_IDS
+    ]
 
 
 @router.get("/runtimes")
@@ -427,7 +434,7 @@ async def test_run(
     agents = await _agents(store, actor.owner_id)
     profiles = await _profiles(store, actor.owner_id)
     agent = agents[logical_id]
-    default = _default_profile()
+    default = _default_profile(logical_id)
     profile_id = agent.profile_id or default.id
     if agent.profile_id is None:
         agent = agent.model_copy(update={"profile_id": default.id})

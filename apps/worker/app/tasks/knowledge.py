@@ -8,7 +8,10 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 
 from apps.worker.app.celery_app import celery_app
-from modules.knowledge.youtube_ingestion import ingest_youtube_discovery
+from modules.knowledge.youtube_ingestion import (
+    discover_youtube_videos,
+    ingest_youtube_transcripts,
+)
 from modules.research.scheduling import default_schedule, is_due, normalize_schedule
 from packages.shared.database import unit_of_work
 from packages.shared.store import ResourceRecord, ResourceStore
@@ -33,11 +36,34 @@ async def _run_youtube_discovery(run_id: UUID) -> dict[str, object]:
             event_type="knowledge_youtube_discovery.provider_requested",
         )
         try:
-            result = await ingest_youtube_discovery(
+            videos = await discover_youtube_videos(
                 session,
                 run.owner_id,
                 query=str(run.data["query"]),
                 limit=int(run.data.get("limit", 5)),
+            )
+            run = await store.update(
+                run,
+                {
+                    **run.data,
+                    "discovery_stage": "SEARCH_COMPLETED",
+                    "discovered_videos": [
+                        {
+                            "video_id": video.video_id,
+                            "url": video.url,
+                            "title": video.title,
+                            "description": video.description,
+                        }
+                        for video in videos
+                    ],
+                },
+                state="SEARCHED",
+                event_type="knowledge_youtube.search.completed",
+            )
+            result = await ingest_youtube_transcripts(
+                session,
+                run.owner_id,
+                videos,
                 languages=list(run.data.get("languages", ["en"])),
                 category=str(run.data.get("category", "trading")),
             )
@@ -55,6 +81,7 @@ async def _run_youtube_discovery(run_id: UUID) -> dict[str, object]:
             )
             return {"run_id": str(run.id), "state": "FAILED"}
         completed_at = datetime.now(UTC).isoformat()
+        final_state = "PARTIAL" if result["failed"] else "SUCCEEDED"
         await store.update(
             run,
             {
@@ -62,11 +89,13 @@ async def _run_youtube_discovery(run_id: UUID) -> dict[str, object]:
                 **result,
                 "provider_requested_at": requested_at,
                 "completed_at": completed_at,
+                "transcript_completed_at": completed_at,
+                "discovery_stage": "TRANSCRIPTS_INGESTED",
             },
-            state="SUCCEEDED",
+            state=final_state,
             event_type="knowledge_youtube_discovery.completed",
         )
-        return {"run_id": str(run.id), "state": "SUCCEEDED"}
+        return {"run_id": str(run.id), "state": final_state}
 
 
 async def _create_scheduled_youtube_runs() -> list[str]:
@@ -86,9 +115,7 @@ async def _create_scheduled_youtube_runs() -> list[str]:
         existing = list(
             (
                 await session.scalars(
-                    select(ResourceRecord).where(
-                        ResourceRecord.kind == "youtube_discovery_run"
-                    )
+                    select(ResourceRecord).where(ResourceRecord.kind == "youtube_discovery_run")
                 )
             ).all()
         )

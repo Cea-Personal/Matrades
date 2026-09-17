@@ -18,6 +18,7 @@ from apps.api.app.dependencies import get_db
 from modules.identity.models import User
 from modules.identity.persistence import AuthTokenRecord, SessionRecord, UserRecord
 from modules.identity.service import enroll, hash_password, totp, verify_password
+from modules.mt5.desktop_runtime import MT5StartupError, ensure_mt5_started
 from packages.shared.config import get_settings
 from packages.shared.domain_types import utc_now
 from packages.shared.store import ResourceStore
@@ -111,6 +112,13 @@ def _set_session_cookie(response: Response, token: str) -> None:
 
 
 async def _issue_session(db: AsyncSession, user: UserRecord, response: Response) -> SessionRecord:
+    try:
+        await ensure_mt5_started()
+    except MT5StartupError as exc:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "MT5 desktop runtime could not be started; session was not created",
+        ) from exc
     raw = secrets.token_urlsafe(48)
     item = SessionRecord(
         user_id=user.id,

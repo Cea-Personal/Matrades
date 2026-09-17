@@ -12,6 +12,7 @@ import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 
 from bridges.mt5.commands import BridgeCommand, BridgeCommandQueue, BridgeReceipt
+from modules.mt5.desktop_runtime import MT5StartupError, ensure_local_mt5_started
 from packages.broker_sdk.schemas import (
     BrokerInstrument,
     BrokerMarketDataSnapshot,
@@ -62,6 +63,7 @@ def create_app(
         else os.environ.get("MATRADES_MT5_AUTHORITY_TOKEN", "")
     )
     trusted_client_fingerprint = os.environ.get("MATRADES_MT5_CLIENT_CERT_FINGERPRINT", "")
+    runtime_control_token = os.environ.get("MATRADES_MT5_RUNTIME_CONTROL_TOKEN", "")
     seen_nonces: dict[str, float] = {}
     sequences: dict[UUID, int] = {}
     latest_snapshots: dict[UUID, dict] = {}
@@ -161,6 +163,30 @@ def create_app(
             "observed_at": datetime.now(UTC).isoformat(),
             "capabilities": capabilities,
             "writes": True,
+        }
+
+    @app.post("/runtime/start")
+    async def start_runtime(
+        x_runtime_token: str | None = Header(
+            default=None, alias="X-Matrades-MT5-Runtime-Token"
+        ),
+    ) -> dict[str, object]:
+        """Start the Wine/MT5 process on the cloud host running this bridge."""
+        if not runtime_control_token or not hmac.compare_digest(
+            x_runtime_token or "", runtime_control_token
+        ):
+            raise HTTPException(401, "invalid MT5 runtime control token")
+        try:
+            result = await ensure_local_mt5_started()
+        except MT5StartupError as exc:
+            raise HTTPException(503, "MT5 runtime could not be started") from exc
+        if result.status != "ready":
+            raise HTTPException(503, "MT5 runtime is not configured on the cloud host")
+        return {
+            "status": result.status,
+            "wine_started": result.wine_started,
+            "terminal_started": result.terminal_started,
+            "detail": result.detail,
         }
 
     @app.post("/market-data/ingest")
