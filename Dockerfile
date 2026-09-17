@@ -41,6 +41,10 @@ COPY . /app
 RUN pip install --no-cache-dir . && chmod +x /app/start.sh
 
 ENV WINEPREFIX=/opt/wineprefix \
+    WINEARCH=win32 \
+    WINEDEBUG=-all \
     PYTHONUNBUFFERED=1
+
+RUN mkdir -p /opt/wineprefix && wineboot --init
 
 ENTRYPOINT ["/app/start.sh"]
