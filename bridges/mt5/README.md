@@ -33,6 +33,30 @@ network or an HTTPS ingress, and configure the bridge host with its own `MATRADE
 launch Wine locally. Docker containers still cannot launch a separate host’s Wine process, so the
 controller must run where the cloud Wine/MT5 installation exists.
 
+## Railway runtime service
+
+For the repository's Railway image, set the service Dockerfile path to `wine.Dockerfile`. The
+image runs `start.sh`, which starts Xvfb, initializes the Wine prefix, installs MT5 when
+`/app/mt5setup.exe` (or `MT5_INSTALLER_URL`) is available, starts `terminal64.exe`, and runs the
+Matrades bridge on Railway's `$PORT`. Set these Railway variables on that service:
+
+```bash
+MATRADES_MT5_AUTO_START_ENABLED=true
+MATRADES_MT5_RUNTIME_CONTROL_TOKEN=the-same-token-used-by-the-api
+MATRADES_MT5_WINE_PREFIX=/opt/wineprefix
+MATRADES_MT5_TERMINAL_PATH=/opt/wineprefix/drive_c/Program Files/MetaTrader 5/terminal64.exe
+MT5_INSTALLER_PATH=/app/mt5setup.exe
+```
+
+Set `MATRADES_MT5_RUNTIME_CONTROL_URL` on the Matrades API service to the Railway public HTTPS
+URL plus `/runtime/start`, for example
+`https://your-mt5-service.up.railway.app/runtime/start`. Do not put the runtime token in the
+browser or expose it through frontend configuration. Attach a Railway persistent volume at
+`/opt/wineprefix` so MT5 installation, login state, and terminal configuration survive restarts.
+If the installer is not copied into the repository, provide an approved `MT5_INSTALLER_URL` or
+make the installer available at `MT5_INSTALLER_PATH`; otherwise the container exits with a clear
+startup error.
+
 Matrades authenticates every bridge request with HMAC-SHA256. The signed bytes are:
 
 ```text
