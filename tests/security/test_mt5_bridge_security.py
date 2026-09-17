@@ -40,6 +40,9 @@ def test_public_bridge_status_reports_startup_without_exposing_broker_data(
         status_path.write_text("wine_failed\n", encoding="utf-8")
         assert client.get("/").json()["runtime_status"] == "wine_failed"
 
+        status_path.write_text("display_failed\n", encoding="utf-8")
+        assert client.get("/").json()["runtime_status"] == "display_failed"
+
 
 def test_signed_ea_ingest_feeds_read_only_snapshot_routes() -> None:
     secret = b"secret"

@@ -19,6 +19,8 @@ def test_desktop_gateway_requires_authentication_for_assets_and_websocket() -> N
 def test_vnc_and_bridge_listen_only_on_loopback() -> None:
     startup = (ROOT / "start.sh").read_text(encoding="utf-8")
 
+    assert startup.index('nginx -c /tmp/matrades-mt5-nginx.conf') < startup.index('Xvfb "$DISPLAY"')
+    assert 'PUBLIC_PORT="${PORT:-8765}"' in startup
     assert "--host 127.0.0.1 --port \"$BRIDGE_PORT\"" in startup
     assert "x11vnc -display \"$DISPLAY\" -rfbport 5900 -localhost" in startup
     assert "websockify 127.0.0.1:6080 127.0.0.1:5900" in startup

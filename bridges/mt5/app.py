@@ -86,11 +86,13 @@ def create_app(
             state = "unknown"
         if state not in {
             "starting",
+            "initializing_display",
             "initializing_wine",
             "installing_mt5",
             "starting_terminal",
             "terminal_started",
             "wine_failed",
+            "display_failed",
             "installer_missing",
             "installer_download_failed",
             "installer_failed",
