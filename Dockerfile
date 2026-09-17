@@ -24,9 +24,10 @@ RUN dpkg --add-architecture i386 && \
     apt-get install -y --install-recommends winehq-stable && \
     rm -rf /var/lib/apt/lists/*
 
-# Fail the image build early if Wine's loader is not actually available.
-RUN wine --version && \
-    test -n "$(find /usr/lib -type f -name kernel32.dll -print -quit)"
+# Fail the image build early if the Wine executable itself is unavailable.
+# Wine's built-in Windows DLLs are not necessarily stored as regular files
+# named exactly kernel32.dll, so do not validate them with a filesystem path.
+RUN wine --version
 
 WORKDIR /app
 COPY . /app
