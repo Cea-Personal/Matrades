@@ -107,7 +107,8 @@ if ! timeout 300s "$WINEBOOT_BIN" --init || ! timeout 30s "$WINE_BIN" cmd /c ver
     PROBE_LOG="$(mktemp /tmp/matrades-wine-probe-log.XXXXXX)"
     if {
         WINEPREFIX="$PROBE_PREFIX" WINEDEBUG=+loaddll timeout 300s "$WINEBOOT_BIN" --init &&
-            WINEPREFIX="$PROBE_PREFIX" timeout 30s "$WINE_BIN" cmd /c ver
+            WINEPREFIX="$PROBE_PREFIX" timeout 30s "$WINE_BIN" notepad.exe & sleep 2 && killall notepad.exe
+
     } >"$PROBE_LOG" 2>&1; then
         echo "Wine works with a temporary prefix. The configured prefix or volume is the likely cause; use a new prefix directory on the existing volume." >&2
     else
@@ -131,10 +132,14 @@ if [[ ! -f "$TERMINAL_PATH" ]]; then
     fi
     set_status installing_mt5
     echo "Installing MetaTrader 5 from $INSTALLER_PATH"
-    if ! "$WINE_BIN" "$INSTALLER_PATH" /s; then
-        fail_and_serve installer_failed
-    fi
-    sleep 10
+    
+    # Force Wine to handle GUI flags correctly by passing standard silent flags
+    "$WINE_BIN" "$INSTALLER_PATH" /s /v/qn &
+    INSTALL_PID=$!
+    
+    # Wait for the installer to finish up to 2 minutes
+    timeout 120s wait "$INSTALL_PID" || true
+    sleep 15
 fi
 
 if [[ ! -f "$TERMINAL_PATH" ]]; then

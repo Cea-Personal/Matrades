@@ -7,6 +7,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # contains the Matrades bridge because Railway exposes one HTTP service port.
 RUN dpkg --add-architecture i386 && \
     apt-get update && \
+    apt-get install -y wine32 \
     apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
@@ -44,6 +45,6 @@ ENV WINEPREFIX=/opt/wineprefix \
     WINEDEBUG=-all \
     PYTHONUNBUFFERED=1
 
-RUN mkdir -p /opt/wineprefix && wineboot --init
+RUN mkdir -p /opt/wineprefix 
 
 ENTRYPOINT ["/app/start.sh"]
