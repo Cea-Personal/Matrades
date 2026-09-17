@@ -20,13 +20,23 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 sleep 2
-
-if [[ -d "$WINEPREFIX/drive_c" && ! -e "$WINEPREFIX/drive_c/windows/system32/kernel32.dll" ]]; then
-    echo "Wine prefix at $WINEPREFIX is incomplete or corrupted; attach a fresh prefix volume" >&2
+if ! kill -0 "$XVFB_PID" 2>/dev/null; then
+    echo "Xvfb exited before Wine initialization" >&2
+    sed -n '1,40p' /tmp/xvfb.log >&2
     exit 1
 fi
-echo "Initializing Wine prefix at $WINEPREFIX"
-"$WINEBOOT_BIN" --init
+
+echo "Initializing Wine prefix at $WINEPREFIX (host architecture: $(uname -m), image architecture: $(dpkg --print-architecture))"
+if ! timeout 300s "$WINEBOOT_BIN" --init; then
+    echo "Wine failed to initialize the configured prefix. Testing a temporary prefix to isolate the volume." >&2
+    PROBE_PREFIX="$(mktemp -d /tmp/matrades-wine-probe.XXXXXX)"
+    if WINEPREFIX="$PROBE_PREFIX" timeout 300s "$WINEBOOT_BIN" --init; then
+        echo "Wine works with a temporary prefix. The configured prefix or volume is the likely cause; use a new prefix directory on the existing volume." >&2
+    else
+        echo "Wine also fails with a temporary prefix. Check the Wine image architecture and Railway runtime logs; changing the volume will not fix this." >&2
+    fi
+    exit 1
+fi
 
 if [[ ! -f "$TERMINAL_PATH" ]]; then
     if [[ ! -f "$INSTALLER_PATH" && -n "${MT5_INSTALLER_URL:-}" ]]; then
