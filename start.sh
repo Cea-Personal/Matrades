@@ -5,6 +5,7 @@ set -Eeuo pipefail
 # /runtime/start and the existing signed MT5 bridge endpoints on that port.
 export WINEPREFIX="${MATRADES_MT5_WINE_PREFIX:-${WINEPREFIX:-/opt/wineprefix}}"
 export DISPLAY="${DISPLAY:-:99}"
+export WINEARCH="${WINEARCH:-win64}"
 WINE_BIN="${MATRADES_MT5_WINE_BINARY:-wine}"
 WINEBOOT_BIN="${MATRADES_MT5_WINEBOOT_BINARY:-wineboot}"
 TERMINAL_PATH="${MATRADES_MT5_TERMINAL_PATH:-$WINEPREFIX/drive_c/Program Files/MetaTrader 5/terminal64.exe}"
@@ -20,7 +21,12 @@ cleanup() {
 trap cleanup EXIT INT TERM
 sleep 2
 
-"$WINEBOOT_BIN" -u
+if [[ -d "$WINEPREFIX/drive_c" && ! -e "$WINEPREFIX/drive_c/windows/system32/kernel32.dll" ]]; then
+    echo "Wine prefix at $WINEPREFIX is incomplete or corrupted; attach a fresh prefix volume" >&2
+    exit 1
+fi
+echo "Initializing Wine prefix at $WINEPREFIX"
+"$WINEBOOT_BIN" --init
 
 if [[ ! -f "$TERMINAL_PATH" ]]; then
     if [[ ! -f "$INSTALLER_PATH" && -n "${MT5_INSTALLER_URL:-}" ]]; then

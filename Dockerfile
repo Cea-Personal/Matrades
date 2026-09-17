@@ -7,13 +7,25 @@ ENV DEBIAN_FRONTEND=noninteractive
 # contains the Matrades bridge because Railway exposes one HTTP service port.
 RUN dpkg --add-architecture i386 && \
     apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates curl gnupg xvfb procps && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        gnupg \
+        xvfb \
+        procps \
+        winbind \
+        cabextract \
+        libvulkan1 \
+        libvulkan1:i386 && \
     mkdir -p /etc/apt/keyrings && \
     curl -fsSL https://dl.winehq.org/wine-builds/winehq.key | gpg --dearmor -o /etc/apt/keyrings/winehq-archive.key && \
     echo 'deb [signed-by=/etc/apt/keyrings/winehq-archive.key] https://dl.winehq.org/wine-builds/debian bookworm main' > /etc/apt/sources.list.d/winehq.list && \
     apt-get update && \
-    apt-get install -y --no-install-recommends winehq-stable && \
+    apt-get install -y --install-recommends winehq-stable && \
     rm -rf /var/lib/apt/lists/*
+
+# Fail the image build early if Wine's loader is not actually available.
+RUN wine --version
 
 WORKDIR /app
 COPY . /app
