@@ -36,7 +36,8 @@ controller must run where the cloud Wine/MT5 installation exists.
 ## Railway runtime service
 
 For the repository's Railway image, set the MT5 service Dockerfile path to the root `Dockerfile`. The
-image runs `start.sh`, which starts Xvfb, initializes the Wine prefix, installs MT5 when
+image runs `start.sh`, which starts Xvfb on an available display, initializes the Wine prefix,
+checks Wine with `cmd /c ver`, and installs MT5 when
 `/app/mt5setup.exe` (or `MT5_INSTALLER_URL`) is available, starts `terminal64.exe`, and runs the
 Matrades bridge on Railway's `$PORT`. Set these Railway variables on that service:
 
@@ -70,6 +71,10 @@ MATRADES_MT5_TERMINAL_PATH=/opt/wineprefix/mt5-fresh/drive_c/Program Files/MetaT
 
 The old installation remains in the previous prefix directory. If the temporary prefix also
 fails, capture the full Wine startup output and the architecture line from the service logs.
+Repeated `Server is already active for display 99` errors are handled by the automatic display
+selection. A `wine: could not load kernel32.dll` error from both the mounted and `/tmp` prefixes
+means startup still fails before the MT5 installer runs; inspect the Wine runtime logs before
+changing MT5 or Railway port settings.
 
 Matrades authenticates every bridge request with HMAC-SHA256. The signed bytes are:
 

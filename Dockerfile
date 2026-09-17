@@ -12,6 +12,7 @@ RUN dpkg --add-architecture i386 && \
         curl \
         gnupg \
         xvfb \
+        xauth \
         procps \
         winbind \
         cabextract \
@@ -34,7 +35,6 @@ COPY . /app
 RUN pip install --no-cache-dir . && chmod +x /app/start.sh
 
 ENV WINEPREFIX=/opt/wineprefix \
-    DISPLAY=:99 \
     PYTHONUNBUFFERED=1
 
 ENTRYPOINT ["/app/start.sh"]

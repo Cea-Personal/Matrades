@@ -3,8 +3,13 @@ set -Eeuo pipefail
 
 # Railway provides PORT for the one public HTTP service port. The bridge exposes
 # /runtime/start and the existing signed MT5 bridge endpoints on that port.
+# xvfb-run selects a free display on every restart, avoiding stale :99 locks.
+if [[ "${MATRADES_XVFB_READY:-}" != "1" ]]; then
+    export MATRADES_XVFB_READY=1
+    exec xvfb-run -a -e /dev/stderr -s '-screen 0 1024x768x24 -ac +extension GLX +render -noreset' "$0" "$@"
+fi
+
 export WINEPREFIX="${MATRADES_MT5_WINE_PREFIX:-${WINEPREFIX:-/opt/wineprefix}}"
-export DISPLAY="${DISPLAY:-:99}"
 export WINEARCH="${WINEARCH:-win64}"
 WINE_BIN="${MATRADES_MT5_WINE_BINARY:-wine}"
 WINEBOOT_BIN="${MATRADES_MT5_WINEBOOT_BINARY:-wineboot}"
@@ -13,27 +18,20 @@ INSTALLER_PATH="${MT5_INSTALLER_PATH:-/app/mt5setup.exe}"
 BRIDGE_PORT="${PORT:-8765}"
 
 mkdir -p "$WINEPREFIX"
-Xvfb "$DISPLAY" -screen 0 1024x768x24 -ac +extension GLX +render -noreset >/tmp/xvfb.log 2>&1 &
-XVFB_PID=$!
-cleanup() {
-    kill "$XVFB_PID" 2>/dev/null || true
-}
-trap cleanup EXIT INT TERM
-sleep 2
-if ! kill -0 "$XVFB_PID" 2>/dev/null; then
-    echo "Xvfb exited before Wine initialization" >&2
-    sed -n '1,40p' /tmp/xvfb.log >&2
-    exit 1
-fi
-
-echo "Initializing Wine prefix at $WINEPREFIX (host architecture: $(uname -m), image architecture: $(dpkg --print-architecture))"
-if ! timeout 300s "$WINEBOOT_BIN" --init; then
+echo "Initializing Wine prefix at $WINEPREFIX (display: $DISPLAY, host architecture: $(uname -m), image architecture: $(dpkg --print-architecture))"
+if ! timeout 300s "$WINEBOOT_BIN" --init || ! timeout 30s "$WINE_BIN" cmd /c ver; then
     echo "Wine failed to initialize the configured prefix. Testing a temporary prefix to isolate the volume." >&2
     PROBE_PREFIX="$(mktemp -d /tmp/matrades-wine-probe.XXXXXX)"
-    if WINEPREFIX="$PROBE_PREFIX" timeout 300s "$WINEBOOT_BIN" --init; then
+    PROBE_LOG="$(mktemp /tmp/matrades-wine-probe-log.XXXXXX)"
+    if {
+        WINEPREFIX="$PROBE_PREFIX" WINEDEBUG=+loaddll timeout 300s "$WINEBOOT_BIN" --init &&
+            WINEPREFIX="$PROBE_PREFIX" timeout 30s "$WINE_BIN" cmd /c ver
+    } >"$PROBE_LOG" 2>&1; then
         echo "Wine works with a temporary prefix. The configured prefix or volume is the likely cause; use a new prefix directory on the existing volume." >&2
     else
-        echo "Wine also fails with a temporary prefix. Check the Wine image architecture and Railway runtime logs; changing the volume will not fix this." >&2
+        echo "Last 80 lines of Wine loader diagnostics:" >&2
+        tail -n 80 "$PROBE_LOG" >&2
+        echo "Wine also fails with a temporary prefix. Check the Wine image and Railway runtime logs; changing the volume will not fix this." >&2
     fi
     exit 1
 fi
