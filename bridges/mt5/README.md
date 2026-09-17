@@ -36,10 +36,12 @@ controller must run where the cloud Wine/MT5 installation exists.
 ## Railway runtime service
 
 For the repository's Railway image, set the MT5 service Dockerfile path to the root `Dockerfile`. The
-image runs `start.sh`, which starts Xvfb on an available display, initializes the Wine prefix,
-checks Wine with `cmd /c ver`, and installs MT5 when
-`/app/mt5setup.exe` (or `MT5_INSTALLER_URL`) is available, starts `terminal64.exe`, and runs the
-Matrades bridge on Railway's `$PORT`. Set these Railway variables on that service:
+image runs `start.sh`, which starts Xvfb on an available display, an authenticated noVNC browser
+desktop, and the bridge before it initializes Wine. It checks Wine with `cmd /c ver`, installs
+MT5 when `/app/mt5setup.exe` (or `MT5_INSTALLER_URL`) is available, and then starts
+`terminal64.exe`. Nginx uses Railway's `$PORT` for the public desktop and reverse-proxies the
+existing bridge API routes; the bridge itself listens only on `127.0.0.1:18765`. Set these
+Railway variables on that service:
 
 ```bash
 MATRADES_MT5_AUTO_START_ENABLED=true
@@ -47,7 +49,24 @@ MATRADES_MT5_RUNTIME_CONTROL_TOKEN=the-same-token-used-by-the-api
 MATRADES_MT5_WINE_PREFIX=/opt/wineprefix
 MATRADES_MT5_TERMINAL_PATH=/opt/wineprefix/drive_c/Program Files/MetaTrader 5/terminal64.exe
 MT5_INSTALLER_PATH=/app/mt5setup.exe
+MATRADES_MT5_DESKTOP_USER=your-desktop-username
+MATRADES_MT5_DESKTOP_PASSWORD=your-long-random-desktop-password
 ```
+
+The desktop credentials are required at startup, are only for viewing and controlling MT5, and
+must be set as Railway service secrets, not committed to the repository. Use the Railway HTTPS
+domain. Opening its root URL redirects to the noVNC desktop and prompts for those credentials;
+`/status` returns JSON startup state, such as `initializing_wine`, `terminal_started`, or
+`wine_failed`. `/docs` and the signed bridge routes remain on the same domain. The browser
+desktop is interactive only if Wine and MT5 have started; a blank display with `wine_failed` at
+`/status` means the existing Wine problem remains. The noVNC WebSocket and all desktop assets
+are behind the same HTTP authentication. The VNC and WebSocket backends bind only to loopback.
+
+If the MT5 EA runs in this container, set its `InpBridgeUrl` and the corresponding MT5 WebRequest
+allowlist entry to `http://127.0.0.1:18765`. For an EA on a different host, use the public HTTPS
+bridge domain instead and preserve its HMAC signing. If Railway has a custom port setting, it
+must match the service `$PORT`; the image defaults to port 8080 when `$PORT` is absent. Do not
+point the browser at the raw bridge port or VNC port.
 
 Set `MATRADES_MT5_RUNTIME_CONTROL_URL` on the Matrades API service to the Railway public HTTPS
 URL plus `/runtime/start`, for example

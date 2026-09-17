@@ -6,6 +6,7 @@ import os
 import time
 from base64 import b64encode
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import httpx
@@ -73,6 +74,35 @@ def create_app(
     latest_market_received: dict[UUID, float] = {}
     command_queue = BridgeCommandQueue(os.environ.get("MATRADES_MT5_COMMAND_QUEUE_PATH"))
     app.state.command_queue = command_queue
+    runtime_status_path = Path(
+        os.environ.get("MATRADES_MT5_RUNTIME_STATUS_PATH", "/tmp/matrades-mt5-runtime.status")
+    )
+
+    @app.get("/")
+    async def runtime_status() -> dict[str, str]:
+        try:
+            state = runtime_status_path.read_text(encoding="utf-8").strip()
+        except OSError:
+            state = "unknown"
+        if state not in {
+            "starting",
+            "initializing_wine",
+            "installing_mt5",
+            "starting_terminal",
+            "terminal_started",
+            "wine_failed",
+            "installer_missing",
+            "installer_download_failed",
+            "installer_failed",
+            "terminal_missing",
+            "terminal_failed",
+        }:
+            state = "unknown"
+        return {
+            "service": "matrades-mt5-bridge",
+            "runtime_status": state,
+            "detail": "This endpoint reports bridge status; it does not display the MT5 desktop.",
+        }
 
     async def verify_with_credential_authority(
         body: bytes, timestamp: str, nonce: str, signature: str

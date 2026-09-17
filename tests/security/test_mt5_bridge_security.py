@@ -3,6 +3,7 @@ import hmac
 import json
 import time
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from uuid import uuid4
 
 import httpx
@@ -22,6 +23,22 @@ def test_signed_message_and_replay_window():
     verify(body, timestamp, sig, secret)
     with pytest.raises(HTTPException):
         verify(body, str(int(time.time()) - 100), sig, secret)
+
+
+def test_public_bridge_status_reports_startup_without_exposing_broker_data(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    status_path = tmp_path / "runtime.status"
+    monkeypatch.setenv("MATRADES_MT5_RUNTIME_STATUS_PATH", str(status_path))
+    with TestClient(create_app()) as client:
+        status_path.write_text("initializing_wine\n", encoding="utf-8")
+        response = client.get("/")
+        assert response.status_code == 200
+        assert response.json()["runtime_status"] == "initializing_wine"
+        assert "account" not in response.text.lower()
+
+        status_path.write_text("wine_failed\n", encoding="utf-8")
+        assert client.get("/").json()["runtime_status"] == "wine_failed"
 
 
 def test_signed_ea_ingest_feeds_read_only_snapshot_routes() -> None:

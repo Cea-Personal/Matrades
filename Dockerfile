@@ -13,6 +13,12 @@ RUN dpkg --add-architecture i386 && \
         gnupg \
         xvfb \
         xauth \
+        x11vnc \
+        fluxbox \
+        novnc \
+        websockify \
+        nginx \
+        apache2-utils \
         procps \
         winbind \
         cabextract \

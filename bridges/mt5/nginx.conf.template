@@ -1,0 +1,53 @@
+worker_processes 1;
+pid /tmp/matrades-mt5-nginx.pid;
+error_log /dev/stderr warn;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    access_log /dev/stdout;
+    sendfile on;
+
+    server {
+        listen __PORT__;
+        server_name _;
+
+        location = / {
+            return 302 /desktop/vnc.html?autoconnect=1&path=websockify;
+        }
+
+        location = /desktop {
+            return 302 /desktop/;
+        }
+
+        location = /desktop/websockify {
+            auth_basic "Matrades MT5 desktop";
+            auth_basic_user_file /tmp/matrades-mt5-desktop.htpasswd;
+            proxy_pass http://127.0.0.1:6080;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_read_timeout 3600s;
+            proxy_send_timeout 3600s;
+        }
+
+        location /desktop/ {
+            auth_basic "Matrades MT5 desktop";
+            auth_basic_user_file /tmp/matrades-mt5-desktop.htpasswd;
+            alias /usr/share/novnc/;
+            add_header Cache-Control no-cache;
+        }
+
+        location = /status {
+            proxy_pass http://127.0.0.1:18765/;
+        }
+
+        location / {
+            proxy_pass http://127.0.0.1:18765;
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+        }
+    }
+}
