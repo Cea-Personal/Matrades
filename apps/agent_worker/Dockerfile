@@ -11,6 +11,8 @@ ENV PATH="/root/.local/bin:${PATH}"
 WORKDIR /app
 
 COPY . .
+COPY ../../infra /app/infra
+COPY ../../packages /app/packages
 RUN pip install --no-cache-dir .
 RUN codex --version
 RUN mkdir -p /app/.codex 
