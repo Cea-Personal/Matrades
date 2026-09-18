@@ -13,7 +13,12 @@ if [ ! -s "$auth_file" ]; then
     printf '%s' "$OPENAI_API_KEY" | codex login --with-api-key
 fi
 echo "Running database migrations..."
-cd ../../infra/migrations
+echo "=== DEBUGBOM ==="
+echo "Current working directory:"
+pwd
+echo "Files in current directory:"
+ls -la
+echo "================="
 python -m alembic upgrade head 
 
 exec python -m apps.agent_worker.app.main
