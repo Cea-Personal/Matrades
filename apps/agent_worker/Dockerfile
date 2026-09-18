@@ -12,5 +12,8 @@ WORKDIR /app
 COPY . .
 RUN pip install --no-cache-dir .
 RUN codex --version
+mkdir -p /app/.codex 
+echo "$AUTH_JSON" > /app/.codex/auth.json
+
 RUN chmod 755 /app/apps/agent_worker/entrypoint.sh
 CMD ["/app/apps/agent_worker/entrypoint.sh"]
