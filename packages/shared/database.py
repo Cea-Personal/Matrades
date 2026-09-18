@@ -21,6 +21,7 @@ engine = create_async_engine(database_url, pool_pre_ping=True, poolclass=NullPoo
 session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
 
+
 @asynccontextmanager
 async def unit_of_work() -> AsyncIterator[AsyncSession]:
     async with session_factory() as session:
