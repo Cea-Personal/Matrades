@@ -8,8 +8,16 @@ from sqlalchemy.pool import NullPool
 
 from packages.shared.config import get_settings
 
+
+
 settings = get_settings()
-engine = create_async_engine(settings.database_url, pool_pre_ping=True, poolclass=NullPool)
+database_url = settings.database_url
+if database_url.startswith("postgres://"):
+    database_url = database_url.replace("postgres://", "postgresql+asyncpg://", 1)
+elif database_url.startswith("postgresql://"):
+    database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+engine = create_async_engine(database_url, pool_pre_ping=True, poolclass=NullPool)
 session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
 
