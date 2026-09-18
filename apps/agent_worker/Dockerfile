@@ -13,7 +13,8 @@ WORKDIR /app
 COPY . .
 COPY ../../infra /app/infra
 COPY ../../packages /app/packages
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir psycopg2-binary asyncpg && \
+    pip install --no-cache-dir .
 RUN codex --version
 RUN mkdir -p /app/.codex 
 RUN echo "$AUTH_JSON" > /app/.codex/auth.json
