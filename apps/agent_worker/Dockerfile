@@ -13,6 +13,8 @@ WORKDIR /app
 COPY . .
 COPY ../../infra /app/infra
 COPY ../../packages /app/packages
+RUN echo "=== Current files inside /app ===" && find .
+
 RUN pip install --no-cache-dir psycopg2-binary asyncpg && \
     pip install --no-cache-dir .
 RUN codex --version
