@@ -12,6 +12,8 @@ if [ ! -s "$auth_file" ]; then
     mkdir -p "$codex_home"
     printf '%s' "$OPENAI_API_KEY" | codex login --with-api-key
 fi
+echo "Running database migrations..."
 cd ./infra/migrations
+python -m alembic upgrade head 
 
 exec python -m apps.agent_worker.app.main
