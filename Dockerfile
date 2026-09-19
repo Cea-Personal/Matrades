@@ -111,4 +111,4 @@ ENV WINEPREFIX=/tmp/wineprefix \
 RUN chmod +x /app/start.sh
 
 
-ENTRYPOINT ["/app/start.sh"]
+ENTRYPOINT ["/app/wine-test.sh"]
