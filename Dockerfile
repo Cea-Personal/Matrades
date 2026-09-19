@@ -36,10 +36,28 @@ RUN apt-get update && \
         winbind \
         cabextract \
         fonts-liberation \
-        fonts-dejavu-core && \
+        fonts-dejavu-core \
+        libvulkan1 \
+        libvulkan1:i386 \
+        mesa-vulkan-drivers \
+        mesa-vulkan-drivers:i386 \
+        libgl1 \
+        libgl1:i386 \
+        libglx-mesa0 \
+        libglx-mesa0:i386 \
+        libx11-6 \
+        libx11-6:i386 \
+        libxext6 \
+        libxext6:i386 \
+        libxrender1 \
+        libxrender1:i386 \
+        libfreetype6 \
+        libfreetype6:i386 && \
     rm -rf /var/lib/apt/lists/*
 
-
+ENV LIBGL_ALWAYS_SOFTWARE=1 \
+    GALLIUM_DRIVER=llvmpipe \
+    MESA_LOADER_DRIVER_OVERRIDE=llvmpipe
 # ---------------------------------------------------------
 # WineHQ repository
 # ---------------------------------------------------------
@@ -48,8 +66,7 @@ RUN mkdir -pm755 /etc/apt/keyrings && \
     wget -O /etc/apt/keyrings/winehq-archive.key \
         https://dl.winehq.org/wine-builds/winehq.key && \
     wget -NP /etc/apt/sources.list.d/ \
-        https://dl.winehq.org/wine-builds/debian/dists/bookworm/winehq-bookworm.sources
-
+        https://dl.winehq.org/wine-builds/debian/dists/bookworm/winehq-bookworm.sources 
 
 # ---------------------------------------------------------
 # Install Wine
