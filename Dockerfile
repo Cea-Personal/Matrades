@@ -1,50 +1,68 @@
 FROM python:3.13-slim-bookworm
 
-# Prevent interactive prompts during installation
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Enable 32-bit architecture and install dependencies/Wine. The image also
-# contains the Matrades bridge because Railway exposes one HTTP service port.
-RUN dpkg --add-architecture i386 && \
-    apt-get update && \
-    apt-get install -y wine32 \
-    apt-get install -y --no-install-recommends \
+# ---------------------------------------------------------
+# WineHQ + desktop/runtime dependencies
+# ---------------------------------------------------------
+
+RUN dpkg --add-architecture i386 \
+    && mkdir -pm755 /etc/apt/keyrings \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
+        wget \
         gnupg \
+        procps \
+        psmisc \
         xvfb \
         xauth \
+        x11-utils \
         x11vnc \
         fluxbox \
         novnc \
         websockify \
         nginx \
         apache2-utils \
-        procps \
         winbind \
         cabextract \
-        libvulkan1 \
-        libvulkan1:i386 && \
-    mkdir -p /etc/apt/keyrings && \
-    curl -fsSL https://dl.winehq.org/wine-builds/winehq.key | gpg --dearmor -o /etc/apt/keyrings/winehq-archive.key && \
-    echo 'deb [signed-by=/etc/apt/keyrings/winehq-archive.key] https://dl.winehq.org/wine-builds/debian bookworm main' > /etc/apt/sources.list.d/winehq.list && \
-    apt-get update && \
-    apt-get install -y --install-recommends winehq-stable && \
-    rm -rf /var/lib/apt/lists/*
+        fonts-liberation \
+        fonts-dejavu-core \
+    && wget -O /etc/apt/keyrings/winehq-archive.key \
+        https://dl.winehq.org/wine-builds/winehq.key \
+    && wget -NP /etc/apt/sources.list.d/ \
+        https://dl.winehq.org/wine-builds/debian/dists/bookworm/winehq-bookworm.sources \
+    && apt-get update \
+    && apt-get install -y --install-recommends \
+        winehq-stable \
+    && rm -rf /var/lib/apt/lists/*
 
-# Fail the image build early if the Wine executable itself is unavailable.
-# Wine's built-in Windows DLLs are not necessarily stored as regular files
-# named exactly kernel32.dll, so do not validate them with a filesystem path.
+# Verify Wine exists, but DON'T initialize a prefix at build time.
 RUN wine --version
 
-WORKDIR /app
-COPY . /app
-RUN pip install --no-cache-dir . && chmod +x /app/start.sh
+# ---------------------------------------------------------
+# Application
+# ---------------------------------------------------------
 
-ENV WINEPREFIX=/opt/wineprefix \
+WORKDIR /app
+
+COPY . /app
+
+RUN pip install --no-cache-dir . \
+    && chmod +x /app/start.sh
+
+# ---------------------------------------------------------
+# Runtime configuration
+# ---------------------------------------------------------
+
+ENV DISPLAY=:99 \
+    WINEARCH=win64 \
+    WINEPREFIX=/data/wineprefix \
     WINEDEBUG=-all \
     PYTHONUNBUFFERED=1
 
-RUN mkdir -p /opt/wineprefix 
+# Railway volume should be mounted at /data.
+VOLUME ["/data"]
 
 ENTRYPOINT ["/app/start.sh"]

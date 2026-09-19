@@ -1,184 +1,491 @@
 #!/usr/bin/env bash
+
 set -Eeuo pipefail
 
-# Railway provides PORT for the one public HTTP service port. Start the HTTP
-# gateway before Xvfb and Wine so display initialization cannot cause a 502.
+# =========================================================
+# Configuration
+# =========================================================
 
-export WINEPREFIX="${MATRADES_MT5_WINE_PREFIX:-${WINEPREFIX:-/opt/wineprefix}}"
+export DISPLAY="${DISPLAY:-:99}"
 export WINEARCH="${WINEARCH:-win64}"
+export WINEPREFIX="${MATRADES_MT5_WINE_PREFIX:-${WINEPREFIX:-/data/wineprefix}}"
+
 WINE_BIN="${MATRADES_MT5_WINE_BINARY:-wine}"
 WINEBOOT_BIN="${MATRADES_MT5_WINEBOOT_BINARY:-wineboot}"
-TERMINAL_PATH="${MATRADES_MT5_TERMINAL_PATH:-$WINEPREFIX/drive_c/Program Files/MetaTrader 5/terminal64.exe}"
-export MATRADES_MT5_TERMINAL_PATH="$TERMINAL_PATH"
-INSTALLER_PATH="${MT5_INSTALLER_PATH:-/app/mt5setup.exe}"
-PUBLIC_PORT="${PORT:-8765}"
-BRIDGE_PORT=18765
+
+PUBLIC_PORT="${PORT:-8080}"
+BRIDGE_PORT="${MATRADES_MT5_BRIDGE_PORT:-18765}"
+
+VNC_PORT=5900
+NOVNC_PORT=6080
+
 STATUS_PATH="${MATRADES_MT5_RUNTIME_STATUS_PATH:-/tmp/matrades-mt5-runtime.status}"
-export DISPLAY=:99
 
-echo "MT5 service starting (public port: $PUBLIC_PORT, bridge port: $BRIDGE_PORT)"
+DEFAULT_TERMINAL_PATH="$WINEPREFIX/drive_c/Program Files/MetaTrader 5/terminal64.exe"
 
-if [[ ! "$PUBLIC_PORT" =~ ^[0-9]+$ ]] || (( PUBLIC_PORT < 1 || PUBLIC_PORT > 65535 )); then
-    echo "PORT must be a TCP port number between 1 and 65535" >&2
-    exit 1
-fi
-if (( PUBLIC_PORT == BRIDGE_PORT || PUBLIC_PORT == 6080 || PUBLIC_PORT == 5900 )); then
-    echo "PORT conflicts with an internal MT5 desktop port" >&2
-    exit 1
-fi
-if [[ ! "${MATRADES_MT5_DESKTOP_USER:-}" =~ ^[A-Za-z0-9_.-]+$ ]] || [[ -z "${MATRADES_MT5_DESKTOP_PASSWORD:-}" ]]; then
-    echo "Set MATRADES_MT5_DESKTOP_USER and MATRADES_MT5_DESKTOP_PASSWORD on the MT5 Railway service before exposing its desktop" >&2
-    exit 1
-fi
-if [[ "$MATRADES_MT5_DESKTOP_PASSWORD" == *$'\n'* || "$MATRADES_MT5_DESKTOP_PASSWORD" == *$'\r'* ]]; then
-    echo "MATRADES_MT5_DESKTOP_PASSWORD must not contain a newline" >&2
-    exit 1
-fi
+TERMINAL_PATH="${MATRADES_MT5_TERMINAL_PATH:-$DEFAULT_TERMINAL_PATH}"
 
-umask 077
-printf '%s\n' "$MATRADES_MT5_DESKTOP_PASSWORD" | htpasswd -i -c -5 /tmp/matrades-mt5-desktop.htpasswd "$MATRADES_MT5_DESKTOP_USER" >/dev/null
-sed "s/__PORT__/$PUBLIC_PORT/" /app/bridges/mt5/nginx.conf.template > /tmp/matrades-mt5-nginx.conf
-nginx -t -c /tmp/matrades-mt5-nginx.conf
+INSTALLER_PATH="${MT5_INSTALLER_PATH:-/app/mt5setup.exe}"
+
+export MATRADES_MT5_TERMINAL_PATH="$TERMINAL_PATH"
+
+
+# =========================================================
+# Helpers
+# =========================================================
+
+log() {
+    echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] $*"
+}
 
 set_status() {
     printf '%s\n' "$1" > "$STATUS_PATH"
+    log "STATUS: $1"
 }
 
-fail_and_serve() {
+fatal() {
     set_status "$1"
-    echo "MT5 startup failed ($1); the desktop and /status remain available for diagnosis" >&2
-    wait "$NGINX_PID"
+    log "FATAL: $1"
     exit 1
 }
 
+process_running() {
+    kill -0 "$1" 2>/dev/null
+}
+
+mt5_running() {
+    if [[ -n "${MT5_PID:-}" ]] && kill -0 "$MT5_PID" 2>/dev/null; then
+        return 0
+    fi
+
+    pgrep -f 'terminal64\.exe' >/dev/null 2>&1
+}
+
+
+# =========================================================
+# Validate configuration
+# =========================================================
+
 mkdir -p "$(dirname "$STATUS_PATH")"
 set_status starting
-echo "Starting MT5 desktop gateway on port $PUBLIC_PORT and bridge on loopback port $BRIDGE_PORT"
-uvicorn bridges.mt5.app:app --host 127.0.0.1 --port "$BRIDGE_PORT" &
-BRIDGE_PID=$!
-nginx -c /tmp/matrades-mt5-nginx.conf -g 'daemon off;' &
-NGINX_PID=$!
-sleep 2
-for service_pid in "$BRIDGE_PID" "$NGINX_PID"; do
-    if ! kill -0 "$service_pid" 2>/dev/null; then
-        echo "The MT5 HTTP gateway or bridge exited during startup" >&2
-        exit 1
-    fi
-done
-echo "MT5 HTTP gateway is running on port $PUBLIC_PORT"
 
-set_status initializing_display
-echo "Starting Xvfb display $DISPLAY"
-Xvfb "$DISPLAY" -screen 0 1024x768x24 -ac -nolisten tcp +extension GLX +render -noreset >/tmp/matrades-xvfb.log 2>&1 &
-XVFB_PID=$!
-for attempt in {1..40}; do
-    if [[ -S /tmp/.X11-unix/X99 ]] && kill -0 "$XVFB_PID" 2>/dev/null; then
-        break
-    fi
-    sleep 0.25
-done
-if [[ ! -S /tmp/.X11-unix/X99 ]] || ! kill -0 "$XVFB_PID" 2>/dev/null; then
-    echo "Xvfb did not start; recent display log:" >&2
-    tail -n 60 /tmp/matrades-xvfb.log >&2
-    fail_and_serve display_failed
+log "Starting Matrades MT5 runtime"
+
+log "Architecture:"
+log "  kernel: $(uname -m)"
+log "  Debian: $(dpkg --print-architecture)"
+log "  foreign: $(dpkg --print-foreign-architectures || true)"
+
+log "Wine:"
+"$WINE_BIN" --version
+
+if [[ ! "$PUBLIC_PORT" =~ ^[0-9]+$ ]]; then
+    fatal invalid_public_port
 fi
 
-fluxbox >/tmp/matrades-fluxbox.log 2>&1 &
-x11vnc -display "$DISPLAY" -rfbport 5900 -localhost -forever -shared -nopw -quiet >/tmp/matrades-x11vnc.log 2>&1 &
-VNC_PID=$!
-websockify 127.0.0.1:6080 127.0.0.1:5900 >/tmp/matrades-websockify.log 2>&1 &
-WEBSOCKIFY_PID=$!
-sleep 2
-for service_pid in "$VNC_PID" "$WEBSOCKIFY_PID"; do
-    if ! kill -0 "$service_pid" 2>/dev/null; then
-        echo "An MT5 desktop service exited during startup" >&2
-        tail -n 30 /tmp/matrades-x11vnc.log /tmp/matrades-websockify.log >&2
-        fail_and_serve display_failed
-    fi
-done
-echo "MT5 browser desktop is ready; initializing Wine"
+if [[ -z "${MATRADES_MT5_DESKTOP_USER:-}" ]]; then
+    fatal desktop_username_missing
+fi
+
+if [[ -z "${MATRADES_MT5_DESKTOP_PASSWORD:-}" ]]; then
+    fatal desktop_password_missing
+fi
+
+
+# =========================================================
+# Persistent storage
+# =========================================================
 
 mkdir -p "$WINEPREFIX"
-set_status initializing_wine
-echo "Initializing Wine prefix at $WINEPREFIX (display: $DISPLAY, host architecture: $(uname -m), image architecture: $(dpkg --print-architecture))"
-if ! timeout 300s "$WINEBOOT_BIN" --init || ! timeout 30s "$WINE_BIN" cmd /c ver; then
-    echo "Wine failed to initialize the configured prefix. Testing a temporary prefix to isolate the volume." >&2
-    PROBE_PREFIX="$(mktemp -d /tmp/matrades-wine-probe.XXXXXX)"
-    PROBE_LOG="$(mktemp /tmp/matrades-wine-probe-log.XXXXXX)"
-    if {
-        WINEPREFIX="$PROBE_PREFIX" WINEDEBUG=+loaddll timeout 300s "$WINEBOOT_BIN" --init &&
-            WINEPREFIX="$PROBE_PREFIX" timeout 30s "$WINE_BIN" notepad.exe & sleep 2 && killall notepad.exe
 
-    } >"$PROBE_LOG" 2>&1; then
-        echo "Wine works with a temporary prefix. The configured prefix or volume is the likely cause; use a new prefix directory on the existing volume." >&2
-    else
-        echo "Last 80 lines of Wine loader diagnostics:" >&2
-        tail -n 80 "$PROBE_LOG" >&2
-        echo "Wine also fails with a temporary prefix. Check the Wine image and Railway runtime logs; changing the volume will not fix this." >&2
+log "Wine prefix: $WINEPREFIX"
+
+
+# =========================================================
+# Start X display
+# =========================================================
+
+set_status starting_display
+
+log "Starting Xvfb on $DISPLAY"
+
+Xvfb "$DISPLAY" \
+    -screen 0 1440x900x24 \
+    -ac \
+    -nolisten tcp \
+    +extension GLX \
+    +render \
+    -noreset \
+    >/tmp/xvfb.log 2>&1 &
+
+XVFB_PID=$!
+
+for attempt in $(seq 1 40); do
+
+    if xdpyinfo -display "$DISPLAY" >/dev/null 2>&1; then
+        break
     fi
-    fail_and_serve wine_failed
-fi
 
-if [[ ! -f "$TERMINAL_PATH" ]]; then
-    if [[ ! -f "$INSTALLER_PATH" && -n "${MT5_INSTALLER_URL:-}" ]]; then
-        echo "Downloading MetaTrader 5 installer"
-        if ! curl -fsSL "$MT5_INSTALLER_URL" -o "$INSTALLER_PATH"; then
-            fail_and_serve installer_download_failed
-        fi
+    if ! process_running "$XVFB_PID"; then
+        cat /tmp/xvfb.log
+        fatal display_failed
     fi
-    if [[ ! -f "$INSTALLER_PATH" ]]; then
-        echo "MT5 terminal is missing and installer was not found at $INSTALLER_PATH" >&2
-        fail_and_serve installer_missing
-    fi
-    set_status installing_mt5
-    echo "Installing MetaTrader 5 from $INSTALLER_PATH"
-    
-    # Force Wine to handle GUI flags correctly by passing standard silent flags
-    "$WINE_BIN" "$INSTALLER_PATH" /s /v/qn &
-    INSTALL_PID=$!
-    
-    # Wait for the installer to finish up to 2 minutes
-    timeout 120s wait "$INSTALL_PID" || true
-    sleep 15
-fi
 
-if [[ ! -f "$TERMINAL_PATH" ]]; then
-    TERMINAL_PATH="$(find "$WINEPREFIX/drive_c" -type f -iname terminal64.exe -print -quit)"
-    export MATRADES_MT5_TERMINAL_PATH="$TERMINAL_PATH"
-fi
-if [[ -z "$TERMINAL_PATH" || ! -f "$TERMINAL_PATH" ]]; then
-    echo "MetaTrader 5 terminal64.exe was not found after installation" >&2
-    fail_and_serve terminal_missing
-fi
+    sleep 0.25
 
-set_status starting_terminal
-echo "Starting MT5 terminal: $TERMINAL_PATH"
-"$WINE_BIN" "$TERMINAL_PATH" >/tmp/mt5.log 2>&1 &
-MT5_PID=$!
-sleep 2
-if ! kill -0 "$MT5_PID" 2>/dev/null && ! pgrep -f -- "$TERMINAL_PATH" >/dev/null; then
-    echo "MT5 terminal exited immediately; recent terminal log:" >&2
-    tail -n 60 /tmp/mt5.log >&2
-    fail_and_serve terminal_failed
-fi
-set_status terminal_started
-
-while kill -0 "$BRIDGE_PID" 2>/dev/null && kill -0 "$NGINX_PID" 2>/dev/null && kill -0 "$XVFB_PID" 2>/dev/null && kill -0 "$VNC_PID" 2>/dev/null && kill -0 "$WEBSOCKIFY_PID" 2>/dev/null; do
-    if ! kill -0 "$MT5_PID" 2>/dev/null; then
-        echo "MT5 terminal exited; restarting it" >&2
-        set_status starting_terminal
-        "$WINE_BIN" "$TERMINAL_PATH" >/tmp/mt5.log 2>&1 &
-        MT5_PID=$!
-        sleep 2
-        if ! kill -0 "$MT5_PID" 2>/dev/null && ! pgrep -f -- "$TERMINAL_PATH" >/dev/null; then
-            echo "MT5 terminal failed after restart; recent terminal log:" >&2
-            tail -n 60 /tmp/mt5.log >&2
-            fail_and_serve terminal_failed
-        fi
-        set_status terminal_started
-    fi
-    sleep 5
 done
 
-echo "The MT5 desktop gateway or bridge stopped unexpectedly" >&2
-exit 1
+if ! xdpyinfo -display "$DISPLAY" >/dev/null 2>&1; then
+    cat /tmp/xvfb.log
+    fatal display_failed
+fi
+
+log "X display ready"
+
+
+# =========================================================
+# Window manager
+# =========================================================
+
+fluxbox >/tmp/fluxbox.log 2>&1 &
+FLUXBOX_PID=$!
+
+
+# =========================================================
+# VNC
+# =========================================================
+
+log "Starting VNC"
+
+x11vnc \
+    -display "$DISPLAY" \
+    -rfbport "$VNC_PORT" \
+    -localhost \
+    -forever \
+    -shared \
+    -nopw \
+    -quiet \
+    >/tmp/x11vnc.log 2>&1 &
+
+VNC_PID=$!
+
+
+# =========================================================
+# noVNC
+# =========================================================
+
+log "Starting noVNC"
+
+websockify \
+    --web=/usr/share/novnc \
+    "127.0.0.1:${NOVNC_PORT}" \
+    "127.0.0.1:${VNC_PORT}" \
+    >/tmp/novnc.log 2>&1 &
+
+NOVNC_PID=$!
+
+
+# =========================================================
+# Wine initialization
+# =========================================================
+
+set_status initializing_wine
+
+log "Initializing Wine prefix"
+
+if ! timeout 180s "$WINEBOOT_BIN" --init >/tmp/wineboot.log 2>&1; then
+
+    log "wineboot failed"
+
+    cat /tmp/wineboot.log
+
+    fatal wineboot_failed
+
+fi
+
+
+log "Testing Wine"
+
+if ! timeout 30s "$WINE_BIN" cmd /c echo WINE_OK >/tmp/winetest.log 2>&1; then
+
+    log "Wine command test failed"
+
+    cat /tmp/winetest.log
+
+    fatal wine_test_failed
+
+fi
+
+log "Wine initialized successfully"
+
+
+# =========================================================
+# Find MT5
+# =========================================================
+
+if [[ ! -f "$TERMINAL_PATH" ]]; then
+
+    log "Checking Wine prefix for terminal64.exe"
+
+    FOUND_TERMINAL="$(
+        find "$WINEPREFIX/drive_c" \
+            -type f \
+            -iname 'terminal64.exe' \
+            -print \
+            -quit 2>/dev/null || true
+    )"
+
+    if [[ -n "$FOUND_TERMINAL" ]]; then
+
+        TERMINAL_PATH="$FOUND_TERMINAL"
+
+        export MATRADES_MT5_TERMINAL_PATH="$TERMINAL_PATH"
+
+    fi
+fi
+
+
+# =========================================================
+# MT5 installation/bootstrap
+# =========================================================
+
+if [[ ! -f "$TERMINAL_PATH" ]]; then
+
+    set_status mt5_install_required
+
+    log "MetaTrader 5 is not currently installed."
+    log ""
+    log "Wine and the remote desktop are working."
+    log ""
+    log "Install MT5 using the browser desktop."
+    log ""
+
+    if [[ -f "$INSTALLER_PATH" ]]; then
+
+        log "Launching MT5 installer: $INSTALLER_PATH"
+
+        "$WINE_BIN" "$INSTALLER_PATH" \
+            >/tmp/mt5-installer.log 2>&1 &
+
+    else
+
+        log "No installer found at:"
+        log "$INSTALLER_PATH"
+
+    fi
+
+fi
+
+
+# =========================================================
+# Bridge
+# =========================================================
+
+log "Starting Matrades MT5 bridge"
+
+uvicorn bridges.mt5.app:app \
+    --host 127.0.0.1 \
+    --port "$BRIDGE_PORT" \
+    >/tmp/bridge.log 2>&1 &
+
+BRIDGE_PID=$!
+
+
+# =========================================================
+# Authentication for desktop
+# =========================================================
+
+umask 077
+
+printf '%s\n' "$MATRADES_MT5_DESKTOP_PASSWORD" |
+    htpasswd \
+        -i \
+        -c \
+        -B \
+        /tmp/matrades-mt5-desktop.htpasswd \
+        "$MATRADES_MT5_DESKTOP_USER" \
+        >/dev/null
+
+
+# =========================================================
+# nginx
+# =========================================================
+
+sed \
+    "s/__PORT__/$PUBLIC_PORT/g" \
+    /app/bridges/mt5/nginx.conf.template \
+    > /tmp/matrades-mt5-nginx.conf
+
+nginx -t -c /tmp/matrades-mt5-nginx.conf
+
+log "Starting nginx on Railway port $PUBLIC_PORT"
+
+nginx \
+    -c /tmp/matrades-mt5-nginx.conf \
+    -g 'daemon off;' \
+    >/tmp/nginx.log 2>&1 &
+
+NGINX_PID=$!
+
+
+# =========================================================
+# Start MT5
+# =========================================================
+
+start_mt5() {
+
+    if [[ ! -f "$TERMINAL_PATH" ]]; then
+        return 1
+    fi
+
+    set_status starting_terminal
+
+    log "Starting MetaTrader 5"
+    log "$TERMINAL_PATH"
+
+    "$WINE_BIN" "$TERMINAL_PATH" \
+        >/tmp/mt5.log 2>&1 &
+
+    MT5_PID=$!
+
+    sleep 5
+
+    if mt5_running; then
+
+        set_status terminal_started
+
+        log "MetaTrader 5 running"
+
+        return 0
+
+    fi
+
+    log "MetaTrader 5 failed to start"
+
+    tail -n 100 /tmp/mt5.log || true
+
+    return 1
+}
+
+
+if [[ -f "$TERMINAL_PATH" ]]; then
+
+    start_mt5 || true
+
+else
+
+    log "Waiting for interactive MT5 installation"
+
+fi
+
+
+# =========================================================
+# Supervisor loop
+# =========================================================
+
+MT5_FAILURES=0
+
+while true; do
+
+    # -----------------------------------------------------
+    # Core infrastructure
+    # -----------------------------------------------------
+
+    if ! process_running "$XVFB_PID"; then
+        fatal xvfb_stopped
+    fi
+
+    if ! process_running "$VNC_PID"; then
+        fatal vnc_stopped
+    fi
+
+    if ! process_running "$NOVNC_PID"; then
+        fatal novnc_stopped
+    fi
+
+    if ! process_running "$NGINX_PID"; then
+        fatal nginx_stopped
+    fi
+
+    if ! process_running "$BRIDGE_PID"; then
+        fatal bridge_stopped
+    fi
+
+
+    # -----------------------------------------------------
+    # Detect MT5 installed during interactive bootstrap
+    # -----------------------------------------------------
+
+    if [[ ! -f "$TERMINAL_PATH" ]]; then
+
+        FOUND_TERMINAL="$(
+            find "$WINEPREFIX/drive_c" \
+                -type f \
+                -iname 'terminal64.exe' \
+                -print \
+                -quit 2>/dev/null || true
+        )"
+
+        if [[ -n "$FOUND_TERMINAL" ]]; then
+
+            TERMINAL_PATH="$FOUND_TERMINAL"
+
+            export MATRADES_MT5_TERMINAL_PATH="$TERMINAL_PATH"
+
+            log "Detected completed MT5 installation"
+
+            start_mt5 || true
+
+        fi
+
+    # -----------------------------------------------------
+    # MT5 crash recovery
+    # -----------------------------------------------------
+
+    elif ! mt5_running; then
+
+        MT5_FAILURES=$((MT5_FAILURES + 1))
+
+        set_status terminal_restarting
+
+        log "MT5 is not running."
+        log "Restart attempt: $MT5_FAILURES"
+
+        case "$MT5_FAILURES" in
+            1)
+                BACKOFF=5
+                ;;
+            2)
+                BACKOFF=10
+                ;;
+            3)
+                BACKOFF=30
+                ;;
+            *)
+                BACKOFF=60
+                ;;
+        esac
+
+        sleep "$BACKOFF"
+
+        if start_mt5; then
+
+            MT5_FAILURES=0
+
+        elif (( MT5_FAILURES >= 5 )); then
+
+            log "MT5 repeatedly failed to start."
+
+            fatal terminal_unhealthy
+
+        fi
+
+    else
+
+        MT5_FAILURES=0
+
+    fi
+
+    sleep 5
+
+done
