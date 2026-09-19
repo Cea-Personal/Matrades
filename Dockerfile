@@ -108,7 +108,7 @@ ENV WINEPREFIX=/tmp/wineprefix \
     PYTHONUNBUFFERED=1
 
 
-RUN chmod +x /app/start.sh
+RUN chmod +x /app/wine-test.sh
 
 
 ENTRYPOINT ["/app/wine-test.sh"]
