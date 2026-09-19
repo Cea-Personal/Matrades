@@ -65,49 +65,17 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 
-RUN set -eux; \
-
-    mkdir -p /tmp/.X11-unix; \
-
-    chmod 1777 /tmp/.X11-unix; \
-
-    Xvfb :98 -screen 0 1024x768x24 -ac -nolisten tcp >/tmp/xvfb-test.log 2>&1 & \
-
-    XVFB_PID=$!; \
-
-    sleep 2; \
-
-    export DISPLAY=:98; \
-
-    export WINEARCH=win64; \
-
-    export WINEPREFIX=/tmp/wine-test; \
-
-    export WINEDEBUG=err+all; \
-
-    wine --version; \
-
-    wineboot --init; \
-
-    wine cmd /c echo WINE_TEST_OK; \
-
-    wineserver -k || true; \
-
-    kill "$XVFB_PID" || true; \
-
-    rm -rf /tmp/wine-test
-
 # # ---------------------------------------------------------
 # # Verify Wine installation during BUILD
 # # ---------------------------------------------------------
 
-# RUN set -eux; \
-#     wine --version; \
-#     which wine; \
-#     which wineboot; \
-#     dpkg --print-architecture; \
-#     dpkg --print-foreign-architectures; \
-#     dpkg -l | grep -E 'wine|libwine'
+RUN set -eux; \
+    wine --version; \
+    which wine; \
+    which wineboot; \
+    dpkg --print-architecture; \
+    dpkg --print-foreign-architectures; \
+    dpkg -l | grep -E 'wine|libwine'
 
 
 # ---------------------------------------------------------
@@ -119,21 +87,21 @@ WORKDIR /app
 COPY . /app
 
 
-# # ---------------------------------------------------------
-# # Python virtual environment
-# # ---------------------------------------------------------
+# ---------------------------------------------------------
+# Python virtual environment
+# ---------------------------------------------------------
 
-# RUN python3 -m venv /opt/venv && \
-#     /opt/venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel && \
-#     /opt/venv/bin/pip install --no-cache-dir .
-
-
-# ENV PATH="/opt/venv/bin:${PATH}"
+RUN python3 -m venv /opt/venv && \
+    /opt/venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    /opt/venv/bin/pip install --no-cache-dir .
 
 
-# # ---------------------------------------------------------
-# # Runtime
-# # ---------------------------------------------------------
+ENV PATH="/opt/venv/bin:${PATH}"
+
+
+# ---------------------------------------------------------
+# Runtime
+# ---------------------------------------------------------
 
 ENV WINEPREFIX=/tmp/wineprefix \
     WINEDEBUG=-all \
