@@ -62,7 +62,5 @@ ENV DISPLAY=:99 \
     WINEDEBUG=-all \
     PYTHONUNBUFFERED=1
 
-# Railway volume should be mounted at /data.
-VOLUME ["/data"]
 
 ENTRYPOINT ["/app/start.sh"]
