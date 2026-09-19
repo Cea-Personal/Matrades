@@ -56,8 +56,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 ENV LIBGL_ALWAYS_SOFTWARE=1 \
-    GALLIUM_DRIVER=llvmpipe \
-    MESA_LOADER_DRIVER_OVERRIDE=llvmpipe
+    GALLIUM_DRIVER=llvmpipe 
 # ---------------------------------------------------------
 # WineHQ repository
 # ---------------------------------------------------------
