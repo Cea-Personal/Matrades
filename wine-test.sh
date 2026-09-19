@@ -10,7 +10,6 @@ unset WINEARCH
 
 export LIBGL_ALWAYS_SOFTWARE=1
 export GALLIUM_DRIVER=llvmpipe
-export MESA_LOADER_DRIVER_OVERRIDE=llvmpipe
 
 echo "======================================"
 echo "Starting Xvfb"
@@ -28,10 +27,12 @@ Xvfb :99 \
     -nolisten tcp \
     >/tmp/xvfb.log 2>&1 &
 
+XVFB_PID=$!
+
 sleep 2
 
 if ! xdpyinfo -display :99 >/dev/null 2>&1; then
-    echo "Xvfb failed"
+    echo "Xvfb FAILED"
     cat /tmp/xvfb.log
     exit 1
 fi
@@ -45,52 +46,58 @@ echo "======================================"
 
 wine --version
 
+echo
 echo "Kernel:"
 uname -a
 
+echo
 echo "Architecture:"
 dpkg --print-architecture
 dpkg --print-foreign-architectures
 
 echo
-echo "Vulkan libraries:"
-
-ldconfig -p | grep -i vulkan || true
+echo "Wine binaries:"
+command -v wine
+command -v wineboot
+command -v wineserver
 
 echo
-echo "Wine processes before test:"
-
-ps aux | grep -E 'wine|wineserver' || true
+echo "Vulkan:"
+ldconfig -p | grep libvulkan.so.1 || true
 
 
 echo
 echo "======================================"
-echo "Creating clean Wine prefix"
+echo "Stopping old Wine processes"
 echo "======================================"
 
 wineserver -k 2>/dev/null || true
 wineserver -w 2>/dev/null || true
 
-rm -rf "$WINEPREFIX"
+pkill -f 'wineboot|winedevice|services.exe|rpcss.exe|explorer.exe' \
+    2>/dev/null || true
 
-mkdir -p "$WINEPREFIX"
-
-echo
-echo "Starting wineserver"
-
-wineserver -p
-
-sleep 2
-
-echo
-echo "Wineserver process:"
-
-ps aux | grep wineserver || true
+sleep 1
 
 
 echo
 echo "======================================"
-echo "Running wineboot"
+echo "Removing previous prefix"
+echo "======================================"
+
+rm -rf "$WINEPREFIX"
+
+if [[ -e "$WINEPREFIX" ]]; then
+    echo "ERROR: Prefix still exists"
+    ls -la "$WINEPREFIX"
+else
+    echo "Prefix completely removed"
+fi
+
+
+echo
+echo "======================================"
+echo "Creating prefix with wineboot"
 echo "======================================"
 
 wineboot --init
@@ -103,22 +110,32 @@ echo "wineboot exit code: $RESULT"
 
 echo
 echo "======================================"
-echo "Wine processes after wineboot"
+echo "Prefix after wineboot"
 echo "======================================"
 
-ps aux | grep -E 'wine|services|rpcss' || true
+ls -la "$WINEPREFIX" 2>/dev/null || true
+
+echo
+echo "Windows directory:"
+
+ls -la "$WINEPREFIX/drive_c/windows" \
+    2>/dev/null || echo "WINDOWS DIRECTORY MISSING"
+
+echo
+echo "System32 directory:"
+
+ls -la "$WINEPREFIX/drive_c/windows/system32" \
+    2>/dev/null | head -30 || echo "SYSTEM32 MISSING"
 
 
 echo
 echo "======================================"
-echo "Prefix contents"
+echo "Wine processes"
 echo "======================================"
 
-find "$WINEPREFIX" \
-    -maxdepth 2 \
-    -type f \
-    -print \
-    2>/dev/null | head -100
+ps aux | grep -E \
+    'wine|wineserver|services.exe|rpcss.exe' \
+    | grep -v grep || true
 
 
 if [[ "$RESULT" -eq 0 ]]; then
@@ -130,13 +147,21 @@ if [[ "$RESULT" -eq 0 ]]; then
 
     wine cmd /c echo WINE_RUNTIME_OK
 
+    CMD_RESULT=$?
+
+    echo "cmd exit code: $CMD_RESULT"
+
+else
+
+    echo
+    echo "wineboot FAILED"
+
 fi
 
 
 echo
 echo "======================================"
-echo "Diagnostic finished"
-echo "Container remains alive"
+echo "Diagnostic complete"
 echo "======================================"
 
 while true; do
