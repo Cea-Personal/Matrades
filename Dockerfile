@@ -91,44 +91,37 @@ RUN set -eux; \
 # ============================================================
 
 RUN useradd \
+
         --create-home \
+
         --uid 1000 \
+
         --shell /bin/bash \
+
         mt5 && \
+
     mkdir -p /app && \
+
     chown -R mt5:mt5 /home/mt5 /app
 
-
-# ============================================================
-# 7. Runtime environment
-# ============================================================
-
 ENV HOME=/home/mt5 \
+
     WINEPREFIX=/home/mt5/.wine \
+
     WINEDEBUG=err+all \
+
     LIBGL_ALWAYS_SOFTWARE=1
-
-
-# ============================================================
-# 8. Copy diagnostic script
-# ============================================================
 
 WORKDIR /app
 
 COPY --chown=mt5:mt5 wine-test.sh /app/wine-test.sh
 
-RUN chmod +x /app/wine-test.sh
+RUN chmod +x /app/wine-test.sh && \
 
+    mkdir -p /tmp/.X11-unix && \
 
-# ============================================================
-# 9. IMPORTANT: Wine runs as non-root
-# ============================================================
+    chmod 1777 /tmp/.X11-unix
 
 USER mt5
-
-
-# ============================================================
-# 10. Diagnostic entrypoint
-# ============================================================
 
 ENTRYPOINT ["/app/wine-test.sh"]
