@@ -65,51 +65,83 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 
-# ---------------------------------------------------------
-# Verify Wine installation during BUILD
-# ---------------------------------------------------------
-
 RUN set -eux; \
+
+    mkdir -p /tmp/.X11-unix; \
+
+    chmod 1777 /tmp/.X11-unix; \
+
+    Xvfb :98 -screen 0 1024x768x24 -ac -nolisten tcp >/tmp/xvfb-test.log 2>&1 & \
+
+    XVFB_PID=$!; \
+
+    sleep 2; \
+
+    export DISPLAY=:98; \
+
+    export WINEARCH=win64; \
+
+    export WINEPREFIX=/tmp/wine-test; \
+
+    export WINEDEBUG=err+all; \
+
     wine --version; \
-    which wine; \
-    which wineboot; \
-    dpkg --print-architecture; \
-    dpkg --print-foreign-architectures; \
-    dpkg -l | grep -E 'wine|libwine'
+
+    wineboot --init; \
+
+    wine cmd /c echo WINE_TEST_OK; \
+
+    wineserver -k || true; \
+
+    kill "$XVFB_PID" || true; \
+
+    rm -rf /tmp/wine-test
+
+# # ---------------------------------------------------------
+# # Verify Wine installation during BUILD
+# # ---------------------------------------------------------
+
+# RUN set -eux; \
+#     wine --version; \
+#     which wine; \
+#     which wineboot; \
+#     dpkg --print-architecture; \
+#     dpkg --print-foreign-architectures; \
+#     dpkg -l | grep -E 'wine|libwine'
 
 
-# ---------------------------------------------------------
-# Python application
-# ---------------------------------------------------------
+# # ---------------------------------------------------------
+# # Python application
+# # ---------------------------------------------------------
 
-WORKDIR /app
+# WORKDIR /app
 
-COPY . /app
-
-
-# ---------------------------------------------------------
-# Python virtual environment
-# ---------------------------------------------------------
-
-RUN python3 -m venv /opt/venv && \
-    /opt/venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    /opt/venv/bin/pip install --no-cache-dir .
+# COPY . /app
 
 
-ENV PATH="/opt/venv/bin:${PATH}"
+# # ---------------------------------------------------------
+# # Python virtual environment
+# # ---------------------------------------------------------
+
+# RUN python3 -m venv /opt/venv && \
+#     /opt/venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel && \
+#     /opt/venv/bin/pip install --no-cache-dir .
 
 
-# ---------------------------------------------------------
-# Runtime
-# ---------------------------------------------------------
-
-ENV WINEARCH=win64 \
-    WINEPREFIX=/data/wineprefix-v3 \
-    WINEDEBUG=-all \
-    PYTHONUNBUFFERED=1
+# ENV PATH="/opt/venv/bin:${PATH}"
 
 
-RUN chmod +x /app/start.sh
+# # ---------------------------------------------------------
+# # Runtime
+# # ---------------------------------------------------------
+
+# ENV WINEARCH=win64 \
+#     WINEPREFIX=/data/wineprefix-v3 \
+#     WINEDEBUG=-all \
+#     PYTHONUNBUFFERED=1
 
 
-ENTRYPOINT ["/app/start.sh"]
+# RUN chmod +x /app/start.sh
+
+
+# ENTRYPOINT ["/app/start.sh"]
