@@ -2,15 +2,17 @@ FROM debian:bookworm
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# ---------------------------------------------------------
-# Enable 32-bit architecture
-# ---------------------------------------------------------
+
+# ============================================================
+# 1. Enable 32-bit packages for Wine
+# ============================================================
 
 RUN dpkg --add-architecture i386
 
-# ---------------------------------------------------------
-# Base dependencies
-# ---------------------------------------------------------
+
+# ============================================================
+# 2. Base dependencies
+# ============================================================
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -18,23 +20,13 @@ RUN apt-get update && \
         wget \
         curl \
         gnupg \
-        software-properties-common \
         procps \
         psmisc \
-        python3 \
-        python3-pip \
-        python3-venv \
         xvfb \
         xauth \
         x11-utils \
-        x11vnc \
-        fluxbox \
-        novnc \
-        websockify \
-        nginx \
-        apache2-utils \
-        winbind \
         cabextract \
+        winbind \
         fonts-liberation \
         fonts-dejavu-core \
         libvulkan1 \
@@ -55,25 +47,21 @@ RUN apt-get update && \
         libfreetype6:i386 && \
     rm -rf /var/lib/apt/lists/*
 
-ENV LIBGL_ALWAYS_SOFTWARE=1 \
-    GALLIUM_DRIVER=llvmpipe 
-# ---------------------------------------------------------
-# WineHQ repository
-# ---------------------------------------------------------
+
+# ============================================================
+# 3. Add official WineHQ repository
+# ============================================================
 
 RUN mkdir -pm755 /etc/apt/keyrings && \
     wget -O /etc/apt/keyrings/winehq-archive.key \
         https://dl.winehq.org/wine-builds/winehq.key && \
     wget -NP /etc/apt/sources.list.d/ \
-        https://dl.winehq.org/wine-builds/debian/dists/bookworm/winehq-bookworm.sources 
+        https://dl.winehq.org/wine-builds/debian/dists/bookworm/winehq-bookworm.sources
 
-# ---------------------------------------------------------
-# Install Wine
-#
-# IMPORTANT:
-# --install-recommends ensures the required Wine runtime
-# components and 32-bit libraries are installed.
-# ---------------------------------------------------------
+
+# ============================================================
+# 4. Install Wine
+# ============================================================
 
 RUN apt-get update && \
     apt-get install -y --install-recommends \
@@ -81,104 +69,66 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 
-# # ---------------------------------------------------------
-# # Verify Wine installation during BUILD
-# # ---------------------------------------------------------
+# ============================================================
+# 5. Verify packages only
+#
+# IMPORTANT:
+# Do NOT run wineboot during Docker build.
+# ============================================================
+
 RUN set -eux; \
-
-    mkdir -p /tmp/.X11-unix; \
-
-    chmod 1777 /tmp/.X11-unix; \
-
-    Xvfb :98 \
-
-        -screen 0 1024x768x24 \
-
-        -ac \
-
-        -nolisten tcp \
-
-        >/tmp/xvfb-test.log 2>&1 & \
-
-    XVFB_PID=$!; \
-
-    sleep 2; \
-
-    export DISPLAY=:98; \
-
-    export WINEPREFIX=/tmp/wine-build-test; \
-
-    export WINEDEBUG=err+all; \
-
-    export LIBGL_ALWAYS_SOFTWARE=1; \
-
-    unset WINEARCH; \
-
-    rm -rf "$WINEPREFIX"; \
-
     wine --version; \
+    command -v wine; \
+    command -v wineboot; \
+    command -v wineserver; \
+    dpkg --print-architecture; \
+    dpkg --print-foreign-architectures; \
+    dpkg -l | grep -E 'wine|libwine' || true
 
-    timeout 60s wineboot --init || { \
 
-        RESULT=$?; \
+# ============================================================
+# 6. Create dedicated non-root MT5/Wine user
+# ============================================================
 
-        echo "======================================"; \
+RUN useradd \
+        --create-home \
+        --uid 1000 \
+        --shell /bin/bash \
+        mt5 && \
+    mkdir -p /app && \
+    chown -R mt5:mt5 /home/mt5 /app
 
-        echo "WINEBOOT FAILED OR TIMED OUT"; \
 
-        echo "exit=$RESULT"; \
+# ============================================================
+# 7. Runtime environment
+# ============================================================
 
-        echo "======================================"; \
+ENV HOME=/home/mt5 \
+    WINEPREFIX=/home/mt5/.wine \
+    WINEDEBUG=err+all \
+    LIBGL_ALWAYS_SOFTWARE=1
 
-        ps aux | grep -E 'wine|services|rpcss' || true; \
 
-        find "$WINEPREFIX" -maxdepth 3 -type f | head -100 || true; \
-
-        cat /tmp/xvfb-test.log || true; \
-
-        exit "$RESULT"; \
-
-    }; \
-
-    timeout 30s wine cmd /c echo WINE_BUILD_TEST_OK; \
-
-    wineserver -k || true; \
-
-    kill "$XVFB_PID" || true; \
-
-    rm -rf "$WINEPREFIX"
-
-# ---------------------------------------------------------
-# Python application
-# ---------------------------------------------------------
+# ============================================================
+# 8. Copy diagnostic script
+# ============================================================
 
 WORKDIR /app
 
-COPY . /app
-
-
-# ---------------------------------------------------------
-# Python virtual environment
-# ---------------------------------------------------------
-
-RUN python3 -m venv /opt/venv && \
-    /opt/venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    /opt/venv/bin/pip install --no-cache-dir .
-
-
-ENV PATH="/opt/venv/bin:${PATH}"
-
-
-# ---------------------------------------------------------
-# Runtime
-# ---------------------------------------------------------
-
-ENV WINEPREFIX=/tmp/wineprefix \
-    WINEDEBUG=-all \
-    PYTHONUNBUFFERED=1
-
+COPY --chown=mt5:mt5 wine-test.sh /app/wine-test.sh
 
 RUN chmod +x /app/wine-test.sh
 
+
+# ============================================================
+# 9. IMPORTANT: Wine runs as non-root
+# ============================================================
+
+USER mt5
+
+
+# ============================================================
+# 10. Diagnostic entrypoint
+# ============================================================
 
 ENTRYPOINT ["/app/wine-test.sh"]
