@@ -78,6 +78,7 @@ backtests use sibling timestamped folders. Each immutable `manifest.json` includ
 UTC timestamp, evidence details, and checksum; the Research and Strategy screens link the durable
 run metadata to these archives. Docker persists the folder in the `research-artifacts` volume.
 
+
 ## Strategy generation and validation
 
 The Strategy Lab exposes exactly two origins. **AI Generated** asks `strategy_researcher` to choose
