@@ -135,8 +135,7 @@ COPY . /app
 # # Runtime
 # # ---------------------------------------------------------
 
-ENV WINEARCH=win64 \
-    WINEPREFIX=/tmp/wineprefix \
+ENV WINEPREFIX=/tmp/wineprefix \
     WINEDEBUG=-all \
     PYTHONUNBUFFERED=1
 
