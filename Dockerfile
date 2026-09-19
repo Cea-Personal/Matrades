@@ -86,13 +86,48 @@ RUN apt-get update && \
 # # ---------------------------------------------------------
 
 RUN set -eux; \
-    wine --version; \
-    which wine; \
-    which wineboot; \
-    dpkg --print-architecture; \
-    dpkg --print-foreign-architectures; \
-    dpkg -l | grep -E 'wine|libwine'
 
+    mkdir -p /tmp/.X11-unix; \
+
+    chmod 1777 /tmp/.X11-unix; \
+
+    Xvfb :98 \
+
+        -screen 0 1024x768x24 \
+
+        -ac \
+
+        -nolisten tcp \
+
+        >/tmp/xvfb-test.log 2>&1 & \
+
+    XVFB_PID=$!; \
+
+    sleep 2; \
+
+    export DISPLAY=:98; \
+
+    export WINEPREFIX=/tmp/wine-build-test; \
+
+    export WINEDEBUG=err+all; \
+
+    export LIBGL_ALWAYS_SOFTWARE=1; \
+
+    unset WINEARCH; \
+
+    rm -rf "$WINEPREFIX"; \
+
+    wine --version; \
+
+    wineboot --init; \
+
+    wine cmd /c echo WINE_BUILD_TEST_OK; \
+
+    wineserver -k || true; \
+
+    kill "$XVFB_PID" || true; \
+
+    rm -rf "$WINEPREFIX"
 
 # ---------------------------------------------------------
 # Python application
