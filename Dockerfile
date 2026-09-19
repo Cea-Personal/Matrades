@@ -1,21 +1,29 @@
-FROM python:3.13-slim-bookworm
+FROM debian:bookworm
 
 ENV DEBIAN_FRONTEND=noninteractive
 
 # ---------------------------------------------------------
-# WineHQ + desktop/runtime dependencies
+# Enable 32-bit architecture
 # ---------------------------------------------------------
 
-RUN dpkg --add-architecture i386 \
-    && mkdir -pm755 /etc/apt/keyrings \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
+RUN dpkg --add-architecture i386
+
+# ---------------------------------------------------------
+# Base dependencies
+# ---------------------------------------------------------
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
         ca-certificates \
-        curl \
         wget \
+        curl \
         gnupg \
+        software-properties-common \
         procps \
         psmisc \
+        python3 \
+        python3-pip \
+        python3-venv \
         xvfb \
         xauth \
         x11-utils \
@@ -28,39 +36,80 @@ RUN dpkg --add-architecture i386 \
         winbind \
         cabextract \
         fonts-liberation \
-        fonts-dejavu-core \
-    && wget -O /etc/apt/keyrings/winehq-archive.key \
-        https://dl.winehq.org/wine-builds/winehq.key \
-    && wget -NP /etc/apt/sources.list.d/ \
-        https://dl.winehq.org/wine-builds/debian/dists/bookworm/winehq-bookworm.sources \
-    && apt-get update \
-    && apt-get install -y --install-recommends \
-        winehq-stable \
-    && rm -rf /var/lib/apt/lists/*
+        fonts-dejavu-core && \
+    rm -rf /var/lib/apt/lists/*
 
-# Verify Wine exists, but DON'T initialize a prefix at build time.
-RUN wine --version
 
 # ---------------------------------------------------------
-# Application
+# WineHQ repository
+# ---------------------------------------------------------
+
+RUN mkdir -pm755 /etc/apt/keyrings && \
+    wget -O /etc/apt/keyrings/winehq-archive.key \
+        https://dl.winehq.org/wine-builds/winehq.key && \
+    wget -NP /etc/apt/sources.list.d/ \
+        https://dl.winehq.org/wine-builds/debian/dists/bookworm/winehq-bookworm.sources
+
+
+# ---------------------------------------------------------
+# Install Wine
+#
+# IMPORTANT:
+# --install-recommends ensures the required Wine runtime
+# components and 32-bit libraries are installed.
+# ---------------------------------------------------------
+
+RUN apt-get update && \
+    apt-get install -y --install-recommends \
+        winehq-stable && \
+    rm -rf /var/lib/apt/lists/*
+
+
+# ---------------------------------------------------------
+# Verify Wine installation during BUILD
+# ---------------------------------------------------------
+
+RUN set -eux; \
+    wine --version; \
+    which wine; \
+    which wineboot; \
+    dpkg --print-architecture; \
+    dpkg --print-foreign-architectures; \
+    dpkg -l | grep -E 'wine|libwine'
+
+
+# ---------------------------------------------------------
+# Python application
 # ---------------------------------------------------------
 
 WORKDIR /app
 
 COPY . /app
 
-RUN pip install --no-cache-dir . \
-    && chmod +x /app/start.sh
 
 # ---------------------------------------------------------
-# Runtime configuration
+# Python virtual environment
 # ---------------------------------------------------------
 
-ENV DISPLAY=:99 \
-    WINEARCH=win64 \
-    WINEPREFIX=/data/wineprefix \
+RUN python3 -m venv /opt/venv && \
+    /opt/venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    /opt/venv/bin/pip install --no-cache-dir .
+
+
+ENV PATH="/opt/venv/bin:${PATH}"
+
+
+# ---------------------------------------------------------
+# Runtime
+# ---------------------------------------------------------
+
+ENV WINEARCH=win64 \
+    WINEPREFIX=/data/wineprefix-v3 \
     WINEDEBUG=-all \
     PYTHONUNBUFFERED=1
+
+
+RUN chmod +x /app/start.sh
 
 
 ENTRYPOINT ["/app/start.sh"]
