@@ -135,13 +135,13 @@ RUN set -eux; \
 # # Runtime
 # # ---------------------------------------------------------
 
-# ENV WINEARCH=win64 \
-#     WINEPREFIX=/data/wineprefix-v3 \
-#     WINEDEBUG=-all \
-#     PYTHONUNBUFFERED=1
+ENV WINEARCH=win64 \
+    WINEPREFIX=/tmp/wineprefix \
+    WINEDEBUG=-all \
+    PYTHONUNBUFFERED=1
 
 
-# RUN chmod +x /app/start.sh
+RUN chmod +x /app/start.sh
 
 
-# ENTRYPOINT ["/app/start.sh"]
+ENTRYPOINT ["/app/start.sh"]
