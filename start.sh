@@ -11,7 +11,6 @@ set -Eeuo pipefail
 # Configuration
 # ------------------------------------------------------------
 
-export WINEARCH="${WINEARCH:-win64}"
 export WINEPREFIX="${MATRADES_MT5_WINE_PREFIX:-${WINEPREFIX:-/data/wineprefix}}"
 export WINEDEBUG="${WINEDEBUG:--all}"
 
