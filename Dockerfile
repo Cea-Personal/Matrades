@@ -84,7 +84,6 @@ RUN apt-get update && \
 # # ---------------------------------------------------------
 # # Verify Wine installation during BUILD
 # # ---------------------------------------------------------
-
 RUN set -eux; \
 
     mkdir -p /tmp/.X11-unix; \
@@ -119,9 +118,29 @@ RUN set -eux; \
 
     wine --version; \
 
-    wineboot --init; \
+    timeout 60s wineboot --init || { \
 
-    wine cmd /c echo WINE_BUILD_TEST_OK; \
+        RESULT=$?; \
+
+        echo "======================================"; \
+
+        echo "WINEBOOT FAILED OR TIMED OUT"; \
+
+        echo "exit=$RESULT"; \
+
+        echo "======================================"; \
+
+        ps aux | grep -E 'wine|services|rpcss' || true; \
+
+        find "$WINEPREFIX" -maxdepth 3 -type f | head -100 || true; \
+
+        cat /tmp/xvfb-test.log || true; \
+
+        exit "$RESULT"; \
+
+    }; \
+
+    timeout 30s wine cmd /c echo WINE_BUILD_TEST_OK; \
 
     wineserver -k || true; \
 
