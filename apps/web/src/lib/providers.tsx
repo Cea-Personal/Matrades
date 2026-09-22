@@ -74,11 +74,9 @@ function AuthBoundary({ children }: { children: React.ReactNode }) {
   const isAuthPage = pathname === "/auth";
   const requiresAuthentication = !isAuthPage && !auth.isPending && !auth.data;
   useEffect(() => {
-    // A signed-out visit to the application entry point should land on the
-    // existing login/sign-up screen instead of leaving the user on a blank
-    // "Sign-in required" state. Keep this independent of the exact API error
-    // payload so expired sessions and gateway-shaped 401 responses behave the
-    // same way.
+    // A signed-out visit should land on the existing login/sign-up screen.
+    // Keep this independent of the exact API error payload so expired sessions
+    // and gateway-shaped 401 responses behave the same way.
     if (requiresAuthentication) {
       router.replace("/auth" as Route);
     }
@@ -91,7 +89,9 @@ function AuthBoundary({ children }: { children: React.ReactNode }) {
     router.replace("/auth" as Route);
   };
 
-  if (!isAuthPage && auth.isPending) return <div className="center-state">Checking secure session…</div>;
+  // Do not render a sign-in or sign-up placeholder on protected routes. The
+  // redirect above owns the signed-out transition; /auth owns authentication.
+  if (!isAuthPage && auth.isPending) return null;
   if (requiresAuthentication) return null;
   return (
     <AuthContext.Provider value={{ user: auth.data ?? null, refresh: auth.refetch, logout }}>
