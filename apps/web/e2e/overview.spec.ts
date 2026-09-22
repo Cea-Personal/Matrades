@@ -29,6 +29,15 @@ async function mockOverview(page: Page, mode: "populated" | "empty" | "unavailab
   });
 }
 
+test("signed-out root redirects to authentication", async ({ page }) => {
+  await page.route("**/api/v1/auth/me", (route) =>
+    route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ detail: "session required" }) }),
+  );
+  await page.goto("/");
+  await expect(page).toHaveURL(/\/auth$/);
+  await expect(page.getByRole("heading", { name: "Sign in to Matrades" })).toBeVisible();
+});
+
 test("overview displays recorded data, signals and account-specific equity", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1520, height: 1000 });
   await mockOverview(page);

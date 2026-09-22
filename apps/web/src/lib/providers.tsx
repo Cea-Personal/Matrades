@@ -5,7 +5,7 @@ import type { Route } from "next";
 import { usePathname, useRouter } from "next/navigation";
 import { createContext, useContext, useEffect, useState } from "react";
 
-import { api, ApiError, API_ROOT } from "@/lib/api";
+import { api, API_ROOT } from "@/lib/api";
 
 export type CurrentUser = {
   id: string;
@@ -72,12 +72,18 @@ function AuthBoundary({ children }: { children: React.ReactNode }) {
     staleTime: 30_000,
   });
   const isAuthPage = pathname === "/auth";
+  const requiresAuthentication = !isAuthPage && !auth.isPending && !auth.data;
   useEffect(() => {
-    if (!isAuthPage && auth.error instanceof ApiError && auth.error.status === 401) {
+    // A signed-out visit to the application entry point should land on the
+    // existing login/sign-up screen instead of leaving the user on a blank
+    // "Sign-in required" state. Keep this independent of the exact API error
+    // payload so expired sessions and gateway-shaped 401 responses behave the
+    // same way.
+    if (requiresAuthentication) {
       router.replace("/auth" as Route);
     }
     if (isAuthPage && auth.data) router.replace("/");
-  }, [auth.data, auth.error, isAuthPage, router]);
+  }, [auth.data, isAuthPage, requiresAuthentication, router]);
 
   const logout = async () => {
     await api<void>("/auth/sessions", { method: "DELETE" });
@@ -86,7 +92,7 @@ function AuthBoundary({ children }: { children: React.ReactNode }) {
   };
 
   if (!isAuthPage && auth.isPending) return <div className="center-state">Checking secure session…</div>;
-  if (!isAuthPage && !auth.data) return <div className="center-state">Sign-in required…</div>;
+  if (requiresAuthentication) return null;
   return (
     <AuthContext.Provider value={{ user: auth.data ?? null, refresh: auth.refetch, logout }}>
       {auth.data && <RealtimeInvalidator />}
