@@ -1,6 +1,7 @@
 """Pin one strategy research job to each selected market in a completed cycle."""
 
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from sqlalchemy import select
@@ -42,7 +43,7 @@ async def latest_strategy_context(db: AsyncSession, owner_id: UUID) -> dict:
             "market_research_state": newest.state,
             "selections": [],
         }
-    context = {
+    context: dict[str, Any] = {
         "ready": False,
         "reason": None,
         "market_research_run_id": str(run.id),

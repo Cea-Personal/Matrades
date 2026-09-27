@@ -1,9 +1,15 @@
 """Fail closed when historical event restrictions lack covered calendar dates."""
 
-from datetime import timedelta
+from datetime import datetime, timedelta
+from typing import Any
+from uuid import UUID
+
+from modules.research.forex_factory_archive import ForexFactoryArchive
 
 
-def historical_calendar(archive, owner_id, start, end):
+def historical_calendar(
+    archive: ForexFactoryArchive, owner_id: UUID, start: datetime, end: datetime
+) -> tuple[list[dict] | None, dict[str, Any]]:
     periods = archive.list_periods(owner_id)
     day, last = start.date() - timedelta(days=1), end.date() + timedelta(days=1)
     missing = []

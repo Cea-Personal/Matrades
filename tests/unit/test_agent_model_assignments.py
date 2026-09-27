@@ -8,16 +8,49 @@ from modules.agents.model_assignments import (
     assignment_for,
     default_profile,
 )
+from modules.agents.native_config import REASONING_EFFORTS
 from modules.agents.registry import REQUIRED_AGENT_IDS
 
 
-def test_every_required_agent_has_a_cost_aware_assignment():
+def test_every_required_agent_has_a_valid_native_assignment():
     assert set(AGENT_MODEL_ASSIGNMENTS) == set(REQUIRED_AGENT_IDS)
     assert all(assignment.model for assignment in AGENT_MODEL_ASSIGNMENTS.values())
     assert all(
-        assignment.reasoning_effort in {"low", "medium"}
+        assignment.reasoning_effort in REASONING_EFFORTS
         for assignment in AGENT_MODEL_ASSIGNMENTS.values()
     )
+
+
+@pytest.mark.parametrize("effort", sorted(REASONING_EFFORTS))
+def test_native_assignment_preserves_each_supported_reasoning_effort(monkeypatch, tmp_path, effort):
+    from modules.agents import native_config
+
+    monkeypatch.setattr(native_config, "NATIVE_AGENTS_DIR", tmp_path)
+    (tmp_path / "critic.toml").write_text(
+        'name = "critic"\nmodel = "configured-model"\n'
+        f'model_reasoning_effort = "{effort}"\n'
+        'description = "Review"\ndeveloper_instructions = "Review only"\n'
+        'sandbox_mode = "read-only"\n'
+    )
+    assignment = assignment_for("critic")
+    profile = default_profile("critic")
+    assert assignment.model == profile.model == "configured-model"
+    assert assignment.reasoning_effort == profile.parameters["reasoning_effort"] == effort
+
+
+@pytest.mark.parametrize("effort", ["", "unsupported", "HIGH"])
+def test_native_assignment_rejects_unsupported_reasoning_effort(monkeypatch, tmp_path, effort):
+    from modules.agents import native_config
+
+    monkeypatch.setattr(native_config, "NATIVE_AGENTS_DIR", tmp_path)
+    (tmp_path / "critic.toml").write_text(
+        'name = "critic"\nmodel = "configured-model"\n'
+        f'model_reasoning_effort = "{effort}"\n'
+        'description = "Review"\ndeveloper_instructions = "Review only"\n'
+        'sandbox_mode = "read-only"\n'
+    )
+    with pytest.raises(ValueError, match="invalid reasoning effort"):
+        default_profile("critic")
 
 
 def test_every_role_uses_its_current_native_file():

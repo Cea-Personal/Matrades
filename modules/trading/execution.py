@@ -6,10 +6,11 @@ import hashlib
 import json
 from collections.abc import Awaitable, Callable
 from datetime import timedelta
-from typing import Any, Protocol
+from typing import Any
 from uuid import UUID
 
 from modules.risk.models import RiskDecision
+from modules.trading.broker_port import BrokerCommandPort
 from modules.trading.models import (
     CommandState,
     ExecutionAction,
@@ -23,28 +24,6 @@ from modules.trading.models import (
     TradePlanState,
 )
 from packages.shared.domain_types import utc_now
-
-
-class BrokerCommandPort(Protocol):
-    async def submit_order(
-        self, command: ExecutionCommand, authorization: ExecutionAuthorization
-    ) -> dict[str, Any]: ...
-
-    async def cancel_order(
-        self, command: ExecutionCommand, authorization: ExecutionAuthorization
-    ) -> dict[str, Any]: ...
-
-    async def change_protection(
-        self, command: ExecutionCommand, authorization: ExecutionAuthorization
-    ) -> dict[str, Any]: ...
-
-    async def partial_close(
-        self, command: ExecutionCommand, authorization: ExecutionAuthorization
-    ) -> dict[str, Any]: ...
-
-    async def full_exit(
-        self, command: ExecutionCommand, authorization: ExecutionAuthorization
-    ) -> dict[str, Any]: ...
 
 
 class CommandConflict(ValueError):

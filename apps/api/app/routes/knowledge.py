@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import io
-import math
 import re
 import zipfile
 from datetime import UTC, datetime
@@ -13,7 +12,7 @@ from xml.etree import ElementTree
 import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from adapters.blob_store.local import LocalBlobStore
@@ -29,10 +28,11 @@ from modules.knowledge.models import RetrievalHit
 from modules.knowledge.openai_embeddings import (
     DEFAULT_MODEL,
     embed_source_data,
-    embed_texts_for_owner,
     openai_embeddings,
 )
-from modules.knowledge.reranking import RerankingConfigurationInput, rerank_for_owner
+from modules.knowledge.reranking import RerankingConfigurationInput
+from modules.knowledge.retrieval import KnowledgeSearchInput as SearchInput
+from modules.knowledge.retrieval import retrieve_knowledge
 from modules.knowledge.youtube import YouTubeVideo
 from modules.knowledge.youtube_ingestion import (
     discover_youtube_videos,
@@ -42,7 +42,7 @@ from modules.knowledge.youtube_ingestion import (
 from modules.research.scheduling import default_schedule, next_run_at, normalize_schedule
 from modules.security.platform import validate_upload
 from packages.shared.config import get_settings
-from packages.shared.store import ResourceStore
+from packages.shared.store import ResourceRecord, ResourceStore
 
 router = APIRouter(prefix="/knowledge", tags=["Knowledge"])
 assistant_router = APIRouter(prefix="/knowledge-assistant", tags=["Knowledge"])
@@ -63,18 +63,6 @@ class SourceInput(BaseModel):
     venue_instrument_id: str | None = None
     specification_version_id: str | None = None
     source_cut_refs: list[str] = Field(default_factory=list)
-
-
-class SearchInput(BaseModel):
-    query: str = Field(min_length=1, max_length=4000)
-    category: str | None = None
-    tags: list[str] = Field(default_factory=list)
-    source_date_from: str | None = None
-    source_date_to: str | None = None
-    limit: int = Field(default=5, ge=1, le=20)
-    asset_class: str | None = None
-    instrument_type: str | None = None
-    venue_instrument_id: str | None = None
 
 
 class YouTubeScrapeInput(BaseModel):
@@ -327,89 +315,7 @@ async def search(
     actor: Annotated[Actor, Depends(current_actor)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    query_terms = set(re.findall(r"[a-z0-9]+", payload.query.lower()))
-    query_vectors, _ = await embed_texts_for_owner(db, actor.owner_id, [payload.query])
-    query_vector = query_vectors[0]
-
-    def cosine(left: list[float], right: list[float]) -> float:
-        if not left or not right:
-            return 0.0
-        dot = sum(a * b for a, b in zip(left, right, strict=False))
-        norm_left = math.sqrt(sum(value * value for value in left))
-        norm_right = math.sqrt(sum(value * value for value in right))
-        return dot / (norm_left * norm_right) if norm_left and norm_right else 0.0
-
-    hits: list[dict] = []
-    for source in await ResourceStore(db).list("knowledge_source", actor.owner_id):
-        if source.state != "ACTIVE":
-            continue
-        if payload.category and source.data.get("category") != payload.category:
-            continue
-        if payload.asset_class and source.data.get("asset_class") != payload.asset_class:
-            continue
-        if (
-            payload.instrument_type
-            and source.data.get("instrument_type") != payload.instrument_type
-        ):
-            continue
-        if (
-            payload.venue_instrument_id
-            and source.data.get("venue_instrument_id") != payload.venue_instrument_id
-        ):
-            continue
-        source_tags = set(source.data.get("tags", []))
-        if payload.tags and not set(payload.tags).issubset(source_tags):
-            continue
-        source_date = source.data.get("source_date")
-        if payload.source_date_from and source_date and source_date < payload.source_date_from:
-            continue
-        if payload.source_date_to and source_date and source_date > payload.source_date_to:
-            continue
-        for segment in source.data.get("segments", []):
-            terms = set(re.findall(r"[a-z0-9]+", segment["text"].lower()))
-            overlap = len(query_terms & terms)
-            lexical_score = overlap / max(len(query_terms), 1)
-            vector_score = max(0.0, cosine(query_vector, segment.get("embedding", [])))
-            if not overlap and vector_score < 0.08:
-                continue
-            score = (0.65 * lexical_score) + (0.35 * vector_score)
-            hits.append(
-                {
-                    "source_id": str(source.id),
-                    "source_name": source.data.get("name"),
-                    "document_id": segment["document_id"],
-                    "segment_id": segment["id"],
-                    "segment_ordinal": segment["ordinal"],
-                    "source_version": source.version,
-                    "source_date": source_date,
-                    "score": score,
-                    "lexical_score": lexical_score,
-                    "vector_score": vector_score,
-                    "embedding_model": source.data.get("embedding_model"),
-                    "text": segment["text"],
-                }
-            )
-    hits.sort(key=lambda hit: (-hit["score"], hit["source_name"], hit["segment_ordinal"]))
-    hits, reranking = await rerank_for_owner(db, actor.owner_id, payload.query, hits, payload.limit)
-    audit = await ResourceStore(db).audit(
-        actor.owner_id,
-        actor.actor_id,
-        "knowledge.retrieved",
-        "knowledge_search",
-        None,
-        {
-            "query_hash": hashlib.sha256(payload.query.encode()).hexdigest(),
-            "result_segment_ids": [hit["segment_id"] for hit in hits],
-            "reranking": reranking,
-        },
-    )
-    return {
-        "authority": "CONTEXT_ONLY",
-        "may_replace_facts": False,
-        "retrieval_audit_id": str(audit.id),
-        "citations": hits,
-        "reranking": reranking,
-    }
+    return await retrieve_knowledge(db, actor.owner_id, payload, actor_id=actor.actor_id)
 
 
 @router.post("/assistant")
@@ -453,7 +359,10 @@ async def assistant(
             owner_id=actor.owner_id, question=payload.question, active_trade=active_trade
         ),
         retrieval_hits,
-        degraded=result["reranking"]["status"] == "DEGRADED",
+        degraded=(
+            result["reranking"]["status"] == "DEGRADED"
+            or result["embedding"]["status"] == "DEGRADED"
+        ),
     )
     return answer.model_dump(mode="json") | {
         "authority": result["authority"],
@@ -653,14 +562,29 @@ async def ingest_youtube_run_transcripts(
 ):
     """Fetch transcripts only for videos persisted by the search stage."""
     store = ResourceStore(db)
-    run = await store.get("youtube_discovery_run", run_id, actor.owner_id)
+    run = await db.scalar(
+        select(ResourceRecord)
+        .where(
+            ResourceRecord.kind == "youtube_discovery_run",
+            ResourceRecord.id == run_id,
+            ResourceRecord.owner_id == actor.owner_id,
+            ResourceRecord.state != "DELETED",
+        )
+        .with_for_update()
+    )
     if run is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "YouTube search run not found")
-    if run.state in {"SUCCEEDED", "PARTIAL"}:
+    if run.state == "SUCCEEDED":
         return {"run_id": str(run.id), **run.data, "state": run.state, "already_processed": True}
-    if run.state != "SEARCHED":
+    if run.state not in {"SEARCHED", "PARTIAL", "FAILED"}:
         raise HTTPException(status.HTTP_409_CONFLICT, "run is not ready for transcript ingestion")
     videos = [YouTubeVideo(**item) for item in run.data.get("discovered_videos", [])]
+    if not videos:
+        raise HTTPException(status.HTTP_409_CONFLICT, "run has no discovered videos")
+    previous_results = run.data.get("transcript_results", [])
+    if run.state == "PARTIAL":
+        failed_ids = {item["video_id"] for item in run.data.get("failed", [])}
+        videos = [video for video in videos if video.video_id in failed_ids]
     requested_at = datetime.now(UTC).isoformat()
     await store.update(
         run,
@@ -698,12 +622,22 @@ async def ingest_youtube_run_transcripts(
             status.HTTP_502_BAD_GATEWAY, "YouTube transcript ingestion failed"
         ) from exc
     completed_at = datetime.now(UTC).isoformat()
+    if previous_results:
+        updated_results = {item["video_id"]: item for item in result["transcript_results"]}
+        result["transcript_results"] = [
+            updated_results.get(item["video_id"], item) for item in previous_results
+        ]
+        result["created"] += int(run.data.get("created", 0))
+        result["skipped"] += int(run.data.get("skipped", 0))
+        result["discovered"] = len(run.data["discovered_videos"])
+        result["sources"] = [*run.data.get("sources", []), *result["sources"]]
     state = "PARTIAL" if result["failed"] else "SUCCEEDED"
     await store.update(
         run,
         {
             **run.data,
             **result,
+            "error": None,
             "transcript_completed_at": completed_at,
             "discovery_stage": "TRANSCRIPTS_INGESTED",
         },

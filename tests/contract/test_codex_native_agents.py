@@ -1,9 +1,8 @@
-from pathlib import Path
 import tomllib
+from pathlib import Path
 
-from modules.agents.registry import REQUIRED_AGENT_IDS
 from modules.agents.model_assignments import default_profile
-
+from modules.agents.registry import REQUIRED_AGENT_IDS
 
 ROOT = Path(__file__).parents[2]
 NATIVE_AGENT_DIR = ROOT / ".codex" / "agents"

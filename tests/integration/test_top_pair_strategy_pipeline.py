@@ -14,6 +14,8 @@ from apps.worker.app.tasks import strategies as tasks
 from modules.backtesting.engine import BacktestCandle
 from modules.connections.models import ConnectionProvider
 from modules.identity.authorization import Actor, Role
+from modules.knowledge import retrieval as knowledge_retrieval
+from modules.knowledge.ingestion import build_source_data
 from modules.strategies import research_pipeline
 from packages.shared.persistence import Base
 from packages.shared.store import ResourceStore
@@ -296,6 +298,22 @@ async def test_top_pair_research_persists_levels_or_no_trade(
 ):
     monkeypatch.setattr(tasks.settings, "research_data_root", tmp_path)
     owner, run_id, selections = await seed(database)
+    async with database() as session:
+        await ResourceStore(session).create(
+            "knowledge_source",
+            owner,
+            build_source_data(
+                name="Reviewed EURUSD trend method",
+                content="EUR/USD trending strategy: confirm trend and account for risk and costs.",
+                source_kind="YOUTUBE_TRANSCRIPT",
+            ),
+        )
+
+    async def rerank(session, owner_id, query, hits, limit):
+        assert owner_id == owner
+        return hits[:limit], {"status": "APPLIED", "provider": "COHERE"}
+
+    monkeypatch.setattr(knowledge_retrieval, "rerank_for_owner", rerank)
     if cfd:
         async with database() as session:
             store = ResourceStore(session)
@@ -341,6 +359,10 @@ async def test_top_pair_research_persists_levels_or_no_trade(
             assert pack["venue_instrument_id"]
             assert pack["specification_version_id"]
             assert "holdout" not in pack
+            assert pack["knowledge_retrieval"]["reranking"]["status"] == "APPLIED"
+            assert pack["knowledge_retrieval"]["access_mode"] == "BACKEND_RETRIEVAL"
+            assert pack["knowledge_context"]
+            assert all(hit["authority"] == "CONTEXT_ONLY" for hit in pack["knowledge_context"])
             spec = strategy("LONG" if profitable else "SHORT").model_dump(mode="json")
             spec["instruments"] = [pack["instrument"]]
             return {

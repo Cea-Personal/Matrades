@@ -13,7 +13,6 @@ from modules.connections.resolution import resolve_connection
 from modules.knowledge.ingestion import token_embedding
 from packages.shared.store import ResourceStore
 
-
 DEFAULT_MODEL = "text-embedding-3-small"
 
 
@@ -58,7 +57,9 @@ async def openai_embeddings(
             await http.aclose()
 
 
-async def get_embedding_configuration(session: AsyncSession, owner_id: UUID) -> dict[str, Any] | None:
+async def get_embedding_configuration(
+    session: AsyncSession, owner_id: UUID
+) -> dict[str, Any] | None:
     records = await ResourceStore(session).list("knowledge_embedding_configuration", owner_id)
     return records[0].data if records else None
 
@@ -73,7 +74,9 @@ async def embed_texts_for_owner(
         session, owner_id, UUID(str(configuration["connection_id"]))
     )
     if connection.profile.provider != ConnectionProvider.OPENAI or not connection.secret:
-        raise RuntimeError("configured knowledge embedding connection is not an active OpenAI connection")
+        raise RuntimeError(
+            "configured knowledge embedding connection is not an active OpenAI connection"
+        )
     model = str(configuration.get("model") or DEFAULT_MODEL)
     dimensions = configuration.get("dimensions")
     vectors = await openai_embeddings(

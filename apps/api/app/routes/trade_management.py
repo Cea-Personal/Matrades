@@ -12,6 +12,7 @@ from apps.api.app.dependencies import current_actor, get_db, require_roles
 from apps.worker.app.tasks.execution import dispatch_execution_command
 from modules.identity.authorization import Actor, Role
 from modules.notifications.service import queue_confirmed_broker_notifications
+from modules.risk.models import Direction
 from modules.risk.reservations import PersistentReservationStore, ReservationState
 from modules.trading.broker_models import (
     ActiveTrade,
@@ -107,7 +108,7 @@ async def ingest_broker_snapshot(
             account_id=item.account_id,
             broker_position_id=item.position_id,
             instrument=item.symbol,
-            direction=item.direction.value,
+            direction=Direction(item.direction.value),
             quantity=item.volume,
             average_price=item.entry_price,
             version=snapshot.sequence,
@@ -141,7 +142,7 @@ async def ingest_broker_snapshot(
                 command_id=command.id,
                 broker_order_id=item.order_id,
                 instrument=item.symbol,
-                direction=item.direction.value,
+                direction=Direction(item.direction.value),
                 state=item.state,
                 quantity=item.requested_volume,
                 filled_quantity=item.filled_volume,
@@ -219,11 +220,7 @@ async def ingest_broker_snapshot(
         plan = TradePlan.model_validate(plan_record.data)
         matched_order = relevant_orders[0] if len(relevant_orders) == 1 else None
         matched_position = next(
-            (
-                item
-                for item in snapshot.positions
-                if item.position_id == result.broker_position_id
-            ),
+            (item for item in snapshot.positions if item.position_id == result.broker_position_id),
             None,
         )
         fills = [
@@ -274,7 +271,9 @@ async def ingest_broker_snapshot(
         filled_quantity = (
             matched_order.filled_quantity
             if matched_order is not None
-            else abs(matched_position.volume) if matched_position is not None else Decimal("0")
+            else abs(matched_position.volume)
+            if matched_position is not None
+            else Decimal("0")
         )
         next_state = (
             CommandState.APPLIED
@@ -377,9 +376,7 @@ async def ingest_broker_snapshot(
                     if command.state is CommandState.PARTIALLY_APPLIED
                     else "order_accepted"
                 ),
-                revision=max(
-                    [matched_order.version, *(item.revision for item in fills)]
-                ),
+                revision=max([matched_order.version, *(item.revision for item in fills)]),
                 account_id=command.account_id,
                 instrument=matched_order.instrument,
                 quantity=filled_quantity or matched_order.quantity,

@@ -1,5 +1,7 @@
 """Fixed CFD baselines: seven families, both directions, no optimizer or LLM call."""
 
+from decimal import Decimal
+
 from modules.strategies.ai_workflow import StrategyHypothesis
 from packages.strategy_sdk.schema import Condition, StrategySpecification, TradeRules
 from packages.strategy_sdk.taxonomy import StrategyFamily
@@ -15,8 +17,10 @@ def cfd_family_hypotheses(
         up = direction == "LONG"
         greater, lesser = (">", "<") if up else ("<", ">")
 
-        def rule(feature, operator, value):
-            return Condition(feature=feature, operator=operator, value=value)
+        def rule(feature: str, operator: str, value: Decimal | str) -> Condition:
+            return Condition.model_validate(
+                {"feature": feature, "operator": operator, "value": value}
+            )
 
         momentum = rule("momentum", greater, "0")
         trend = rule("close", greater, "slow_average")
@@ -87,8 +91,8 @@ def cfd_family_hypotheses(
                     "take_profit": [],
                     "trade_rules": TradeRules(
                         direction=direction,
-                        stop_volatility_multiple="1.5",
-                        take_profit_r_multiples=["1", "2"],
+                        stop_volatility_multiple=Decimal("1.5"),
+                        take_profit_r_multiples=[Decimal("1"), Decimal("2")],
                     ).model_dump(mode="json"),
                     "evaluator_version": "strategy-evaluator-v2",
                 }

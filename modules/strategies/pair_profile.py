@@ -183,7 +183,12 @@ def profile_pair(
                 if 0 <= (c.observed_at - scheduled).total_seconds() < period * 2
             ]
             if len(before) >= 5 and after and sum(before):
-                ratios.append(float((sum(after) / len(after)) / (sum(before) / len(before))))
+                ratios.append(
+                    float(
+                        (sum(after, Decimal(0)) / len(after))
+                        / (sum(before, Decimal(0)) / len(before))
+                    )
+                )
         news_sensitivity.update(
             {
                 "status": "DESCRIPTIVE_RANGE_PROXY" if ratios else "INSUFFICIENT_EVENT_SAMPLES",

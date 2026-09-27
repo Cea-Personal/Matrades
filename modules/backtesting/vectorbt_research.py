@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from itertools import product
+from typing import TYPE_CHECKING, Any
 
 from modules.strategies.ai_workflow import StrategyHypothesis
 from modules.strategies.entry_context import entry_context_reason
@@ -17,11 +18,16 @@ from modules.strategies.signals import (
 )
 from packages.strategy_sdk.schema import StrategySpecification
 
+if TYPE_CHECKING:
+    from pandas import DataFrame
+
+    from modules.backtesting.engine import BacktestCandle, BacktestConfiguration
+
 
 def parameter_sweep(
     hypotheses: list[StrategyHypothesis],
-    discovery: list,
-    configuration,
+    discovery: list[BacktestCandle],
+    configuration: BacktestConfiguration,
     *,
     timeframe_seconds: int,
     max_combinations: int = 256,
@@ -98,7 +104,7 @@ def parameter_sweep(
             targets.append(np.array(distance) * float(reward))
         columns = range(len(variants))
 
-        def matrix(values, columns=columns):
+        def matrix(values: list, columns: range = columns) -> DataFrame:
             return pd.DataFrame(np.array(values).T, index=frame.index, columns=columns)
 
         short = prototype.trade_rules.direction == "SHORT"
@@ -130,7 +136,7 @@ def parameter_sweep(
             train = trades[(trades.entry_idx < inner_cut) & (trades.exit_idx < inner_cut)]
             validation = trades[trades.entry_idx >= inner_cut]
 
-            def stats(rows):
+            def stats(rows: DataFrame) -> dict[str, Any]:
                 if rows.empty:
                     return {"trade_count": 0, "net_pnl": 0.0, "expectancy": 0.0}
                 return {
@@ -144,10 +150,10 @@ def parameter_sweep(
             eligible = all(
                 item["trade_count"] >= 3 and item["net_pnl"] > 0 for item in (training, testing)
             )
-            row = {
+            row: dict[str, Any] = {
                 "hypothesis_id": hypothesis.hypothesis_id,
                 "family": spec.family.value,
-                "direction": spec.trade_rules.direction,
+                "direction": "SHORT" if short else "LONG",
                 "window": parameters[0],
                 "atr_stop": parameters[1],
                 "reward_r": parameters[2],

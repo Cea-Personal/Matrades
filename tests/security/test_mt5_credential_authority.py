@@ -5,10 +5,12 @@ import time
 from uuid import uuid4
 
 import httpx
+from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from apps.api.app.dependencies import get_db
 from apps.api.app.main import create_app
+from apps.api.app.routes import internal_mt5
 from modules.connections.models import ConnectionProvider
 from modules.connections.mt5_authority import verify_ui_managed_mt5_signature
 from modules.credentials.vault import EnvelopeCipher
@@ -17,7 +19,12 @@ from packages.shared.persistence import Base
 from packages.shared.store import ResourceStore
 
 
-async def test_ui_managed_linked_credential_is_mt5_signature_authority(tmp_path) -> None:
+async def test_ui_managed_linked_credential_is_mt5_signature_authority(
+    tmp_path, monkeypatch
+) -> None:
+    service_token = "isolated-mt5-authority-token"  # noqa: S105 - isolated service identity
+    configured = get_settings().model_copy(update={"mt5_authority_token": SecretStr(service_token)})
+    monkeypatch.setattr(internal_mt5, "get_settings", lambda: configured)
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'authority.db'}")
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
@@ -84,7 +91,7 @@ async def test_ui_managed_linked_credential_is_mt5_signature_authority(tmp_path)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         authenticated = await client.post(
             "/api/v1/internal/mt5/authenticate",
-            headers={"X-Matrades-Service-Token": "development-mt5-authority-token"},
+            headers={"X-Matrades-Service-Token": service_token},
             json={
                 "body_base64": base64.b64encode(body).decode(),
                 "timestamp": timestamp,
@@ -106,5 +113,17 @@ async def test_ui_managed_linked_credential_is_mt5_signature_authority(tmp_path)
             },
         )
         assert unauthorized_service.status_code == 401
+
+        invalid_signature = await client.post(
+            "/api/v1/internal/mt5/authenticate",
+            headers={"X-Matrades-Service-Token": service_token},
+            json={
+                "body_base64": base64.b64encode(body).decode(),
+                "timestamp": timestamp,
+                "nonce": nonce,
+                "signature": "0" * 64,
+            },
+        )
+        assert invalid_signature.status_code == 401
 
     await engine.dispose()

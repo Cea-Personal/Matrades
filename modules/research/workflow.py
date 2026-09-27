@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from modules.research.features import IneligibleResearchEvidence, fingerprint, typed_fingerprint
 from modules.research.matrix import aggregate_status
@@ -539,7 +539,11 @@ class AutonomousResearchWorkflow:
         currency_exposures = set()
         ready = sorted(
             (item for item in results if item.status == LaneStatus.READY),
-            key=lambda item: (-item.candidate.score, item.lane.as_string()),
+            # ResearchLaneResult validates that READY always contains a candidate.
+            key=lambda item: (
+                -cast(TypedResearchCandidate, item.candidate).score,
+                item.lane.as_string(),
+            ),
         )
         for result in ready:
             for candidate in result.ranked_candidates:

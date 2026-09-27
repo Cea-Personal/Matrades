@@ -14,7 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from adapters.agent_runtime.litellm.client import LiteLLMClient
 from apps.api.app.dependencies import current_actor, get_db, require_roles
-from modules.agents.model_assignments import default_profile
+from modules.agents.configuration import load_agents as _agents
+from modules.agents.configuration import load_profiles as _profiles
+from modules.agents.configuration import native_profile as _default_profile
 from modules.agents.models import (
     AgentDefinition,
     AgentExecution,
@@ -74,35 +76,6 @@ async def _saved_runtime_settings(store: ResourceStore, owner_id: UUID) -> dict[
         "litellm_api_key_configured": bool(record.data.get("litellm_api_key_envelope")),
         "updated_at": record.updated_at,
     }
-
-
-def _default_profile(logical_id: str | None = None) -> ModelProfile:
-    return default_profile(logical_id, fallback_model=get_settings().default_codex_model)
-
-
-async def _profiles(store: ResourceStore, owner_id: UUID) -> dict[UUID, ModelProfile]:
-    default = _default_profile()
-    result = {default.id: default}
-    for logical_id in REQUIRED_AGENT_IDS:
-        profile = _default_profile(logical_id)
-        result[profile.id] = profile
-    for item in await store.list("agent_profile", owner_id):
-        profile = ModelProfile.model_validate(item.data)
-        profile = profile.model_copy(
-            update={"parameters": {**profile.parameters, "assignment": "agent_profile"}}
-        )
-        result[profile.id] = profile
-    return result
-
-
-async def _agents(store: ResourceStore, owner_id: UUID) -> dict[str, AgentDefinition]:
-    result = {
-        logical_id: AgentDefinition(logical_id=logical_id) for logical_id in REQUIRED_AGENT_IDS
-    }
-    for item in await store.list("agent_configuration", owner_id):
-        agent = AgentDefinition.model_validate(item.data)
-        result[agent.logical_id] = agent
-    return result
 
 
 @router.get("/registry")
@@ -538,7 +511,7 @@ async def test_run(
             requested_model=profile.model,
             resolved_system_prompt=prompts.system,
             resolved_user_prompt=prompts.user,
-            tools=("market.read", "knowledge.search"),
+            tools=(),
             status=execution_status,
             duration_ms=int((monotonic() - started) * 1000),
             error=error,
@@ -548,7 +521,7 @@ async def test_run(
             agent,
             profiles,
             prompts,
-            PermissionSet(agent.permission_set_version, ("market.read", "knowledge.search")),
+            PermissionSet(agent.permission_set_version, ()),
             {**payload.input, "output_schema": output_schema},
             deadline_seconds=120,
         )

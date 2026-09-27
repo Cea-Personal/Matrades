@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta
+from decimal import Decimal
 from hashlib import sha256
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -96,7 +97,11 @@ async def cached_history(
     candles = [
         BacktestCandle(
             observed_at=at.to_pydatetime() - timedelta(seconds=seconds),
-            **{key: str(row[key]) for key in ("open", "high", "low", "close", "volume")},
+            open=Decimal(str(row["open"])),
+            high=Decimal(str(row["high"])),
+            low=Decimal(str(row["low"])),
+            close=Decimal(str(row["close"])),
+            volume=Decimal(str(row["volume"])),
         )
         for at, row in frame.iterrows()
     ]

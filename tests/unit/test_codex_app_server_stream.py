@@ -65,7 +65,10 @@ async def test_invoke_uses_only_parent_final_answer_after_subagent_messages() ->
         if method == "thread/start":
             assert params["ephemeral"] is False
             assert params["model"] == load_native_agent("orchestrator")["model"]
-            assert params["config"]["model_reasoning_effort"] == "medium"
+            assert (
+                params["config"]["model_reasoning_effort"]
+                == load_native_agent("orchestrator")["model_reasoning_effort"]
+            )
             snapshot = Path(params["config"]["agents.technical_analyst.config_file"])
             assert (
                 await asyncio.to_thread(lambda: tomllib.loads(snapshot.read_text())["model"])
@@ -76,7 +79,7 @@ async def test_invoke_uses_only_parent_final_answer_after_subagent_messages() ->
             return {"thread": {"id": "parent-thread"}}
         if method == "turn/start":
             assert params["model"] == load_native_agent("orchestrator")["model"]
-            assert params["effort"] == "medium"
+            assert params["effort"] == load_native_agent("orchestrator")["model_reasoning_effort"]
             assert "NATIVE SUBAGENT DELEGATION" not in params["input"][0]["text"]
             assert 'OUTPUT SCHEMA:\n{"type": "object"}' in params["input"][0]["text"]
             return {"turn": {"id": "parent-turn"}}

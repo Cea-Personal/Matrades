@@ -52,3 +52,50 @@ test("agent configuration separates native models, explicit overrides and verifi
   await expect(page.getByRole("cell", { name: /^Saved profile override/ })).toHaveCount(0);
   expect(writes).toEqual(["/agents/critic"]);
 });
+
+test("an individual Test button sends only its own request and does not disable other agents", async ({ page }) => {
+  const tests: string[] = [];
+  let release!: () => void;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  const agents = ["technical_analyst", "critic"].map(logical_id => ({
+    logical_id, required: true, runtime: "CODEX_APP_SERVER", profile_id: null,
+    configured_model: "native-file-model", configured_reasoning_effort: "low",
+    system_prompt_override: null, user_prompt_override: null, permission_set_version: "v1",
+  }));
+  await page.route("**/api/v1/**", async route => {
+    const path = new URL(route.request().url()).pathname.replace("/api/v1", "");
+    if (path === "/events") return route.fulfill({ contentType: "text/event-stream", body: ": connected\n\n" });
+    if (route.request().method() === "POST" && path.endsWith("/test")) {
+      tests.push(path);
+      await pending;
+      return route.fulfill({ json: {
+        execution: { logical_id: "technical_analyst", status: "SUCCEEDED", actual_runtime: "CODEX_APP_SERVER" },
+        result: { summary: "Selected agent only" },
+      } });
+    }
+    const responses: Record<string, unknown> = {
+      "/auth/me": { id: "user", owner_id: "owner", email: "test@example.com", email_verified: true, role: "OWNER" },
+      "/agents/registry": agents,
+      "/agents/profiles": [],
+      "/agents/status": { codex_worker_heartbeat: true, codex_auth_mode: "HOST_MOUNTED_AUTH_JSON", agents: [] },
+      "/agents/runtime-settings": { codex_enabled: true, litellm_enabled: false, litellm_url: "http://localhost:4000", default_codex_model: "platform-fallback", litellm_api_key_configured: false },
+    };
+    return route.fulfill({ json: responses[path] ?? [] });
+  });
+  try {
+    await page.goto("/agents");
+    const analyst = page.getByRole("row").filter({ has: page.getByText("technical_analyst", { exact: true }) });
+    const critic = page.getByRole("row").filter({ has: page.getByText("critic", { exact: true }) });
+    await analyst.getByRole("button", { name: "Test", exact: true }).click();
+    await expect(analyst.getByRole("button", { name: "Testing…" })).toBeDisabled();
+    await expect(critic.getByRole("button", { name: "Test", exact: true })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "Test all logical agents" })).toBeDisabled();
+    await expect.poll(() => tests).toEqual(["/agents/technical_analyst/test"]);
+    release();
+    await expect(analyst.getByRole("button", { name: "Test", exact: true })).toBeEnabled();
+    await expect(page.getByText("technical_analyst · SUCCEEDED", { exact: true })).toBeVisible();
+    expect(tests).toEqual(["/agents/technical_analyst/test"]);
+  } finally {
+    release();
+  }
+});

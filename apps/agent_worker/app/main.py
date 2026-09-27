@@ -9,8 +9,9 @@ from uuid import UUID
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
-from modules.agents.model_assignments import default_profile
-from modules.agents.models import AgentDefinition, ModelProfile, RuntimeType
+from modules.agents.configuration import load_agents, load_profiles
+from modules.agents.configuration import native_profile as _default_profile
+from modules.agents.models import RuntimeType
 from modules.agents.permissions import PermissionSet
 from modules.agents.prompts import PromptSet, resolve_prompts
 from modules.agents.registry import REQUIRED_AGENT_IDS
@@ -35,11 +36,6 @@ PLATFORM_PROMPTS = PromptSet(
     "Return only a JSON object conforming to the requested output schema.",
     "platform-v1",
 )
-
-
-def _default_profile(logical_id: str | None = None) -> ModelProfile:
-    settings = get_settings()
-    return default_profile(logical_id, fallback_model=settings.default_codex_model)
 
 
 def codex_slots_healthy(routers: list[AgentRuntimeRouter]) -> bool:
@@ -108,26 +104,8 @@ async def serve_agent_requests(
                 owner_id = UUID(str(request.get("owner_id") or settings.default_owner_id))
                 async with unit_of_work() as db:
                     store = ResourceStore(db)
-                    default = _default_profile()
-                    profiles = {default.id: default}
-                    for agent_id in REQUIRED_AGENT_IDS:
-                        profile = _default_profile(agent_id)
-                        profiles[profile.id] = profile
-                    for item in await store.list("agent_profile", owner_id):
-                        profile = ModelProfile.model_validate(item.data)
-                        profile = profile.model_copy(
-                            update={
-                                "parameters": {**profile.parameters, "assignment": "agent_profile"}
-                            }
-                        )
-                        profiles[profile.id] = profile
-                    agents = {
-                        agent_id: AgentDefinition(logical_id=agent_id)
-                        for agent_id in REQUIRED_AGENT_IDS
-                    }
-                    for item in await store.list("agent_configuration", owner_id):
-                        configured = AgentDefinition.model_validate(item.data)
-                        agents[configured.logical_id] = configured
+                    profiles = await load_profiles(store, owner_id)
+                    agents = await load_agents(store, owner_id)
                     agent = agents[logical_id]
                     if agent.profile_id is None:
                         agent = agent.model_copy(
@@ -148,7 +126,7 @@ async def serve_agent_requests(
                         prompts,
                         PermissionSet(
                             agent.permission_set_version,
-                            ("market.read", "knowledge.search"),
+                            (),  # Evidence is supplied by the backend; no callable domain tools.
                         ),
                         {
                             **dict(request.get("payload", {})),

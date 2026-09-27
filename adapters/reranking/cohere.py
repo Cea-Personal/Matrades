@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import math
+from typing import Literal
 
 import httpx
 
-DEFAULT_MODEL = "rerank-v4.0-pro"
+DEFAULT_MODEL: Literal["rerank-v4.0-pro"] = "rerank-v4.0-pro"
 SUPPORTED_MODELS = (DEFAULT_MODEL, "rerank-v4.0-fast", "rerank-v3.5")
 MAX_CANDIDATES = 100
 

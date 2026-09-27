@@ -74,6 +74,8 @@ async def _ingest(run_id: UUID):
         )
         features = await persist_features(db, owner, dataset, candles, data["timeframe"])
         record = await ResourceStore(db).get("research_data_import", run_id, owner)
+        if record is None:
+            raise ValueError("history import not found")
         await ResourceStore(db).update(
             record,
             {
@@ -113,7 +115,7 @@ def ingest_research_history(run_id: str):
         raise
 
 
-async def _recover():
+async def _recover() -> dict[str, int]:
     async with unit_of_work() as db:
         records = list(
             (

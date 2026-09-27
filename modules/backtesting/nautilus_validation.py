@@ -5,6 +5,7 @@ from __future__ import annotations
 from bisect import bisect_right
 from datetime import UTC, datetime
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
+from typing import Any
 
 from modules.strategies.entry_context import entry_context_reason
 from modules.strategies.pair_profile import news_features
@@ -26,7 +27,7 @@ def validate_execution(
     calendar=None,
     validation_start_after=None,
     quotes: list[dict] | None = None,
-) -> dict:
+) -> dict[str, Any]:
     import nautilus_trader
     from nautilus_trader.backtest.engine import BacktestEngine
     from nautilus_trader.backtest.models import FeeModel, FillModel
@@ -66,8 +67,8 @@ def validate_execution(
         value.is_finite() and value > 0 for value in (tick, multiplier, size_step, min_size)
     ):
         raise ValueError("positive finite broker contract terms required")
-    price_precision = max(0, -tick.normalize().as_tuple().exponent)
-    size_precision = max(0, -size_step.normalize().as_tuple().exponent)
+    price_precision = max(0, -int(tick.normalize().as_tuple().exponent))
+    size_precision = max(0, -int(size_step.normalize().as_tuple().exponent))
     currency = Currency.from_str(str(contract["price_currency"]))
     venue = Venue("MATRADES_RESEARCH")
     instrument_id = InstrumentId(Symbol(strategy.instruments[0].replace("/", "_")), venue)
@@ -100,20 +101,20 @@ def validate_execution(
     direction = strategy.trade_rules.direction
     feature_series = strategy_feature_series(strategy, candles)
 
-    class PerUnitFee(FeeModel):
+    class PerUnitFee(FeeModel):  # type: ignore[misc]  # Native Cython base has no typing metadata.
         def get_commission(self, order, fill_qty, fill_px, instrument):
             return Money(fill_qty.as_decimal() * configuration.commission / 2, currency)
 
-    class Replay(Strategy):
-        def __init__(self):
+    class Replay(Strategy):  # type: ignore[misc]  # Native Cython base has no typing metadata.
+        def __init__(self) -> None:
             super().__init__(StrategyConfig(order_id_tag="MR"))
             self.previous_bar = -1
             self.entry_id = None
             self.stop_order = None
             self.targets = set()
-            self.active_features = None
-            self.entry_price = None
-            self.original_risk = None
+            self.active_features: dict[str, Decimal] | None = None
+            self.entry_price: Decimal | None = None
+            self.original_risk: Decimal | None = None
             self.position_risks = []
             self.closed_r = []
             self.fills = []
@@ -161,6 +162,8 @@ def validate_execution(
                 elif self.stop_order is not None and strategy.position_management.get(
                     "trailing_stop"
                 ):
+                    if self.original_risk is None:
+                        raise ValueError("trailing protection requires recorded entry risk")
                     sign = Decimal(1) if direction == "LONG" else Decimal(-1)
                     candidate = candles[index - 1].close - sign * self.original_risk
                     current = self.stop_order.trigger_price.as_decimal()
@@ -215,12 +218,15 @@ def validate_execution(
                 }
             )
             if event.client_order_id == self.entry_id:
+                if self.active_features is None:
+                    raise ValueError("entry fill requires recorded decision features")
                 self.entry_id = None
-                self.entry_price = event.last_px.as_decimal()
+                entry_price: Decimal = event.last_px.as_decimal()
+                self.entry_price = entry_price
                 stop, targets = protection_levels(
-                    strategy.trade_rules, self.entry_price, self.active_features["volatility"], tick
+                    strategy.trade_rules, entry_price, self.active_features["volatility"], tick
                 )
-                self.original_risk = abs(self.entry_price - stop)
+                self.original_risk = abs(entry_price - stop)
                 self.position_risks.append(self.original_risk * event.last_qty.as_decimal())
                 self.partial_hits = 0
                 side = OrderSide.SELL if direction == "LONG" else OrderSide.BUY
@@ -259,6 +265,10 @@ def validate_execution(
                     if positions:
                         kwargs = {"quantity": positions[0].quantity}
                         if strategy.position_management.get("move_to_break_even"):
+                            if self.entry_price is None:
+                                raise ValueError(
+                                    "break-even protection requires recorded entry price"
+                                )
                             kwargs["trigger_price"] = instrument.make_price(float(self.entry_price))
                         self.modify_order(self.stop_order, **kwargs)
 
@@ -287,7 +297,7 @@ def validate_execution(
             if event.client_order_id == self.entry_id:
                 self.entry_id = None
 
-    def price(value, side):
+    def price(value: Decimal, side: str) -> Price:
         rounding = ROUND_FLOOR if side == "bid" else ROUND_CEILING
         rounded = (value / tick).to_integral_value(rounding=rounding) * tick
         if rounded <= 0:

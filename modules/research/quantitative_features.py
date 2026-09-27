@@ -6,6 +6,8 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from pandas import DataFrame
+
     from modules.backtesting.engine import BacktestCandle
 
 FEATURE_VERSION = "talib-structure-session-intermarket-v1"
@@ -34,7 +36,7 @@ TECHNICAL_FEATURES = frozenset(
 )
 
 
-def candle_frame(candles: list[BacktestCandle], timeframe_seconds: int):
+def candle_frame(candles: list[BacktestCandle], timeframe_seconds: int) -> DataFrame:
     import pandas as pd
 
     from modules.backtesting.engine import validate_candles
@@ -59,7 +61,7 @@ def candle_frame(candles: list[BacktestCandle], timeframe_seconds: int):
     return frame
 
 
-def technical_features(frame):
+def technical_features(frame: DataFrame) -> DataFrame:
     """Same causal technical definitions for feature storage and trading rules."""
     import talib
 

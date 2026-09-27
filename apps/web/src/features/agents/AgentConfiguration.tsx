@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { ProgressiveList } from "@/components/ProgressiveList";
 import { Disclosure } from "@/components/Disclosure";
 import { api } from "@/lib/api";
+import { useKeyedMutation } from "@/lib/useKeyedMutation";
 import type { ModelProfile } from "@/features/agents/ModelProfiles";
 
 type Agent = {
@@ -31,6 +32,13 @@ type TestResult = {
   result?: unknown; error?: string;
 };
 
+function testAgent(id: string) {
+  return api<Omit<TestResult, "logical_id">>(`/agents/${id}/test`, {
+    method: "POST",
+    body: JSON.stringify({ input: { purpose: "configuration_test", requested_at: new Date().toISOString() } }),
+  });
+}
+
 export function AgentConfiguration() {
   const client = useQueryClient();
   const agents = useQuery<Agent[]>({
@@ -46,7 +54,8 @@ export function AgentConfiguration() {
     refetchInterval: 15_000,
   });
   const [selected, setSelected] = useState<Agent | null>(null);
-  const [result, setResult] = useState<unknown>(null);
+  const [individualResults, setIndividualResults] = useState<Record<string, TestResult>>({});
+  const bulkTestRunning = useRef(false);
   const [allResults, setAllResults] = useState<TestResult[]>([]);
   const [error, setError] = useState("");
   const save = useMutation({
@@ -58,27 +67,23 @@ export function AgentConfiguration() {
     },
     onError: (e: Error) => setError(e.message),
   });
-  const test = useMutation({
-    mutationFn: (id: string) => api(`/agents/${id}/test`, {
-      method: "POST",
-      body: JSON.stringify({ input: { purpose: "configuration_test", requested_at: new Date().toISOString() } }),
-    }),
-    onSuccess: async value => {
-      setResult(value); await client.invalidateQueries({ queryKey: ["agents", "status"] });
+  const test = useKeyedMutation({
+    mutationFn: testAgent,
+    onSuccess: async (value, id) => {
+      setIndividualResults(previous => ({ ...previous, [id]: { ...value, logical_id: id } }));
+      await client.invalidateQueries({ queryKey: ["agents", "status"] });
     },
-    onError: (e: Error) => setError(e.message),
+    onError: (e: Error, id) => {
+      setIndividualResults(previous => ({ ...previous, [id]: { logical_id: id, error: e.message } }));
+    },
   });
   const testAll = useMutation({
+    retry: false,
     mutationFn: async () => Promise.all((agents.data ?? []).map(async agent => {
       try {
         return {
           logical_id: agent.logical_id,
-          ...await api<{ execution: { status?: string; actual_runtime?: string }; result?: unknown }>(
-            `/agents/${agent.logical_id}/test`, {
-              method: "POST",
-              body: JSON.stringify({ input: { purpose: "configuration_test", requested_at: new Date().toISOString() } }),
-            },
-          ),
+          ...await testAgent(agent.logical_id),
         };
       } catch (cause) {
         return { logical_id: agent.logical_id, error: cause instanceof Error ? cause.message : String(cause) };
@@ -88,7 +93,22 @@ export function AgentConfiguration() {
       setAllResults(values); await client.invalidateQueries({ queryKey: ["agents", "status"] });
     },
     onError: (e: Error) => setError(e.message),
+    onSettled: () => { bulkTestRunning.current = false; },
   });
+  const startTest = (id: string) => {
+    if (bulkTestRunning.current || !test.mutate(id)) return;
+    setIndividualResults(previous => {
+      const next = { ...previous };
+      delete next[id];
+      return next;
+    });
+  };
+  const startAllTests = () => {
+    if (bulkTestRunning.current || test.hasPending() || !agents.data?.length) return;
+    bulkTestRunning.current = true;
+    setError("");
+    testAll.mutate();
+  };
 
   return <section className="section-stack">
     <article className="card">
@@ -97,8 +117,8 @@ export function AgentConfiguration() {
           <h2>Logical agent registry</h2>
           <p className="muted">Native agent files supply the defaults. Saved profiles are explicit overrides. Last-run models are shown only when runtime evidence verifies them.</p>
         </div>
-        <button className="btn primary" disabled={testAll.isPending || agents.isPending || agents.isError}
-          onClick={() => testAll.mutate()}>Test all logical agents</button>
+        <button className="btn primary" disabled={testAll.isPending || test.pendingKeys.size > 0 || agents.isPending || agents.isError || !agents.data?.length}
+          onClick={startAllTests}>Test all logical agents</button>
       </div>
       <p className={runtimeStatus.data?.codex_worker_heartbeat ? "notice good" : "notice bad"}>
         {runtimeStatus.data?.codex_worker_heartbeat
@@ -116,6 +136,8 @@ export function AgentConfiguration() {
             const profile = profiles.data?.find(item => item.id === agent.profile_id);
             const configuredModel = agent.configured_model ?? profile?.model ?? agent.recommended_model;
             const verifiedModel = status?.model_verified ? status.actual_model : null;
+            const isTesting = test.pendingKeys.has(agent.logical_id) || testAll.isPending;
+            const individualResult = individualResults[agent.logical_id];
             return <tr key={agent.logical_id}>
               <td><strong>{agent.logical_id}</strong>{agent.required && <small> protected</small>}</td>
               <td>{agent.runtime}<small>{configuredModel ?? "Configuration unavailable"} · {agent.configured_reasoning_effort ?? (agent.runtime === "CODEX_APP_SERVER" ? agent.recommended_reasoning_effort : null) ?? "model default"}</small></td>
@@ -133,8 +155,9 @@ export function AgentConfiguration() {
               </td>
               <td>{agent.permission_set_version}</td>
               <td><button className="btn compact" onClick={() => setSelected({ ...agent })}>Configure</button>{" "}
-                <button className="btn compact" disabled={test.isPending || testAll.isPending}
-                  onClick={() => test.mutate(agent.logical_id)}>Test</button>
+                <button className="btn compact" disabled={isTesting} aria-busy={isTesting}
+                  onClick={() => startTest(agent.logical_id)}>{isTesting ? "Testing…" : "Test"}</button>
+                {individualResult?.error && <small role="alert" className="notice bad">Test failed: {individualResult.error}</small>}
               </td>
             </tr>;
           })}</tbody>
@@ -169,8 +192,13 @@ export function AgentConfiguration() {
       <div className="actions"><button className="btn primary" disabled={save.isPending}>Activate configuration</button>
         <button type="button" className="btn" onClick={() => setSelected(null)}>Cancel</button></div>
     </form>}
-    {result !== null && <article className="card"><h2>Bounded execution result</h2>
-      <Disclosure title="Execution result details"><pre>{JSON.stringify(result, null, 2)}</pre></Disclosure></article>}
+    {Object.keys(individualResults).length > 0 && <article className="card"><h2>Bounded execution results</h2>
+      <ProgressiveList items={Object.values(individualResults).reverse()} label="individual test results">
+        {visible => <div className="section-stack">{visible.map(item => <Disclosure key={item.logical_id}
+          title={`${item.logical_id} · ${item.error ? "ERROR" : item.execution?.status ?? "Completed"}`}>
+          <pre>{JSON.stringify(item, null, 2)}</pre>
+        </Disclosure>)}</div>}
+      </ProgressiveList></article>}
     {error && <p className="notice bad">{error}</p>}
   </section>;
 }

@@ -92,15 +92,15 @@ async def collect_context(
                     raise ValueError(
                         "CFTC needs an exact contract/report/category mapping for this pair"
                     )
-                client = CftcProvider()
+                cot_client = CftcProvider()
                 try:
-                    rows = await client.cot(
+                    rows = await cot_client.cot(
                         str(mapping["code"]),
                         report=str(mapping["report"]),
                         weeks=int(mapping.get("weeks", 156)),
                     )
                 finally:
-                    await client.close()
+                    await cot_client.close()
                 fields = mapping.get("categories", {})
                 if not fields or len(fields) > 5:
                     raise ValueError("COT mapping needs 1–5 explicit report category field pairs")
@@ -129,7 +129,7 @@ async def collect_context(
             elif provider == ConnectionProvider.FRED and connection.secret:
                 if not config.get("series"):
                     raise ValueError("FRED needs configured series IDs")
-                client = FredProvider(connection.secret)
+                fred_client = FredProvider(connection.secret)
                 try:
                     for series in config.get("series", [])[:5]:
                         contexts.append(
@@ -137,12 +137,12 @@ async def collect_context(
                                 "provider": "FRED",
                                 "series": str(series),
                                 "vintage_as_of": end.date().isoformat(),
-                                "data": await client.series(str(series), as_of=end),
+                                "data": await fred_client.series(str(series), as_of=end),
                                 "point_in_time": "FIRST_SEEN_ONLY",
                             }
                         )
                 finally:
-                    await client.close()
+                    await fred_client.close()
             elif provider == ConnectionProvider.YAHOO_FINANCE:
                 if not config.get("proxies"):
                     raise ValueError("Yahoo intermarket context needs named proxies")

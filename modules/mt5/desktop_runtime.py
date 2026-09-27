@@ -56,40 +56,36 @@ class MT5DesktopRuntime:
             return await self._ensure_started(settings, configured_path)
 
     async def _ensure_started(self, settings: Settings, configured_path: Path) -> MT5StartupResult:
-        terminal_path = configured_path.expanduser().resolve()
-        if not terminal_path.is_file():
+        terminal_path = await asyncio.to_thread(lambda: configured_path.expanduser().resolve())
+        if not await asyncio.to_thread(terminal_path.is_file):
             raise MT5StartupError("configured MT5 terminal executable was not found")
 
-        wine_binary = self._resolve_binary(settings.mt5_wine_binary)
+        wine_binary = await asyncio.to_thread(self._resolve_binary, settings.mt5_wine_binary)
         if wine_binary is None:
             raise MT5StartupError("configured Wine executable was not found")
 
-        if self._process_alive(self._terminal_process, terminal_path):
+        if await asyncio.to_thread(self._process_alive, self._terminal_process, terminal_path):
             return MT5StartupResult("ready", detail="MT5 terminal is already running")
 
         wine_started = False
-        if not self._process_matches("wineserver"):
-            wineboot_binary = self._resolve_binary(settings.mt5_wineboot_binary)
+        if not await asyncio.to_thread(self._process_matches, "wineserver"):
+            wineboot_binary = await asyncio.to_thread(
+                self._resolve_binary, settings.mt5_wineboot_binary
+            )
             if wineboot_binary is not None:
                 await self._run_wineboot(wineboot_binary, settings, terminal_path)
                 wine_started = True
 
         try:
-            self._terminal_process = subprocess.Popen(
-                [wine_binary, str(terminal_path)],
-                cwd=str(terminal_path.parent),
-                env=self._environment(settings),
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
+            self._terminal_process = await asyncio.to_thread(
+                self._launch_terminal, wine_binary, terminal_path, settings
             )
         except OSError as exc:
             raise MT5StartupError("Wine could not launch the MT5 terminal") from exc
 
         deadline = asyncio.get_running_loop().time() + settings.mt5_startup_timeout_seconds
         while asyncio.get_running_loop().time() < deadline:
-            if self._process_alive(self._terminal_process, terminal_path):
+            if await asyncio.to_thread(self._process_alive, self._terminal_process, terminal_path):
                 return MT5StartupResult(
                     "ready",
                     wine_started=wine_started,
@@ -101,6 +97,20 @@ class MT5DesktopRuntime:
         if self._terminal_process.poll() is not None:
             raise MT5StartupError("MT5 terminal exited during startup")
         raise MT5StartupError("MT5 terminal did not become ready before the startup timeout")
+
+    def _launch_terminal(
+        self, wine_binary: str, terminal_path: Path, settings: Settings
+    ) -> subprocess.Popen[bytes]:
+        # The configured binary is resolved above; arguments never pass through a shell.
+        return subprocess.Popen(  # noqa: S603
+            [wine_binary, str(terminal_path)],
+            cwd=str(terminal_path.parent),
+            env=self._environment(settings),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
 
     async def _run_wineboot(
         self, wineboot_binary: str, settings: Settings, terminal_path: Path
@@ -148,7 +158,7 @@ class MT5DesktopRuntime:
         if ps_binary is None:
             return False
         try:
-            result = subprocess.run(
+            result = subprocess.run(  # noqa: S603 - resolved ps binary, no shell or user arguments
                 [ps_binary, "-ax", "-o", "command="],
                 capture_output=True,
                 text=True,
@@ -188,9 +198,7 @@ async def _ensure_remote_started(settings: Settings) -> MT5StartupResult:
     if not token:
         raise MT5StartupError("remote MT5 runtime control token is not configured")
     try:
-        async with httpx.AsyncClient(
-            timeout=settings.mt5_startup_timeout_seconds + 5
-        ) as client:
+        async with httpx.AsyncClient(timeout=settings.mt5_startup_timeout_seconds + 5) as client:
             response = await client.post(
                 control_url,
                 headers={"X-Matrades-MT5-Runtime-Token": token},

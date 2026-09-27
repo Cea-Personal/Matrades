@@ -117,8 +117,8 @@ def strategy_feature_series(
 ) -> list[dict[str, Decimal]]:
     """Causal batch evaluation: compute Wilder ATR once, not a prefix per bar."""
     window = int(strategy.parameters.get("structure_window", 20))
-    period = strategy.parameters.get("atr_period")
-    period = int(period) if period is not None else None
+    configured_period = strategy.parameters.get("atr_period")
+    period = int(configured_period) if configured_period is not None else None
     result = []
     if technical_series is None:
         technical_series = technical_feature_series(candles, required_technical_features(strategy))

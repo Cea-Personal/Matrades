@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.app.dependencies import current_actor, get_db, require_roles, require_step_up
+from apps.api.app.routes.trade_plans import get_trade_plan, list_trade_plans
 from modules.identity.authorization import Actor, Role
 from modules.trading.coordinator import current_broker_snapshot
 from modules.trading.kill_switches import update_kill_switch
@@ -56,24 +57,9 @@ async def equity_history(
     }
 
 
-@router.get("/trade-plans")
-async def list_trade_plans(
-    actor: Annotated[Actor, Depends(current_actor)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-):
-    return [item.public() for item in await ResourceStore(db).list("trade_plan", actor.owner_id)]
-
-
-@router.get("/trade-plans/{plan_id}")
-async def get_trade_plan(
-    plan_id: UUID,
-    actor: Annotated[Actor, Depends(current_actor)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-):
-    item = await ResourceStore(db).get("trade_plan", plan_id, actor.owner_id)
-    if item is None:
-        raise HTTPException(status_code=404, detail="trade plan not found")
-    return item.public()
+# Keep both public URL families while sharing their owner-scoped read handlers.
+router.add_api_route("/trade-plans", list_trade_plans, methods=["GET"])
+router.add_api_route("/trade-plans/{plan_id}", get_trade_plan, methods=["GET"])
 
 
 @router.get("/execution-commands")

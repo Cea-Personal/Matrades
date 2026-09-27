@@ -23,11 +23,11 @@ export function YouTubeDiscovery() {
   const refresh = () => client.invalidateQueries({ queryKey: ["knowledge"] });
   const searchVideos = useMutation({
     mutationFn: () => api<SearchResponse>("/knowledge/youtube/search", { method: "POST", body: JSON.stringify({ query: manualInput.query, limit: Number(manualInput.limit), languages: ["en"], category: "trading" }) }),
-    onSuccess: result => { setSearchResult(result); setMessage(`SerpApi found ${result.discovered} videos. Review the results, then fetch their transcripts.`); },
+    onSuccess: async result => { setSearchResult(result.discovered ? result : null); setMessage(result.discovered ? `SerpApi found ${result.discovered} new videos. Review the results, then fetch their transcripts.` : "No new videos found within this search's page budget. Previously discovered videos were excluded; try a more specific query or search again to continue discovery."); await refresh(); },
     onError: (error: Error) => setMessage(error.message),
   });
   const fetchTranscripts = useMutation({
-    mutationFn: () => { if (!searchResult) throw new Error("Search for videos first"); return api<TranscriptResponse>(`/knowledge/youtube/runs/${searchResult.run_id}/transcripts`, { method: "POST" }); },
+    mutationFn: (runId: string) => api<TranscriptResponse>(`/knowledge/youtube/runs/${runId}/transcripts`, { method: "POST" }),
     onSuccess: async result => { setMessage(`${result.created} transcript(s) indexed, ${result.skipped} already known, ${result.failed.length} unavailable.`); setSearchResult(null); await refresh(); },
     onError: (error: Error) => setMessage(error.message),
   });
@@ -45,16 +45,16 @@ export function YouTubeDiscovery() {
 
   return <article className="card form-stack">
     <h2>YouTube discovery schedule and SerpApi calls</h2>
-    <p className="muted">Each scheduled or manual provider call is timestamped here in Connections. Successful captions are written to the owner-scoped knowledge index.</p>
+    <p className="muted">Searches exclude videos previously discovered by your account and continue through result pages within a bounded request budget. Successful captions are written to your knowledge index.</p>
     <form className="form-stack inset" onSubmit={event => { event.preventDefault(); searchVideos.mutate(); }}>
       <h3>Two-stage YouTube knowledge ingestion</h3>
-      <p className="muted">First use SerpApi to discover trading videos. Review the returned titles, then fetch their captions, chunk and embed them into the owner-scoped Knowledge base.</p>
+      <p className="muted">Discover new trading videos, review their titles, then fetch captions for the Knowledge base. Research receives relevant cited excerpts through hybrid retrieval and configured Cohere reranking. Captions supply testable ideas, not verified performance or trading approval.</p>
       <div className="form-grid">
         <label>Search query<input required value={manualInput.query} onChange={event => setManualInput({ ...manualInput, query: event.target.value })} /></label>
-        <label>Videos to inspect<input type="number" min="1" max="20" value={manualInput.limit} onChange={event => setManualInput({ ...manualInput, limit: event.target.value })} /></label>
+        <label>New videos to inspect<input type="number" min="1" max="20" value={manualInput.limit} onChange={event => setManualInput({ ...manualInput, limit: event.target.value })} /></label>
       </div>
       <div className="actions"><button type="submit" className="btn primary" disabled={searchVideos.isPending || fetchTranscripts.isPending}>{searchVideos.isPending ? "Searching videos…" : "1. Search trading videos"}</button></div>
-      {searchResult ? <div className="inset form-stack"><strong>{searchResult.discovered} videos discovered</strong><ul className="record-list">{searchResult.videos.map(video => <li key={video.video_id}><a href={video.url} target="_blank" rel="noreferrer"><strong>{video.title}</strong></a><small>{video.video_id}</small></li>)}</ul><button type="button" className="btn primary" disabled={fetchTranscripts.isPending} onClick={() => fetchTranscripts.mutate()}>{fetchTranscripts.isPending ? "Fetching transcripts…" : "Fetch transcripts for these videos"}</button></div> : null}
+      {searchResult ? <div className="inset form-stack"><strong>{searchResult.discovered} videos discovered</strong><ul className="record-list">{searchResult.videos.map(video => <li key={video.video_id}><a href={video.url} target="_blank" rel="noreferrer"><strong>{video.title}</strong></a><small>{video.video_id}</small></li>)}</ul><button type="button" className="btn primary" disabled={fetchTranscripts.isPending} onClick={() => fetchTranscripts.mutate(searchResult.run_id)}>{fetchTranscripts.isPending ? "Fetching transcripts…" : "Fetch transcripts for these videos"}</button></div> : null}
     </form>
     {message ? <p className="notice">{message}</p> : null}
     {editable?.configured && !editing ? <div className="inset form-stack">
@@ -68,6 +68,6 @@ export function YouTubeDiscovery() {
       <div className="actions"><button className="btn primary" disabled={save.isPending || !editable.query || (editable.enabled && !editable.weekdays.length)} onClick={() => save.mutate()}>{save.isPending ? "Saving…" : editable.configured ? "Replace YouTube schedule" : "Save YouTube schedule"}</button>{editable.configured ? <button className="btn" onClick={() => { setDraft(null); setEditing(false); }}>Cancel</button> : null}</div>
     </> : <p>Loading schedule…</p>}
     <h3>Recent SerpApi invocation history</h3>
-    {runs.data?.length ? <ProgressiveList items={newestFirst(runs.data)} label="YouTube research runs">{visible => <ul className="record-list">{visible.map(run => <li key={run.id}><strong>{run.trigger} · {run.state}</strong><span>{run.query}</span><small>Provider called: {run.provider_requested_at ? new Date(run.provider_requested_at).toLocaleString() : run.scheduled_at ? `queued ${new Date(run.scheduled_at).toLocaleString()}` : "not called yet"} · indexed {run.created ?? 0} / discovered {run.discovered ?? 0}</small></li>)}</ul>}</ProgressiveList> : <p className="empty">No SerpApi calls recorded yet. Without a saved schedule, calls are manual only.</p>}
+    {runs.data?.length ? <ProgressiveList items={newestFirst(runs.data)} label="YouTube research runs">{visible => <ul className="record-list">{visible.map(run => <li key={run.id}><strong>{run.trigger} · {run.state}</strong><span>{run.query}</span><small>Provider called: {run.provider_requested_at ? new Date(run.provider_requested_at).toLocaleString() : run.scheduled_at ? `queued ${new Date(run.scheduled_at).toLocaleString()}` : "not called yet"} · indexed {run.created ?? 0} / discovered {run.discovered ?? run.discovered_videos?.length ?? 0}</small>{run.discovered_videos?.length && ["SEARCHED", "PARTIAL", "FAILED"].includes(run.state) ? <button type="button" className="btn" disabled={fetchTranscripts.isPending} onClick={() => fetchTranscripts.mutate(run.id)}>{run.state === "SEARCHED" ? "Fetch saved transcripts" : "Retry unavailable transcripts"}</button> : null}</li>)}</ul>}</ProgressiveList> : <p className="empty">No SerpApi calls recorded yet. Without a saved schedule, calls are manual only.</p>}
   </article>;
 }

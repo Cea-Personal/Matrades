@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { api } from "@/lib/api";
+import { deferred } from "@/test/deferred";
 import { AgentConfiguration } from "./AgentConfiguration";
 
 vi.mock("@/lib/api", () => ({ api: vi.fn() }));
@@ -92,4 +93,109 @@ test("configuration load failures are visible instead of an empty registry", asy
   vi.mocked(api).mockRejectedValue(new Error("Native agent file unavailable"));
   show();
   expect(await screen.findByText(/Unable to load agent configuration/)).toHaveTextContent("Native agent file unavailable");
+});
+
+function testRequests() {
+  return vi.mocked(api).mock.calls.filter(([path, options]) =>
+    options?.method === "POST" && path.endsWith("/test"),
+  ).map(([path]) => path);
+}
+
+async function agentRow(id: string) {
+  return (await screen.findByText(id, { selector: "strong" })).closest("tr")!;
+}
+
+test("testing one agent sends exactly one targeted request and leaves other agents enabled", async () => {
+  const pending = deferred();
+  const defaultApi = vi.mocked(api).getMockImplementation()!;
+  vi.mocked(api).mockImplementation((path, options) =>
+    path === "/agents/technical_analyst/test" ? pending.promise : defaultApi(path, options),
+  );
+  show();
+  const analyst = within(await agentRow("technical_analyst"));
+  const critic = within(await agentRow("critic"));
+  const button = analyst.getByRole("button", { name: "Test" });
+  fireEvent.click(button);
+  fireEvent.click(button);
+  expect(analyst.getByRole("button", { name: "Testing…" })).toBeDisabled();
+  expect(critic.getByRole("button", { name: "Test" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Test all logical agents" })).toBeDisabled();
+  await waitFor(() => expect(testRequests()).toEqual(["/agents/technical_analyst/test"]));
+  await act(async () => pending.resolve({ execution: { status: "SUCCEEDED" }, result: { summary: "Analyst only" } }));
+  await waitFor(() => expect(analyst.getByRole("button", { name: "Test" })).toBeEnabled());
+  expect(screen.getByText("technical_analyst · SUCCEEDED")).toBeInTheDocument();
+  expect(testRequests()).toEqual(["/agents/technical_analyst/test"]);
+});
+
+test("different agent tests finish independently and preserve both results", async () => {
+  const analystPending = deferred();
+  const criticPending = deferred();
+  const defaultApi = vi.mocked(api).getMockImplementation()!;
+  vi.mocked(api).mockImplementation((path, options) => {
+    if (path === "/agents/technical_analyst/test") return analystPending.promise;
+    if (path === "/agents/critic/test") return criticPending.promise;
+    return defaultApi(path, options);
+  });
+  show();
+  const analyst = within(await agentRow("technical_analyst"));
+  const critic = within(await agentRow("critic"));
+  fireEvent.click(analyst.getByRole("button", { name: "Test" }));
+  fireEvent.click(critic.getByRole("button", { name: "Test" }));
+  await waitFor(() => expect(testRequests()).toEqual(["/agents/technical_analyst/test", "/agents/critic/test"]));
+  await act(async () => criticPending.resolve({ execution: { status: "SUCCEEDED" }, result: { summary: "Critic only" } }));
+  await waitFor(() => expect(critic.getByRole("button", { name: "Test" })).toBeEnabled());
+  expect(analyst.getByRole("button", { name: "Testing…" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Test all logical agents" })).toBeDisabled();
+  await act(async () => analystPending.resolve({ execution: { status: "SUCCEEDED" }, result: { summary: "Analyst only" } }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Test all logical agents" })).toBeEnabled());
+  expect(screen.getByText("critic · SUCCEEDED")).toBeInTheDocument();
+  expect(screen.getByText("technical_analyst · SUCCEEDED")).toBeInTheDocument();
+  expect(testRequests()).toHaveLength(2);
+});
+
+test("an individual test error stays on its agent and can be retried without automatic duplicates", async () => {
+  const first = deferred();
+  const second = deferred();
+  let attempts = 0;
+  const defaultApi = vi.mocked(api).getMockImplementation()!;
+  vi.mocked(api).mockImplementation((path, options) => {
+    if (path === "/agents/technical_analyst/test") return attempts++ ? second.promise : first.promise;
+    return defaultApi(path, options);
+  });
+  show();
+  const analyst = within(await agentRow("technical_analyst"));
+  const critic = within(await agentRow("critic"));
+  fireEvent.click(analyst.getByRole("button", { name: "Test" }));
+  await waitFor(() => expect(testRequests()).toHaveLength(1));
+  await act(async () => first.reject(new Error("Agent timed out")));
+  expect(await analyst.findByRole("alert")).toHaveTextContent("Agent timed out");
+  expect(critic.queryByRole("alert")).not.toBeInTheDocument();
+  expect(testRequests()).toHaveLength(1);
+  fireEvent.click(analyst.getByRole("button", { name: "Test" }));
+  expect(analyst.queryByRole("alert")).not.toBeInTheDocument();
+  await waitFor(() => expect(testRequests()).toHaveLength(2));
+  await act(async () => second.resolve({ execution: { status: "SUCCEEDED" } }));
+  await waitFor(() => expect(analyst.getByRole("button", { name: "Test" })).toBeEnabled());
+  expect(critic.getByRole("button", { name: "Test" })).toBeEnabled();
+});
+
+test("bulk tests are explicit and cannot overlap individual tests or enqueue duplicates", async () => {
+  const pending = deferred();
+  const defaultApi = vi.mocked(api).getMockImplementation()!;
+  vi.mocked(api).mockImplementation((path, options) =>
+    path.endsWith("/test") ? pending.promise : defaultApi(path, options),
+  );
+  show();
+  const analyst = within(await agentRow("technical_analyst"));
+  const critic = within(await agentRow("critic"));
+  const allButton = screen.getByRole("button", { name: "Test all logical agents" });
+  fireEvent.click(allButton);
+  fireEvent.click(allButton);
+  fireEvent.click(analyst.getByRole("button", { name: "Testing…" }));
+  expect(allButton).toBeDisabled();
+  expect(critic.getByRole("button", { name: "Testing…" })).toBeDisabled();
+  await waitFor(() => expect(testRequests()).toEqual(["/agents/technical_analyst/test", "/agents/critic/test"]));
+  await act(async () => pending.resolve({ execution: { status: "SUCCEEDED" } }));
+  await waitFor(() => expect(allButton).toBeEnabled());
+  expect(testRequests()).toHaveLength(2);
 });

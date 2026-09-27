@@ -75,11 +75,12 @@ def create_app(
     command_queue = BridgeCommandQueue(os.environ.get("MATRADES_MT5_COMMAND_QUEUE_PATH"))
     app.state.command_queue = command_queue
     runtime_status_path = Path(
-        os.environ.get("MATRADES_MT5_RUNTIME_STATUS_PATH", "/tmp/matrades-mt5-runtime.status")
+        # The wrapper's non-secret status file is limited to known states below.
+        os.environ.get("MATRADES_MT5_RUNTIME_STATUS_PATH", "/tmp/matrades-mt5-runtime.status")  # noqa: S108
     )
 
     @app.get("/")
-    async def runtime_status() -> dict[str, str]:
+    def runtime_status() -> dict[str, str]:
         try:
             state = runtime_status_path.read_text(encoding="utf-8").strip()
         except OSError:
@@ -199,9 +200,7 @@ def create_app(
 
     @app.post("/runtime/start")
     async def start_runtime(
-        x_runtime_token: str | None = Header(
-            default=None, alias="X-Matrades-MT5-Runtime-Token"
-        ),
+        x_runtime_token: str | None = Header(default=None, alias="X-Matrades-MT5-Runtime-Token"),
     ) -> dict[str, object]:
         """Start the Wine/MT5 process on the cloud host running this bridge."""
         if not runtime_control_token or not hmac.compare_digest(
@@ -398,17 +397,13 @@ def create_app(
         return commands
 
     @app.post("/commands", status_code=202)
-    async def enqueue_command(
-        command: BridgeCommand, _: None = Depends(authenticate)
-    ) -> dict:
+    async def enqueue_command(command: BridgeCommand, _: None = Depends(authenticate)) -> dict:
         if not command.authorization_id or not command.authorization_digest:
             raise HTTPException(403, "server authorization is required")
         return command_queue.enqueue(command).model_dump(mode="json")
 
     @app.post("/commands/receipts")
-    async def command_receipt(
-        receipt: BridgeReceipt, _: None = Depends(authenticate)
-    ) -> dict:
+    async def command_receipt(receipt: BridgeReceipt, _: None = Depends(authenticate)) -> dict:
         return command_queue.receipt(receipt).model_dump(mode="json")
 
     return app

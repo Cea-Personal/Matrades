@@ -28,7 +28,6 @@ def test_security_ui_has_mfa_masking_and_delete_dialog():
 def test_connection_ui_exposes_named_data_sources_and_mt5_setup():
     text = Path("apps/web/src/features/configuration/Connections.tsx").read_text()
     dialog = Path("apps/web/src/components/MfaDeleteDialog.tsx").read_text()
-    mt5 = Path("apps/web/src/features/connections/MT5Connection.tsx").read_text()
     rules = Path("apps/web/src/features/configuration/AccountRules.tsx").read_text()
     page = Path("apps/web/src/app/connections/page.tsx").read_text()
     assert all(
@@ -36,7 +35,7 @@ def test_connection_ui_exposes_named_data_sources_and_mt5_setup():
         for value in ("Twelve Data", "Coinbase", "CoinGecko", "FRED", "Calendar", "News")
     )
     assert all(
-        value in text + dialog + mt5 + rules + page
+        value in text + dialog + rules + page
         for value in (
             "Bridge URL",
             "Account reference",
@@ -47,9 +46,9 @@ def test_connection_ui_exposes_named_data_sources_and_mt5_setup():
     )
 
 
-def test_configuration_ui_exposes_forex_factory_news_and_mac_wine_guidance():
+def test_configuration_ui_exposes_forex_factory_and_mt5_setup_is_documented():
     text = Path("apps/web/src/features/configuration/Connections.tsx").read_text()
-    mt5 = Path("apps/web/src/features/connections/MT5Connection.tsx").read_text()
+    mt5 = Path("bridges/mt5/README.md").read_text()
     assert "Forex Factory" in text
     assert all(
         value in text
@@ -57,11 +56,11 @@ def test_configuration_ui_exposes_forex_factory_news_and_mac_wine_guidance():
             "Forex Factory scraper",
             "Scrape",
             "Scheduled",
-            "Save scraper schedule",
+            "Save new scraper schedule",
             "already archived",
         )
     )
-    assert all(value in mt5 for value in ("macOS", "Wine", "Expert Advisor"))
+    assert all(value in mt5 for value in ("macOS", "Wine", "Expert Advisors"))
 
 
 def test_mt5_ea_and_bridge_service_are_shipped():
@@ -73,8 +72,7 @@ def test_mt5_ea_and_bridge_service_are_shipped():
         for value in ("WebRequest", "/ingest", "InpBridgeSecret", "InpMatradesAccountId")
     )
     assert all(
-        value in compose
-        for value in ("mt5-bridge", "8765:8765", "MATRADES_MT5_AUTHORITY_URL")
+        value in compose for value in ("mt5-bridge", "8765:8765", "MATRADES_MT5_AUTHORITY_URL")
     )
     connections_ui = Path("apps/web/src/features/configuration/Connections.tsx").read_text()
     assert "source of truth" in connections_ui

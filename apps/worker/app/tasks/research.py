@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from typing import cast
 from uuid import NAMESPACE_URL, UUID, uuid5
 from zoneinfo import ZoneInfo
 
@@ -19,6 +20,7 @@ from modules.agents.rpc import OwnerScopedAgentGateway, RedisAgentGateway
 from modules.backtesting.basis import ALLOWED_PROVIDERS
 from modules.connections.models import ConnectionProvider, MarketDataCapability, ProviderBinding
 from modules.connections.resolution import find_connection, resolve_connection
+from modules.knowledge.research import KnowledgeResearchGateway
 from modules.research.artifacts import ResearchCycleArchive
 from modules.research.matrix import ALL_LANES
 from modules.research.models import (
@@ -27,6 +29,7 @@ from modules.research.models import (
     TypedResearchCandidate,
     TypedResearchRun,
 )
+from modules.research.ports import TypedResearchDataProvider
 from modules.research.scheduling import default_schedule, is_due, normalize_schedule
 from modules.research.workflow import AutonomousResearchWorkflow
 from packages.shared.config import settings
@@ -153,7 +156,7 @@ async def _execute_research_cycle(run_id: UUID) -> dict:
     }
     twelve_configuration = twelve.profile.configuration if twelve else {}
     coinbase_configuration = coinbase.profile.configuration if coinbase else {}
-    lane_providers = {}
+    lane_providers: dict[str, TypedResearchDataProvider] = {}
     for lane_key, resolved in lane_connections.items():
         if resolved.profile.provider == ConnectionProvider.MT5_BRIDGE:
             if resolved.secret:
@@ -162,7 +165,7 @@ async def _execute_research_cycle(run_id: UUID) -> dict:
                     resolved.secret,
                     UUID(str(record.data["account_id"])),
                 )
-            else:
+            elif configured_lanes is not None:
                 configured_lanes.discard(lane_key)
         else:
             configuration = resolved.profile.configuration
@@ -193,7 +196,8 @@ async def _execute_research_cycle(run_id: UUID) -> dict:
         owner_id,
     )
     try:
-        workflow = AutonomousResearchWorkflow(provider, agents)
+        knowledge_agents = KnowledgeResearchGateway(agents, owner_id)
+        workflow = AutonomousResearchWorkflow(provider, knowledge_agents)
         if typed_lanes:
             typed_run = TypedResearchRun(
                 id=run_id,
@@ -224,6 +228,10 @@ async def _execute_research_cycle(run_id: UUID) -> dict:
                 }
             )
             serialized = typed_result.model_dump(mode="json")
+            serialized["knowledge_retrieval"] = [
+                {key: value for key, value in context.items() if key != "citations"}
+                for context in knowledge_agents.contexts.values()
+            ]
             serialized["lane_results"] = [
                 item.model_dump(mode="json") for item in typed_result.lane_results
             ]
@@ -323,6 +331,10 @@ async def _execute_research_cycle(run_id: UUID) -> dict:
         await agents.close()
 
     serialized = result.model_dump(mode="json")
+    serialized["knowledge_retrieval"] = [
+        {key: value for key, value in context.items() if key != "citations"}
+        for context in knowledge_agents.contexts.values()
+    ]
     news_connection = forex_factory or custom_news
     news_source: dict[str, object] = {
         "provider": (
@@ -499,7 +511,7 @@ async def _create_scheduled_runs() -> list[str]:
                     "lanes": [
                         item
                         for item in (
-                            matrix.data.get("lanes")
+                            cast(list[dict], matrix.data.get("lanes"))
                             if matrix
                             else [lane.model_dump(mode="json") for lane in ALL_LANES]
                         )

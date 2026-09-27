@@ -1072,15 +1072,16 @@ async def create_approved_trade_plan(
     required = ("account_id", "market_selection_id", "category")
     if any(not basis.get(key) for key in required):
         raise HTTPException(status.HTTP_409_CONFLICT, "typed market strategy basis is incomplete")
-    typed = (
-        specification.asset_class,
-        specification.instrument_type,
-        specification.quantity_unit,
-        specification.venue_instrument_id,
-        specification.specification_version_id,
-    )
-    if any(value is None for value in typed):
+    if (
+        specification.asset_class is None
+        or specification.instrument_type is None
+        or specification.quantity_unit is None
+        or specification.venue_instrument_id is None
+        or specification.specification_version_id is None
+    ):
         raise HTTPException(status.HTTP_409_CONFLICT, "typed instrument identity is required")
+    listing_id = UUID(specification.venue_instrument_id)
+    specification_id = UUID(specification.specification_version_id)
     direction = (
         Direction.BUY
         if specification.trade_rules and specification.trade_rules.direction == "LONG"
@@ -1099,8 +1100,8 @@ async def create_approved_trade_plan(
         risk_per_unit=distance,
         asset_class=specification.asset_class,
         instrument_type=specification.instrument_type,
-        venue_instrument_id=UUID(str(specification.venue_instrument_id)),
-        specification_version_id=UUID(str(specification.specification_version_id)),
+        venue_instrument_id=listing_id,
+        specification_version_id=specification_id,
         quantity_unit=specification.quantity_unit,
     )
     try:
@@ -1123,8 +1124,8 @@ async def create_approved_trade_plan(
         quantity_unit=specification.quantity_unit,
         asset_class=specification.asset_class,
         instrument_type=specification.instrument_type,
-        venue_instrument_id=candidate.venue_instrument_id,
-        specification_version_id=candidate.specification_version_id,
+        venue_instrument_id=listing_id,
+        specification_version_id=specification_id,
     )
     plan = build_trade_plan(
         owner_id=actor.owner_id,

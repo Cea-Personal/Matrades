@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ProgressiveList, newestFirst } from "@/components/ProgressiveList";
 import { Disclosure } from "@/components/Disclosure";
 import { api, type Resource, withStepUp } from "@/lib/api";
+import { useKeyedMutation } from "@/lib/useKeyedMutation";
 import { MfaDeleteDialog } from "@/components/MfaDeleteDialog";
 
 const providers = [
@@ -49,6 +50,7 @@ export function Connections() {
   const [credentialRemovalTarget, setCredentialRemovalTarget] = useState<Resource | null>(null);
   const [connection, setConnection] = useState({ name: "", provider: "TWELVE_DATA" as Provider, credential_id: "", bridge_url: "http://host.docker.internal:8765", account_reference: "", base_url: "", feed_url: "", crypto_universe: "BTC-USD,ETH-USD,SOL-USD" });
   const [message, setMessage] = useState("");
+  const [connectionTestResults, setConnectionTestResults] = useState<Record<string, { text: string; failed: boolean }>>({});
   const [researchConfiguration, setResearchConfiguration] = useState("{}");
   const [exchange, setExchange] = useState("coinbase");
   const [removalTarget, setRemovalTarget] = useState<Resource | null>(null);
@@ -81,11 +83,25 @@ export function Connections() {
     onSuccess: async () => { setConnection({ ...connection, name: "" }); setMessage("Connection saved. Run Test to record live provider health."); await invalidate(); },
     onError: (error: Error) => setMessage(error.message),
   });
-  const testConnection = useMutation({
+  const testConnection = useKeyedMutation({
     mutationFn: (id: string) => api<Resource>(`/configuration/connections/${id}/test`, { method: "POST" }),
-    onSuccess: async item => { setMessage(`${String(item.name)} is ${String(item.health)}${item.health_cached ? " (cached; Twelve Data checks run at most once per hour)" : ""}${item.last_error ? ` · ${String(item.last_error)}` : ""}.`); await invalidate(); },
-    onError: (error: Error) => setMessage(error.message),
+    onSuccess: async (item, id) => {
+      const text = `${String(item.name)} is ${String(item.health)}${item.health_cached ? " (cached; Twelve Data checks run at most once per hour)" : ""}${item.last_error ? ` · ${String(item.last_error)}` : ""}.`;
+      setConnectionTestResults(previous => ({ ...previous, [id]: { text, failed: item.health === "OFFLINE" } }));
+      await invalidate();
+    },
+    onError: (error: Error, id) => {
+      setConnectionTestResults(previous => ({ ...previous, [id]: { text: error.message, failed: true } }));
+    },
   });
+  const startConnectionTest = (id: string) => {
+    if (!testConnection.mutate(id)) return;
+    setConnectionTestResults(previous => {
+      const next = { ...previous };
+      delete next[id];
+      return next;
+    });
+  };
   const stepUpAndRemove = useMutation({
     mutationFn: async (code: string) => {
       if (!removalTarget) throw new Error("Choose a data source to remove");
@@ -146,7 +162,34 @@ export function Connections() {
 
   return <section className="section-stack"><header><p className="eyebrow">Provider boundary</p><h2>Data source status</h2><p className="muted">Configure the authoritative sources used by research, backtesting, macro context, and read-only broker reconciliation. Secrets remain encrypted and replacement requires MFA step-up.</p></header>
 {message && <p className="notice">{message}</p>}
-<article className="card"><h2>Configured data sources</h2><p className="muted">This includes market, economic, knowledge, and broker connections such as MT5 Bridge. Twelve Data health checks are cached for one hour to conserve API quota. Replacing its credential resets the cache and allows an immediate fresh check. Removing a source opens an MFA confirmation dialog.</p>{connections.isPending ? <p>Loading…</p> : dataConnections.length ? <ProgressiveList items={newestFirst(dataConnections)} label="data sources" pageSize={6}>{visible => <div className="table-wrap"><table><thead><tr><th>Name</th><th>Source</th><th>Health</th><th>Last checked</th><th>Capabilities</th><th /></tr></thead><tbody>{visible.map(item => <tr key={item.id}><td>{String(item.name)}</td><td>{providers.find(provider => provider.id === item.provider)?.label ?? String(item.provider)}</td><td><span className={`status ${String(item.health).toLowerCase()}`}>{String(item.health)}</span>{item.last_error ? <small className="muted">{String(item.last_error)}</small> : null}</td><td>{item.last_checked ? new Date(String(item.last_checked)).toLocaleString() : "Never"}{item.health_cached ? " (cached)" : ""}</td><td>{((item.capabilities as string[]) ?? []).join(", ") || "Not tested"}</td><td><div className="actions"><button className="btn compact" disabled={testConnection.isPending} onClick={() => testConnection.mutate(item.id)}>Test</button><button className="btn compact" disabled={stepUpAndRemove.isPending} onClick={() => { setRemovalTarget(item); setMessage(""); }}>Remove</button></div></td></tr>)}</tbody></table></div>}</ProgressiveList> : <p className="empty">No data-source connections configured.</p>}</article>
+<article className="card"><h2>Configured data sources</h2>
+  <p className="muted">This includes market, economic, knowledge, and broker connections such as MT5 Bridge. Twelve Data health checks are cached for one hour to conserve API quota. Replacing its credential resets the cache and allows an immediate fresh check. Removing a source opens an MFA confirmation dialog.</p>
+  {connections.isPending ? <p>Loading…</p> : dataConnections.length ? <ProgressiveList items={newestFirst(dataConnections)} label="data sources" pageSize={6}>
+    {visible => <div className="table-wrap"><table>
+      <thead><tr><th>Name</th><th>Source</th><th>Health</th><th>Last checked</th><th>Capabilities</th><th /></tr></thead>
+      <tbody>{visible.map(item => {
+        const testing = testConnection.pendingKeys.has(item.id);
+        const feedback = connectionTestResults[item.id];
+        return <tr key={item.id}>
+          <td>{String(item.name)}</td>
+          <td>{providers.find(provider => provider.id === item.provider)?.label ?? String(item.provider)}</td>
+          <td><span className={`status ${String(item.health).toLowerCase()}`}>{String(item.health)}</span>
+            {item.last_error ? <small className="muted">{String(item.last_error)}</small> : null}
+          </td>
+          <td>{item.last_checked ? new Date(String(item.last_checked)).toLocaleString() : "Never"}{item.health_cached ? " (cached)" : ""}</td>
+          <td>{((item.capabilities as string[]) ?? []).join(", ") || "Not tested"}</td>
+          <td><div className="actions">
+            <button className="btn compact" disabled={testing} aria-busy={testing}
+              onClick={() => startConnectionTest(item.id)}>{testing ? "Testing…" : "Test"}</button>
+            <button className="btn compact" disabled={stepUpAndRemove.isPending}
+              onClick={() => { setRemovalTarget(item); setMessage(""); }}>Remove</button>
+          </div>{feedback && <small role={feedback.failed ? "alert" : "status"}
+            className={feedback.failed ? "notice bad" : "notice"}>{feedback.text}</small>}</td>
+        </tr>;
+      })}</tbody>
+    </table></div>}
+  </ProgressiveList> : <p className="empty">No data-source connections configured.</p>}
+</article>
 <Disclosure title="Add a connection or credential"><div className="grid two">
       <form className="card form-stack" onSubmit={submitCredential}><h2>1. Store a credential</h2><label>Provider<select value={credential.provider} onChange={event => { const provider = providers.find(item => item.id === event.target.value)!; setCredential({ ...credential, provider: provider.id, purpose: provider.purpose }); }}>
         {providers.filter(item => item.credential).map(item => <option key={item.id} value={item.id}>{item.label}</option>)}

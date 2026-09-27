@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 import httpx
@@ -21,6 +22,7 @@ from modules.backtesting.vectorbt_research import parameter_sweep
 from modules.connections.resolution import resolve_connection
 from modules.knowledge.ingestion import build_source_data
 from modules.knowledge.openai_embeddings import embed_source_data
+from modules.knowledge.retrieval import KnowledgeSearchInput, retrieve_knowledge
 from modules.market_data.research_context import collect_context
 from modules.market_data.research_history import (
     archived_history,
@@ -39,9 +41,7 @@ from modules.strategies.evidence import (
     StrategyEvidencePack,
     candle_checksum,
     historical_summary,
-    lexical_knowledge_context,
     resolve_approved_candidate,
-    source_knowledge_context,
     split_research_history,
 )
 from modules.strategies.family_library import cfd_family_hypotheses
@@ -233,32 +233,23 @@ async def _generate_strategy(run_id: UUID) -> dict:
                 "trading strategy entry exit stop loss take profit risk",
             )
         )
-        transcript_knowledge = [
-            hit
-            for source in transcript_sources[:8]
-            for hit in source_knowledge_context(source, transcript_query, limit=8)
-        ]
-        knowledge = lexical_knowledge_context(
-            knowledge_sources,
-            " ".join(
-                (
-                    candidate.instrument,
-                    candidate.category,
-                    candidate.fingerprint.regime,
-                    description,
-                    "strategy risk entry exit",
-                )
+        knowledge_retrieval = await retrieve_knowledge(
+            session, owner_id,
+            KnowledgeSearchInput(
+                query=transcript_query[:4000], limit=12,
+                asset_class=candidate.asset_class,
+                instrument_type=candidate.instrument_type,
             ),
-            limit=12,
+            source_id=UUID(str(pinned_source_id)) if pinned_source_id else None,
+            research=True,
         )
-        seen_knowledge: set[str] = set()
-        combined_knowledge = []
-        for item in [*transcript_knowledge, *knowledge]:
-            if item["reference_id"] in seen_knowledge:
-                continue
-            seen_knowledge.add(item["reference_id"])
-            combined_knowledge.append(item)
-        knowledge = combined_knowledge[:20]
+        knowledge = knowledge_retrieval["citations"]
+        if pinned_source_id and not knowledge:
+            raise RuntimeError("pinned YouTube transcript has no compatible indexed context")
+        used_sources = {hit["source_id"] for hit in knowledge}
+        transcript_sources = [
+            source for source in transcript_sources if str(source.id) in used_sources
+        ]
 
     history_end = candidate.fingerprint.observed_at
     history_start = history_end - timedelta(days=settings.strategy_research_history_days)
@@ -365,7 +356,7 @@ async def _generate_strategy(run_id: UUID) -> dict:
                 kind="knowledge_segment",
                 summary=f"Context-only excerpt from {knowledge_item.get('source_name')}",
                 source_id=knowledge_item["source_id"],
-                source_version=knowledge_item["source_version"],
+                source_version=str(knowledge_item["source_version"]),
                 authority="CONTEXT_ONLY",
             )
         )
@@ -394,6 +385,9 @@ async def _generate_strategy(run_id: UUID) -> dict:
         policy_context=policy_context,
         prior_strategy_context=prior_context,
         knowledge_context=knowledge,
+        knowledge_retrieval={
+            key: value for key, value in knowledge_retrieval.items() if key != "citations"
+        },
         references=references,
         asset_class=candidate.asset_class,
         instrument_type=candidate.instrument_type,
@@ -556,7 +550,7 @@ async def _generate_strategy(run_id: UUID) -> dict:
     screening = screen_hypotheses(
         hypotheses, holdout, screening_configuration, calendar=holdout_calendar
     )
-    pipeline = {
+    pipeline: dict[str, Any] = {
         "name": "youtube_transcript_to_trade_plan",
         "stages": {
             "youtube_transcript": "COMPLETED" if transcript_sources else "NOT_AVAILABLE",
@@ -1000,7 +994,7 @@ async def _run_backtest(run_id: UUID) -> dict:
                 seconds=timeframe_seconds * (required_unseen - unseen_count)
             )
     compiled = compile_strategy(specification)
-    execution_validation = (
+    execution_validation: dict[str, Any] = (
         {"engine": "NautilusTrader", "status": "WAITING_FOR_UNSEEN_HISTORY", "passed": False}
         if waiting_for_data
         else await asyncio.to_thread(

@@ -255,11 +255,20 @@ def test_vectorbt_sweep_runs_real_engine_on_discovery_only():
     assert all("inner_validation" in result for result in report["experiments"])
 
 
-def test_native_nautilus_order_lifecycle_with_costs_and_partial_targets():
+@pytest.mark.parametrize(
+    "management",
+    [
+        {},
+        {"trailing_stop": True},
+        {"move_to_break_even": True},
+        {"trailing_stop": True, "move_to_break_even": True},
+    ],
+)
+def test_native_nautilus_order_lifecycle_with_costs_and_partial_targets(management):
     from modules.backtesting.nautilus_validation import validate_execution
 
     result = validate_execution(
-        strategy(),
+        strategy().model_copy(update={"position_management": management}),
         history(120),
         BacktestConfiguration(initial_equity=10000, spread=".02", slippage=".01", commission=".01"),
         timeframe_seconds=60,

@@ -1,13 +1,21 @@
 """Chronological, fixed-rule robustness checks; no holdout optimization."""
 
+from __future__ import annotations
+
+from datetime import datetime
 from decimal import Decimal
 from statistics import mean, stdev
+from typing import TYPE_CHECKING, Any
 
 from modules.backtesting.protection import simulate_protected_trades
 from modules.strategies.entry_context import entry_context_reason
+from packages.strategy_sdk.schema import StrategySpecification
+
+if TYPE_CHECKING:
+    from modules.backtesting.engine import BacktestCandle, BacktestConfiguration
 
 
-def return_statistics(returns: list[float]) -> dict:
+def return_statistics(returns: list[float]) -> dict[str, Any]:
     average = mean(returns) if returns else None
     deviation = stdev(returns) if len(returns) > 1 else 0
     downside = (sum(min(x, 0) ** 2 for x in returns) / len(returns)) ** 0.5 if returns else 0
@@ -25,15 +33,20 @@ def return_statistics(returns: list[float]) -> dict:
         "max_drawdown_r": drawdown if returns else None,
         "win_rate": wins / len(returns) if returns else None,
         "profit_factor_r": profit / loss if loss else None,
-        "sharpe_per_trade": average / deviation if deviation else None,
-        "sortino_per_trade": average / downside if downside else None,
+        "sharpe_per_trade": average / deviation if average is not None and deviation else None,
+        "sortino_per_trade": average / downside if average is not None and downside else None,
         "ratio_basis": "NON_ANNUALIZED_R_PER_TRADE_ZERO_BENCHMARK",
     }
 
 
 def chronological_robustness(
-    strategy, candles, configuration, *, calendar=None, validation_start_after=None
-) -> dict:
+    strategy: StrategySpecification,
+    candles: list[BacktestCandle],
+    configuration: BacktestConfiguration,
+    *,
+    calendar: list[dict] | None = None,
+    validation_start_after: datetime | None = None,
+) -> dict[str, Any]:
     """Use prior bars only as warmup; no trade may enter before each test cut.
 
     Fixed-rule walk-forward checks are not a train/refit optimizer. Two closed
@@ -42,7 +55,12 @@ def chronological_robustness(
     if strategy.trade_rules is None:
         return {"available": False, "reason": "Explicit protection rules required"}
 
-    def evaluate(start, end, spec=strategy, config=configuration):
+    def evaluate(
+        start: int,
+        end: int,
+        spec: StrategySpecification = strategy,
+        config: BacktestConfiguration = configuration,
+    ) -> dict[str, Any]:
         entries = {
             c.observed_at.isoformat()
             for c in candles[start:end]
@@ -51,7 +69,7 @@ def chronological_robustness(
         trades, fills, _ = simulate_protected_trades(
             spec, candles[max(0, start - 40) : end], config, allowed_entry_times=entries
         )
-        groups = {}
+        groups: dict[str, list[float]] = {}
         for trade, fill in zip(trades, fills, strict=True):
             groups.setdefault(fill["regime"], []).append(float(trade.pnl / trade.risk))
         stats = return_statistics([float(t.pnl / t.risk) for t in trades])
@@ -113,7 +131,7 @@ def chronological_robustness(
     )
     cost_stress = evaluate(cut, len(candles), config=stressed)
 
-    def passed(sample):
+    def passed(sample: dict[str, Any]) -> bool:
         return sample["trade_count"] >= 2 and sample["average_r"] > 0
 
     return {

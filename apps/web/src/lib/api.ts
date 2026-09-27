@@ -23,13 +23,15 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     cache: "no-store",
   });
   if (!response.ok) {
-    let detail: unknown = response.statusText;
+    const text = await response.text();
+    let detail: unknown = text || response.statusText;
     try {
-      const body = (await response.json()) as { detail?: unknown; message?: unknown };
-      detail = body.detail ?? body.message ?? body;
-    } catch {
-      detail = await response.text();
-    }
+      const body: unknown = JSON.parse(text);
+      detail = body && typeof body === "object"
+        ? (body as { detail?: unknown; message?: unknown }).detail
+          ?? (body as { message?: unknown }).message ?? body
+        : body;
+    } catch { /* Keep the text fallback; the response body is read only once. */ }
     throw new ApiError(response.status, detail);
   }
   if (response.status === 204) return undefined as T;

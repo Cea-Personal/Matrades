@@ -2,16 +2,17 @@ from __future__ import annotations
 
 import hashlib
 from typing import Any
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from modules.connections.models import ConnectionProvider
 from modules.connections.resolution import find_connection
 from modules.knowledge.ingestion import build_source_data
 from modules.knowledge.openai_embeddings import embed_source_data
-from modules.knowledge.youtube import YouTubeVideo, fetch_video_transcripts, serpapi_search
-from packages.shared.store import ResourceStore
+from modules.knowledge.youtube import YouTubeVideo, fetch_video_transcripts, serpapi_discover
+from packages.shared.store import ResourceRecord, ResourceStore
 
 
 async def discover_youtube_videos(
@@ -25,7 +26,57 @@ async def discover_youtube_videos(
     connection = await find_connection(session, owner_id, ConnectionProvider.SERPAPI)
     if connection is None or not connection.secret:
         raise RuntimeError("configure an active SerpApi connection first")
-    return await serpapi_search(connection.secret, query, limit=limit)
+    # Serialize discovery for this connection to prevent simultaneous searches
+    # selecting the same unseen videos. The caller owns the transaction.
+    await session.scalar(
+        select(ResourceRecord)
+        .where(
+            ResourceRecord.id == connection.id,
+            ResourceRecord.kind == "connection",
+            ResourceRecord.owner_id == owner_id,
+        )
+        .with_for_update()
+    )
+    store = ResourceStore(session)
+    seen = {
+        str(source.data.get("external_id"))
+        for source in await store.list("knowledge_source", owner_id, include_deleted=True)
+        if source.data.get("source_kind") == "YOUTUBE_TRANSCRIPT"
+    }
+    for run in await store.list("youtube_discovery_run", owner_id):
+        seen.update(str(video["video_id"]) for video in run.data.get("discovered_videos", []))
+    for previous in await store.list("youtube_discovery_cursor", owner_id):
+        seen.update(previous.data.get("seen_video_ids", []))
+    normalized_query = " ".join(query.lower().split())
+    cursor_id = uuid5(NAMESPACE_URL, f"youtube-discovery:{owner_id}:{normalized_query}")
+    cursor = await store.get("youtube_discovery_cursor", cursor_id, owner_id)
+    batch = await serpapi_discover(
+        connection.secret,
+        query,
+        limit=limit,
+        skip_video_ids=seen,
+        start=int(cursor.data.get("next_start", 0)) if cursor else 0,
+    )
+    data: dict[str, Any] = {
+        "query": normalized_query,
+        "next_start": batch.next_start,
+        "exhausted": batch.exhausted,
+    }
+    # Reserve results here, including one-stage callers that do not persist
+    # discovered_videos on their run, before another search can use the cursor.
+    previous_ids = set(cursor.data.get("seen_video_ids", [])) if cursor else set()
+    data["seen_video_ids"] = sorted(previous_ids | {video.video_id for video in batch.videos})
+    if cursor:
+        await store.update(cursor, data, event_type="knowledge_youtube.cursor_advanced")
+    else:
+        await store.create(
+            "youtube_discovery_cursor",
+            owner_id,
+            data,
+            record_id=cursor_id,
+            event_type="knowledge_youtube.cursor_created",
+        )
+    return batch.videos
 
 
 def _video_data(video: YouTubeVideo) -> dict[str, str]:
@@ -158,6 +209,7 @@ async def ingest_youtube_discovery(
     videos = await discover_youtube_videos(session, owner_id, query=query, limit=limit)
     return {
         "query": query,
+        "discovered_videos": [_video_data(video) for video in videos],
         **await ingest_youtube_transcripts(
             session,
             owner_id,

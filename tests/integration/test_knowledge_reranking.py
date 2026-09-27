@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -11,7 +12,8 @@ from apps.api.app.dependencies import current_actor, get_db
 from apps.api.app.routes import knowledge
 from modules.connections.resolution import _cipher
 from modules.identity.authorization import Actor, Role
-from modules.knowledge import reranking
+from modules.knowledge import reranking, retrieval
+from modules.knowledge import research as knowledge_research
 from packages.shared.persistence import Base
 from packages.shared.store import ResourceStore
 
@@ -117,6 +119,145 @@ async def seed_source(workspace, name, *, owner_id=None, state="ACTIVE", **metad
         data,
         state=state,
     )
+
+
+async def test_research_uses_shared_hybrid_and_cohere_with_scope_and_citations(workspace):
+    await enable(workspace)
+    allowed = await seed_source(workspace, "EURUSD method")
+    generic = await seed_source(
+        workspace, "YouTube trading method", source_kind="YOUTUBE_TRANSCRIPT"
+    )
+    await workspace.store.update(
+        generic,
+        {**generic.data, "asset_class": None, "instrument_type": None, "venue_instrument_id": None},
+    )
+    await seed_source(workspace, "foreign", owner_id=uuid4())
+    await seed_source(workspace, "disabled", state="DISABLED")
+    wrong_lane = await seed_source(workspace, "stock only")
+    await workspace.store.update(wrong_lane, {**wrong_lane.data, "asset_class": "STOCKS"})
+    result = await retrieval.retrieve_knowledge(
+        workspace.db,
+        workspace.actor.owner_id,
+        retrieval.KnowledgeSearchInput(query="risk", asset_class="FOREX", instrument_type="SPOT"),
+        research=True,
+    )
+    assert result["reranking"]["status"] == "APPLIED"
+    assert result["access_mode"] == "BACKEND_RETRIEVAL" and not result["agent_callable_tools"]
+    assert {hit["source_id"] for hit in result["citations"]} == {str(allowed.id), str(generic.id)}
+    assert all(
+        hit["authority"] == "CONTEXT_ONLY" and hit["reference_id"].startswith("knowledge:")
+        for hit in result["citations"]
+    )
+    documents = workspace.rerank.call_args.args[2]
+    assert not any(
+        "foreign" in text or "disabled" in text or "stock only" in text for text in documents
+    )
+
+
+async def test_pinned_transcript_retrieval_cannot_substitute_another_source(workspace):
+    await enable(workspace)
+    pinned = await seed_source(workspace, "pinned", source_kind="YOUTUBE_TRANSCRIPT")
+    await seed_source(workspace, "other")
+    result = await retrieval.retrieve_knowledge(
+        workspace.db,
+        workspace.actor.owner_id,
+        retrieval.KnowledgeSearchInput(query="nonmatching words"),
+        source_id=pinned.id,
+        research=True,
+    )
+    assert result["citations"] and {hit["source_id"] for hit in result["citations"]} == {
+        str(pinned.id)
+    }
+    foreign = await retrieval.retrieve_knowledge(
+        workspace.db,
+        uuid4(),
+        retrieval.KnowledgeSearchInput(query="risk"),
+        source_id=pinned.id,
+        research=True,
+    )
+    assert not foreign["citations"]
+
+
+async def test_embedding_failure_keeps_lexical_context_without_blocking_research(
+    workspace, monkeypatch
+):
+    source = await seed_source(workspace, "risk method")
+    embed = AsyncMock(side_effect=RuntimeError("provider down"))
+    monkeypatch.setattr(retrieval, "embed_texts_for_owner", embed)
+    result = await retrieval.retrieve_knowledge(
+        workspace.db,
+        workspace.actor.owner_id,
+        retrieval.KnowledgeSearchInput(query="risk"),
+        research=True,
+    )
+    assert result["embedding"]["status"] == "DEGRADED"
+    assert result["citations"][0]["source_id"] == str(source.id)
+    assert result["citations"][0]["vector_score"] == 0
+
+
+async def test_empty_knowledge_does_not_call_embedding_provider(workspace, monkeypatch):
+    embed = AsyncMock(side_effect=AssertionError("must not call provider"))
+    monkeypatch.setattr(retrieval, "embed_texts_for_owner", embed)
+    result = await retrieval.retrieve_knowledge(
+        workspace.db,
+        workspace.actor.owner_id,
+        retrieval.KnowledgeSearchInput(query="risk"),
+        research=True,
+    )
+    assert not result["citations"] and result["embedding"]["status"] == "SKIPPED"
+    embed.assert_not_awaited()
+
+
+@pytest.mark.parametrize("mismatch", ["model", "dimensions"])
+async def test_incompatible_embedding_spaces_are_not_compared(workspace, mismatch):
+    source = await seed_source(workspace, "risk method")
+    data = {**source.data}
+    if mismatch == "model":
+        data["embedding_model"] = "text-embedding-3-large"
+    else:
+        data["segments"] = [{**segment, "embedding": [1.0, 0.0]} for segment in data["segments"]]
+    await workspace.store.update(source, data)
+    result = await retrieval.retrieve_knowledge(
+        workspace.db,
+        workspace.actor.owner_id,
+        retrieval.KnowledgeSearchInput(query="risk"),
+    )
+    assert result["citations"] and result["citations"][0]["vector_score"] == 0
+
+
+async def test_research_retrieves_once_per_lane_for_all_reviewers(workspace, monkeypatch):
+    await enable(workspace)
+    await seed_source(workspace, "risk method")
+
+    @asynccontextmanager
+    async def unit_of_work():
+        yield workspace.db
+
+    monkeypatch.setattr(knowledge_research, "unit_of_work", unit_of_work)
+    upstream = AsyncMock()
+    gateway = knowledge_research.KnowledgeResearchGateway(upstream, workspace.actor.owner_id)
+    payload = {
+        "lane": {"asset_class": "FOREX", "instrument_type": "SPOT"},
+        "candidates": [{"listing": {"symbol": "EURUSD"}}],
+    }
+    for role in (
+        "technical_analyst",
+        "fundamental_analyst",
+        "sentiment_analyst",
+        "regime_analyst",
+        "critic",
+    ):
+        await gateway.invoke(role, payload, {})
+    workspace.rerank.assert_awaited_once()
+    assert upstream.invoke.await_count == 5
+    audit_ids = set()
+    for call in upstream.invoke.call_args_list:
+        augmented = call.args[1]
+        assert augmented["candidates"] == payload["candidates"]
+        assert len(augmented["knowledge_context"]) == 1
+        assert augmented["knowledge_retrieval"]["reranking"]["status"] == "APPLIED"
+        audit_ids.add(augmented["knowledge_retrieval"]["retrieval_audit_id"])
+    assert len(audit_ids) == 1
 
 
 async def test_configuration_verifies_updates_and_disables_without_reindexing(workspace):

@@ -12,7 +12,7 @@ from typing import Any
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 from modules.backtesting.engine import BacktestCandle
-from modules.research.models import MarketFingerprint, ResearchCandidate
+from modules.research.models import MarketCategory, MarketFingerprint, ResearchCandidate
 from packages.shared.domain_types import AssetClass, InstrumentType, QuantityUnit
 
 
@@ -58,6 +58,7 @@ class StrategyEvidencePack(BaseModel):
     policy_context: list[dict[str, Any]] = Field(default_factory=list)
     prior_strategy_context: list[dict[str, Any]] = Field(default_factory=list)
     knowledge_context: list[dict[str, Any]] = Field(default_factory=list)
+    knowledge_retrieval: dict[str, Any] = Field(default_factory=dict)
     references: list[EvidenceReference]
     asset_class: AssetClass | None = None
     instrument_type: InstrumentType | None = None
@@ -88,10 +89,10 @@ def resolve_approved_candidate(
         if now - observed_at > max_age:
             raise ValueError("typed market fingerprint is stale; rerun market research")
         category = {
-            "FOREX": "FOREX",
-            "METALS": "METAL",
-            "CRYPTOCURRENCY": "CRYPTO",
-            "STOCKS": "FOREX",
+            "FOREX": MarketCategory.FOREX,
+            "METALS": MarketCategory.METAL,
+            "CRYPTOCURRENCY": MarketCategory.CRYPTO,
+            "STOCKS": MarketCategory.FOREX,
         }[str(lane["asset_class"])]
         market_fingerprint = MarketFingerprint(
             instrument=str(listing["symbol"]),
@@ -241,9 +242,7 @@ def lexical_knowledge_context(
     return hits[:limit]
 
 
-def source_knowledge_context(
-    source: Any, query: str, *, limit: int = 12
-) -> list[dict[str, Any]]:
+def source_knowledge_context(source: Any, query: str, *, limit: int = 12) -> list[dict[str, Any]]:
     """Return bounded, source-pinned context for strategy extraction.
 
     Transcript evidence is deliberately selected from one persisted source before

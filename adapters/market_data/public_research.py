@@ -10,6 +10,7 @@ import re
 import struct
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
@@ -17,6 +18,9 @@ from modules.backtesting.engine import BacktestCandle
 from modules.connections.models import ConnectionProvider
 from modules.connections.resolution import ResolvedConnection
 from modules.market_data.research_store import ResearchDataStore
+
+if TYPE_CHECKING:
+    from pandas import DataFrame
 
 SECONDS = {"1m": 60, "5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400}
 EXCHANGES = {"coinbase", "binance", "binanceusdm", "kraken", "okx", "bybit"}
@@ -84,7 +88,7 @@ async def dukascopy_history(
         hours.append(cursor)
         cursor += timedelta(hours=1)
 
-    async def partition(hour):
+    async def partition(hour: datetime) -> tuple[DataFrame | None, dict[str, Any]]:
         path = (
             f"{symbol}/{hour.year}/{hour.month - 1:02d}/{hour.day:02d}/{hour.hour:02d}h_ticks.bi5"
         )
