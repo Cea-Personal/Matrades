@@ -7,13 +7,15 @@ import { YouTubeDiscovery } from "./YouTubeDiscovery";
 
 vi.mock("@/lib/api", () => ({ api: vi.fn() }));
 
+const defaultSchedule = {
+  configured: false, enabled: false, run_at: "05:00", timezone: "UTC", weekdays: [],
+  query: "trading strategy", limit: 5, languages: ["en"], category: "trading",
+  next_run_at: null,
+};
+
 beforeEach(() => {
   vi.mocked(api).mockImplementation(async path =>
-    path.endsWith("/schedule") ? {
-      configured: false, enabled: false, run_at: "05:00", timezone: "UTC", weekdays: [],
-      query: "trading strategy", limit: 5, languages: ["en"], category: "trading",
-      next_run_at: null,
-    } : [],
+    path.endsWith("/schedule") ? defaultSchedule : [],
   );
 });
 afterEach(() => { cleanup(); vi.mocked(api).mockReset(); });
@@ -75,4 +77,50 @@ test.each(["SEARCHED", "PARTIAL", "FAILED"])("saved %s runs can fetch or retry t
     "/knowledge/youtube/runs/saved-run/transcripts", { method: "POST" },
   ));
   expect(vi.mocked(api).mock.calls.some(([path]) => path.endsWith("/search"))).toBe(false);
+});
+
+test("new schedules default to automatic query planning and save the selected mode", async () => {
+  const base = vi.mocked(api).getMockImplementation()!;
+  let saved: Record<string, unknown> | undefined;
+  vi.mocked(api).mockImplementation(async (path, options) => {
+    if (path.endsWith("/schedule") && options?.method === "PUT") {
+      saved = JSON.parse(options.body as string);
+      return { ...saved, configured: true, next_run_at: null };
+    }
+    return base(path, options);
+  });
+  show();
+  expect(await screen.findByRole("combobox", { name: "Scheduled query selection" })).toHaveValue("AUTO_MARKET");
+  expect(screen.queryByRole("textbox", { name: "Scheduled query" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Save YouTube schedule" }));
+  await waitFor(() => expect(saved?.query_mode).toBe("AUTO_MARKET"));
+  expect(saved?.limit).toBe(5);
+  expect(vi.mocked(api).mock.calls.some(([path]) => path.endsWith("/search"))).toBe(false);
+});
+
+test("a saved fixed schedule can switch to automatic and shows its next query preview", async () => {
+  const base = vi.mocked(api).getMockImplementation()!;
+  vi.mocked(api).mockImplementation(async (path, options) => {
+    if (path.endsWith("/schedule") && options?.method === "PUT") {
+      const saved = JSON.parse(options.body as string);
+      return { ...saved, configured: true, next_run_at: null, query_preview: {
+        mode: "AUTO_MARKET", query: "gold XAUUSD CFD trending market pullback strategy backtest",
+        reason: "Rotate among the latest top pairs.",
+      } };
+    }
+    if (path.endsWith("/schedule")) return {
+      ...defaultSchedule, configured: true, query: "my old scheduled query",
+      query_mode: "FIXED", enabled: true,
+    };
+    return base(path, options);
+  });
+  show();
+  expect(await screen.findByText(/my old scheduled query/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Edit / replace schedule" }));
+  expect(screen.getByRole("combobox", { name: "Scheduled query selection" })).toHaveValue("FIXED");
+  fireEvent.change(screen.getByRole("combobox", { name: "Scheduled query selection" }), { target: { value: "AUTO_MARKET" } });
+  fireEvent.click(screen.getByLabelText("Mon"));
+  fireEvent.click(screen.getByRole("button", { name: "Replace YouTube schedule" }));
+  expect(await screen.findByText("gold XAUUSD CFD trending market pullback strategy backtest")).toBeInTheDocument();
+  expect(screen.getByText("Next scheduled query preview")).toBeInTheDocument();
 });

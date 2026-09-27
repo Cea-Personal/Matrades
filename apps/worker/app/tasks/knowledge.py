@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 
 from apps.worker.app.celery_app import celery_app
+from modules.knowledge.query_planning import choose_scheduled_query
 from modules.knowledge.youtube_ingestion import (
     discover_youtube_videos,
     ingest_youtube_transcripts,
@@ -105,10 +106,12 @@ async def _create_scheduled_youtube_runs() -> list[str]:
         schedules = list(
             (
                 await session.scalars(
-                    select(ResourceRecord).where(
+                    select(ResourceRecord)
+                    .where(
                         ResourceRecord.kind == "youtube_discovery_schedule",
                         ResourceRecord.state != "DELETED",
                     )
+                    .with_for_update()
                 )
             ).all()
         )
@@ -135,11 +138,13 @@ async def _create_scheduled_youtube_runs() -> list[str]:
             key = (str(record.owner_id), local_date)
             if key in scheduled_keys:
                 continue
+            plan = await choose_scheduled_query(session, record.owner_id, record.data, now=now)
             run = await store.create(
                 "youtube_discovery_run",
                 record.owner_id,
                 {
-                    "query": record.data.get("query", "trading strategy"),
+                    "query": plan["query"],
+                    "query_plan": plan,
                     "limit": int(record.data.get("limit", 5)),
                     "languages": record.data.get("languages", ["en"]),
                     "category": record.data.get("category", "trading"),
@@ -153,6 +158,7 @@ async def _create_scheduled_youtube_runs() -> list[str]:
                 event_type="knowledge_youtube_discovery.scheduled",
             )
             created.append(str(run.id))
+            scheduled_keys.add(key)
     for run_id in created:
         run_youtube_discovery.delay(run_id)
     return created

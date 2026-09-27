@@ -7,8 +7,10 @@ import { api, type Resource } from "@/lib/api";
 
 type SearchResponse = { run_id: string; state: string; query: string; discovered: number; videos: { video_id: string; title: string; url: string }[]; provider_requested_at: string };
 type TranscriptResponse = { run_id: string; state: string; created: number; skipped: number; failed: unknown[]; transcript_results?: { video_id: string; title: string; status: string }[] };
-type Schedule = { configured: boolean; enabled: boolean; run_at: string; timezone: string; weekdays: number[]; next_run_at: string | null; query: string; limit: number; languages: string[]; category: string };
-type Run = Resource & { trigger: string; provider_requested_at?: string; scheduled_at?: string; query: string; discovered?: number; created?: number; discovery_stage?: string; discovered_videos?: { video_id: string; title: string; url: string }[] };
+type QueryMode = "AUTO_MARKET" | "FIXED";
+type QueryPlan = { mode: QueryMode; query: string; reason: string; instrument?: string; regime?: string; topic?: string; basis?: string };
+type Schedule = { configured: boolean; enabled: boolean; run_at: string; timezone: string; weekdays: number[]; next_run_at: string | null; query: string; query_mode?: QueryMode; query_preview?: QueryPlan; limit: number; languages: string[]; category: string };
+type Run = Resource & { trigger: string; provider_requested_at?: string; scheduled_at?: string; query: string; query_plan?: QueryPlan; discovered?: number; created?: number; discovery_stage?: string; discovered_videos?: { video_id: string; title: string; url: string }[] };
 
 export function YouTubeDiscovery() {
   const client = useQueryClient();
@@ -20,6 +22,7 @@ export function YouTubeDiscovery() {
   const [message, setMessage] = useState("");
   const [searchResult, setSearchResult] = useState<SearchResponse | null>(null);
   const editable = draft ?? schedule.data;
+  const queryMode = editable?.query_mode ?? (editable?.configured ? "FIXED" : "AUTO_MARKET");
   const refresh = () => client.invalidateQueries({ queryKey: ["knowledge"] });
   const searchVideos = useMutation({
     mutationFn: () => api<SearchResponse>("/knowledge/youtube/search", { method: "POST", body: JSON.stringify({ query: manualInput.query, limit: Number(manualInput.limit), languages: ["en"], category: "trading" }) }),
@@ -32,8 +35,8 @@ export function YouTubeDiscovery() {
     onError: (error: Error) => setMessage(error.message),
   });
   const save = useMutation({
-    mutationFn: () => { if (!editable) throw new Error("Schedule is still loading"); const { enabled, run_at, timezone, weekdays, query, limit, languages, category } = editable; return api<Schedule>("/knowledge/youtube/schedule", { method: "PUT", body: JSON.stringify({ enabled, run_at, timezone, weekdays, query, limit, languages, category }) }); },
-    onSuccess: async result => { setDraft(result); setEditing(false); setMessage("YouTube discovery schedule saved. Every SerpApi call will be timestamped below."); await refresh(); },
+    mutationFn: () => { if (!editable) throw new Error("Schedule is still loading"); const { enabled, run_at, timezone, weekdays, query, limit, languages, category } = editable; return api<Schedule>("/knowledge/youtube/schedule", { method: "PUT", body: JSON.stringify({ enabled, run_at, timezone, weekdays, query, query_mode: queryMode, limit, languages, category }) }); },
+    onSuccess: async result => { setDraft(result); setEditing(false); setMessage("YouTube discovery schedule saved. Each discovery run and its chosen query will be recorded below."); await refresh(); },
     onError: (error: Error) => setMessage(error.message),
   });
   const remove = useMutation({
@@ -58,16 +61,19 @@ export function YouTubeDiscovery() {
     </form>
     {message ? <p className="notice">{message}</p> : null}
     {editable?.configured && !editing ? <div className="inset form-stack">
-      <strong>Saved YouTube schedule</strong><span>{editable.enabled ? `${editable.run_at} · ${editable.timezone} · “${editable.query}”` : "Disabled"}</span>
+      <strong>Saved YouTube schedule</strong><span>{editable.enabled ? `${editable.run_at} · ${editable.timezone} · ${queryMode === "AUTO_MARKET" ? "Automatic pair/regime topic rotation" : `“${editable.query}”`}` : "Disabled"}</span>
       <small>Next SerpApi call: {editable.next_run_at ? new Date(editable.next_run_at).toLocaleString() : "Schedule disabled"}</small>
       <div className="actions"><button className="btn" onClick={() => setEditing(true)}>Edit / replace schedule</button><button className="btn danger" disabled={remove.isPending} onClick={() => remove.mutate()}>Remove schedule</button></div>
     </div> : editable ? <>
-      <div className="form-grid"><label>Scheduled query<input value={editable.query} onChange={event => change({ query: event.target.value })} /></label><label>Videos per call<input type="number" min="1" max="20" value={editable.limit} onChange={event => change({ limit: Number(event.target.value) })} /></label><label>Run time<input type="time" value={editable.run_at} onChange={event => change({ run_at: event.target.value })} /></label><label>Timezone<input value={editable.timezone} onChange={event => change({ timezone: event.target.value })} /></label></div>
+      <label>Scheduled query selection<select value={queryMode} onChange={event => change({ query_mode: event.target.value as QueryMode })}><option value="AUTO_MARKET">Automatic — latest pairs and market regimes</option><option value="FIXED">Fixed — use my scheduled query</option></select></label>
+      {queryMode === "AUTO_MARKET" ? <p className="muted">One query per scheduled run: rotate across the latest top four pairs and regime-compatible strategy topics, including backtesting and robustness. Without fresh selected pairs, rotate general educational topics. This does not make extra model calls or multiply the video budget.</p> : null}
+      <div className="form-grid">{queryMode === "FIXED" ? <label>Scheduled query<input value={editable.query} onChange={event => change({ query: event.target.value })} /></label> : null}<label>Videos per call<input type="number" min="1" max="20" value={editable.limit} onChange={event => change({ limit: Number(event.target.value) })} /></label><label>Run time<input type="time" value={editable.run_at} onChange={event => change({ run_at: event.target.value })} /></label><label>Timezone<input value={editable.timezone} onChange={event => change({ timezone: event.target.value })} /></label></div>
       <label><input type="checkbox" checked={editable.enabled} onChange={event => change({ enabled: event.target.checked })} /> Enable scheduled SerpApi discovery</label>
       <fieldset><legend>Run on</legend><div className="actions">{["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day, index) => <label key={day}><input type="checkbox" checked={editable.weekdays.includes(index)} onChange={event => change({ weekdays: event.target.checked ? [...new Set([...editable.weekdays, index])].sort() : editable.weekdays.filter(value => value !== index) })} /> {day}</label>)}</div></fieldset>
-      <div className="actions"><button className="btn primary" disabled={save.isPending || !editable.query || (editable.enabled && !editable.weekdays.length)} onClick={() => save.mutate()}>{save.isPending ? "Saving…" : editable.configured ? "Replace YouTube schedule" : "Save YouTube schedule"}</button>{editable.configured ? <button className="btn" onClick={() => { setDraft(null); setEditing(false); }}>Cancel</button> : null}</div>
+      <div className="actions"><button className="btn primary" disabled={save.isPending || (queryMode === "FIXED" && !editable.query) || (editable.enabled && !editable.weekdays.length)} onClick={() => save.mutate()}>{save.isPending ? "Saving…" : editable.configured ? "Replace YouTube schedule" : "Save YouTube schedule"}</button>{editable.configured ? <button className="btn" onClick={() => { setDraft(null); setEditing(false); }}>Cancel</button> : null}</div>
     </> : <p>Loading schedule…</p>}
+    {editable?.query_preview?.mode === queryMode ? <div className="inset form-stack"><strong>Next scheduled query preview</strong><span>{editable.query_preview.query}</span><small>{editable.query_preview.reason} Recomputed when the schedule runs.</small></div> : null}
     <h3>Recent SerpApi invocation history</h3>
-    {runs.data?.length ? <ProgressiveList items={newestFirst(runs.data)} label="YouTube research runs">{visible => <ul className="record-list">{visible.map(run => <li key={run.id}><strong>{run.trigger} · {run.state}</strong><span>{run.query}</span><small>Provider called: {run.provider_requested_at ? new Date(run.provider_requested_at).toLocaleString() : run.scheduled_at ? `queued ${new Date(run.scheduled_at).toLocaleString()}` : "not called yet"} · indexed {run.created ?? 0} / discovered {run.discovered ?? run.discovered_videos?.length ?? 0}</small>{run.discovered_videos?.length && ["SEARCHED", "PARTIAL", "FAILED"].includes(run.state) ? <button type="button" className="btn" disabled={fetchTranscripts.isPending} onClick={() => fetchTranscripts.mutate(run.id)}>{run.state === "SEARCHED" ? "Fetch saved transcripts" : "Retry unavailable transcripts"}</button> : null}</li>)}</ul>}</ProgressiveList> : <p className="empty">No SerpApi calls recorded yet. Without a saved schedule, calls are manual only.</p>}
+    {runs.data?.length ? <ProgressiveList items={newestFirst(runs.data)} label="YouTube research runs">{visible => <ul className="record-list">{visible.map(run => <li key={run.id}><strong>{run.trigger} · {run.state}</strong><span>{run.query}</span>{run.query_plan ? <small>{run.query_plan.instrument ? `${run.query_plan.instrument} · ${run.query_plan.regime} · ` : ""}{run.query_plan.reason}</small> : null}<small>Provider called: {run.provider_requested_at ? new Date(run.provider_requested_at).toLocaleString() : run.scheduled_at ? `queued ${new Date(run.scheduled_at).toLocaleString()}` : "not called yet"} · indexed {run.created ?? 0} / discovered {run.discovered ?? run.discovered_videos?.length ?? 0}</small>{run.discovered_videos?.length && ["SEARCHED", "PARTIAL", "FAILED"].includes(run.state) ? <button type="button" className="btn" disabled={fetchTranscripts.isPending} onClick={() => fetchTranscripts.mutate(run.id)}>{run.state === "SEARCHED" ? "Fetch saved transcripts" : "Retry unavailable transcripts"}</button> : null}</li>)}</ul>}</ProgressiveList> : <p className="empty">No SerpApi calls recorded yet. Without a saved schedule, calls are manual only.</p>}
   </article>;
 }

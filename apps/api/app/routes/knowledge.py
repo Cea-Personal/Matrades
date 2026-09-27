@@ -30,6 +30,7 @@ from modules.knowledge.openai_embeddings import (
     embed_source_data,
     openai_embeddings,
 )
+from modules.knowledge.query_planning import QueryMode, choose_scheduled_query, query_mode
 from modules.knowledge.reranking import RerankingConfigurationInput
 from modules.knowledge.retrieval import KnowledgeSearchInput as SearchInput
 from modules.knowledge.retrieval import retrieve_knowledge
@@ -73,6 +74,8 @@ class YouTubeScrapeInput(BaseModel):
 
 
 class YouTubeScheduleInput(YouTubeScrapeInput):
+    query: str = Field(default="trading strategy", min_length=2, max_length=240)
+    query_mode: QueryMode = "AUTO_MARKET"
     enabled: bool = True
     run_at: str = "05:00"
     timezone: str = "UTC"
@@ -686,6 +689,10 @@ async def get_youtube_schedule(
             "configured": False,
             **schedule,
             "query": "trading strategy",
+            "query_mode": "AUTO_MARKET",
+            "query_preview": await choose_scheduled_query(
+                db, actor.owner_id, {"query_mode": "AUTO_MARKET"}
+            ),
             "limit": 5,
             "languages": ["en"],
             "category": "trading",
@@ -700,6 +707,8 @@ async def get_youtube_schedule(
         **record.public(),
         **schedule,
         "configured": True,
+        "query_mode": query_mode(record.data),
+        "query_preview": await choose_scheduled_query(db, actor.owner_id, record.data),
         "next_run_at": upcoming.isoformat() if upcoming else None,
         "saved_at": record.updated_at,
     }
@@ -736,6 +745,7 @@ async def save_youtube_schedule(
         **record.public(),
         **schedule,
         "configured": True,
+        "query_preview": await choose_scheduled_query(db, actor.owner_id, data),
         "next_run_at": upcoming.isoformat() if upcoming else None,
         "saved_at": record.updated_at,
     }
@@ -760,6 +770,7 @@ async def delete_youtube_schedule(
         "configured": False,
         **default_schedule(enabled=False, run_at="05:00"),
         "query": "trading strategy",
+        "query_mode": "AUTO_MARKET",
         "limit": 5,
         "languages": ["en"],
         "category": "trading",
