@@ -27,7 +27,9 @@ class Settings(BaseSettings):
     blob_root: Path = Path("data/blobs")
     codex_enabled: bool = True
     codex_binary: str = "codex"
+    codex_orchestrator_model: str = "gpt-5.5"
     default_codex_model: str = "gpt-5.6-terra"
+    agent_worker_concurrency: int = Field(default=4, ge=1, le=8)
     mt5_auto_start_enabled: bool = True
     mt5_wine_binary: str = "wine"
     mt5_wineboot_binary: str = "wineboot"
@@ -52,13 +54,20 @@ class Settings(BaseSettings):
     forex_factory_schedule_enabled: bool = True
     forex_factory_schedule_hour_utc: int = Field(default=5, ge=0, le=23)
     forex_factory_schedule_minute_utc: int = Field(default=0, ge=0, le=59)
-    research_agent_timeout_seconds: int = Field(default=90, ge=10, le=300)
+    # Codex app-server reads may wait up to 120 seconds for a single event.
+    research_agent_timeout_seconds: int = Field(default=180, ge=10, le=300)
     research_artifact_root: Path = Path("data/research_cycles")
+    research_data_root: Path = Path("data/quantitative_research")
+    quantitative_research_max_combinations: int = Field(default=256, ge=32, le=4096)
     strategy_research_max_market_age_hours: int = Field(default=24, ge=1, le=168)
     strategy_research_history_days: int = Field(default=45, ge=7, le=365)
     strategy_research_timeframe: str = "4h"
     strategy_research_discovery_ratio: Decimal = Field(
         default=Decimal("0.70"), ge=Decimal("0.5"), le=Decimal("0.9")
+    )
+    # Research/backtest normalization only; never broker sizing authority.
+    strategy_research_simulation_risk_percent: Decimal = Field(
+        default=Decimal("0.5"), gt=0, le=Decimal("1")
     )
 
 

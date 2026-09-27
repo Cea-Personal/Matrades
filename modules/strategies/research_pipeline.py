@@ -3,24 +3,94 @@
 from datetime import UTC, datetime, timedelta
 from uuid import NAMESPACE_URL, UUID, uuid5
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from modules.connections.models import ConnectionProvider
 from modules.connections.resolution import ResolvedConnection, find_connection, resolve_connection
+from modules.market_data.research_history import independent_history_binding
 from modules.strategies.evidence import resolve_approved_candidate
 from packages.shared.config import settings
 from packages.shared.store import ResourceRecord, ResourceStore
+
+
+async def latest_market_run(
+    db: AsyncSession, owner_id: UUID, *, completed_only: bool = False
+) -> ResourceRecord | None:
+    """Use creation order: updates to old selections must not make an old cycle current."""
+    query = select(ResourceRecord).where(
+        ResourceRecord.kind == "research_run",
+        ResourceRecord.owner_id == owner_id,
+        ResourceRecord.state != "DELETED",
+    )
+    if completed_only:
+        query = query.where(ResourceRecord.state == "COMPLETED")
+    return await db.scalar(
+        query.order_by(ResourceRecord.created_at.desc(), ResourceRecord.id.desc()).limit(1)
+    )
+
+
+async def latest_strategy_context(db: AsyncSession, owner_id: UUID) -> dict:
+    newest = await latest_market_run(db, owner_id)
+    if newest is None:
+        return {"ready": False, "reason": "run autonomous market research first", "selections": []}
+    run = await latest_market_run(db, owner_id, completed_only=True)
+    if run is None:
+        return {
+            "ready": False,
+            "reason": "no completed market research cycle is available yet",
+            "market_research_state": newest.state,
+            "selections": [],
+        }
+    context = {
+        "ready": False,
+        "reason": None,
+        "market_research_run_id": str(run.id),
+        "market_research_state": run.state,
+        "newer_market_research_state": newest.state if newest.id != run.id else None,
+        "selections": [],
+    }
+    selections = [
+        item
+        for item in await ResourceStore(db).list("market_selection", owner_id)
+        if item.state == "ACTIVE_MARKET_ANALYSIS"
+        and item.data.get("research_run_id") == str(run.id)
+    ]
+    for selection in selections:
+        try:
+            basis = await resolve_strategy_basis(db, owner_id, selection.id)
+            context["selections"].append({"ready": True, "reason": None, **basis})
+        except (KeyError, LookupError, RuntimeError, ValueError) as exc:
+            context["selections"].append(
+                {
+                    "ready": False,
+                    "reason": str(exc),
+                    "market_selection_id": str(selection.id),
+                    "market_research_run_id": str(run.id),
+                    "instrument": selection.data.get("candidate", {})
+                    .get("listing", {})
+                    .get("symbol"),
+                    "category": selection.data.get("lane", {}).get("asset_class"),
+                }
+            )
+    context["ready"] = any(item["ready"] for item in context["selections"])
+    if not context["selections"]:
+        context["reason"] = "latest market research cycle has no selected pairs"
+    elif not context["ready"]:
+        context["reason"] = "no selected pair has a valid historical data basis"
+    return context
 
 
 async def resolve_strategy_basis(
     db: AsyncSession, owner_id: UUID, selection_id: UUID | None = None
 ) -> dict[str, str]:
     store = ResourceStore(db)
+    if selection_id is None:
+        raise ValueError("choose a pair from the latest market research cycle")
     selections = [
         item
         for item in await store.list("market_selection", owner_id)
-        if item.state == "ACTIVE_MARKET_ANALYSIS"
-        and (selection_id is None or item.id == selection_id)
+        if item.state == "ACTIVE_MARKET_ANALYSIS" and item.id == selection_id
     ]
     if not selections:
         raise ValueError("a fresh typed autonomous market research lane is required")
@@ -75,6 +145,15 @@ async def resolve_strategy_basis(
         timeframe = {"M1": "1m", "M5": "5m", "M15": "15m", "H1": "1h", "H4": "4h", "D1": "1d"}.get(
             native_timeframe, timeframe
         )
+    execution_connection_id = str(connection.id)
+    history = await independent_history_binding(
+        db, owner_id, UUID(candidate.account_id), selection.data["lane"], candidate.instrument
+    )
+    history_binding_id = ""
+    if history is not None:
+        history_binding, connection = history
+        history_binding_id = str(history_binding.id)
+        provider = connection.profile.provider
     return {
         "market_selection_id": str(selection.id),
         "market_research_run_id": str(research_run.id),
@@ -85,6 +164,8 @@ async def resolve_strategy_basis(
         "historical_connection_id": str(connection.id),
         "historical_provider": provider.value,
         "historical_timeframe": timeframe,
+        "execution_connection_id": execution_connection_id,
+        "research_history_binding_id": history_binding_id,
     }
 
 

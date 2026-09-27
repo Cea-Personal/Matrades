@@ -2,6 +2,8 @@
 
 import { useQuery } from "@tanstack/react-query";
 
+import { ProgressiveList, newestFirst } from "@/components/ProgressiveList";
+import { Disclosure } from "@/components/Disclosure";
 import { api, type Resource } from "@/lib/api";
 import { ActiveTradeChart } from "@/features/trading/ActiveTradeChart";
 
@@ -54,9 +56,9 @@ export function TradeManagement() {
           </tbody></table></div>
         )}
       </article>
-      {trades.map(trade => <ActiveTradeChart key={`chart-${trade.id}`} trade={trade} />)}
-      <article className="card"><h2>Trade Plan lifecycle</h2>{plans.length === 0 ? <p className="empty">No autonomous Trade Plans recorded.</p> : <ul className="record-list">{plans.map(plan => <li key={plan.id}><strong>{text(plan.instrument, plan.id)}</strong><span>{text(plan.state)} · risk {text((plan.risk as Record<string, unknown> | undefined)?.decision)}</span><small>{new Date(plan.updated_at).toLocaleString()}</small></li>)}</ul>}</article>
-      <article className="card"><h2>Execution command ledger</h2>{commands.length === 0 ? <p className="empty">No execution commands recorded.</p> : <div className="table-wrap"><table><thead><tr><th>Action</th><th>State</th><th>Outcome certainty</th><th>Broker order</th><th>Idempotency</th></tr></thead><tbody>{commands.map(command => <tr key={command.id}><td>{text(command.action)}</td><td>{text(command.state)}</td><td>{text(command.outcome_certainty)}</td><td>{text(command.broker_order_id)}</td><td><code>{text(command.idempotency_key)}</code></td></tr>)}</tbody></table></div>}</article>
+      {trades.map(trade => <Disclosure key={`chart-${trade.id}`} title={`${text((trade.broker_position as Record<string, unknown> | undefined)?.instrument, text(trade.instrument, trade.id))} · position chart`}><ActiveTradeChart trade={trade} /></Disclosure>)}
+      <article className="card"><h2>Trade Plan lifecycle</h2>{plans.length === 0 ? <p className="empty">No autonomous Trade Plans recorded.</p> : <ProgressiveList items={newestFirst(plans)} label="trade plans">{visible => <ul className="record-list">{visible.map(plan => <li key={plan.id}><strong>{text(plan.instrument, plan.id)}</strong><span>{text(plan.state)} · risk {text((plan.risk as Record<string, unknown> | undefined)?.decision)}</span><small>{new Date(plan.updated_at).toLocaleString()}</small></li>)}</ul>}</ProgressiveList>}</article>
+      <article className="card"><h2>Execution command ledger</h2>{commands.length === 0 ? <p className="empty">No execution commands recorded.</p> : <ProgressiveList items={newestFirst(commands)} label="execution commands">{visible => <div className="table-wrap"><table><thead><tr><th>Action</th><th>State</th><th>Outcome certainty</th><th>Broker order</th><th>Idempotency</th></tr></thead><tbody>{visible.map(command => <tr key={command.id}><td>{text(command.action)}</td><td>{text(command.state)}</td><td>{text(command.outcome_certainty)}</td><td>{text(command.broker_order_id)}</td><td><code>{text(command.idempotency_key)}</code></td></tr>)}</tbody></table></div>}</ProgressiveList>}</article>
     </section>
   );
 }

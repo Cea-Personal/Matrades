@@ -21,11 +21,12 @@ def test_strategy_ui_is_ai_only_and_has_generation_backtesting_and_archive():
             "AI Generated",
             "AI Assisted",
             "Generate strategy",
-            "Approve strategy",
+            "Accept proposal",
+            "Create strategy version",
             "Run backtest",
             "Research archive",
             "Research basis",
-            "approved market selection",
+            "Latest completed market research basis",
             "unseen holdout",
         )
     )

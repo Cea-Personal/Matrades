@@ -3,13 +3,14 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { ProgressiveList, newestFirst } from "@/components/ProgressiveList";
 import { api, type Resource } from "@/lib/api";
 
 type Lane = { asset_class: string; instrument_type: string; enabled: boolean };
 type Matrix = { account_id: string; version: number; lanes: Lane[] };
 type BindingScope = "MARKET_RESEARCH" | "ECONOMIC_CONTEXT";
 
-const marketCapabilities = ["DISCOVERY", "INSTRUMENT_DIRECTORY", "QUOTE", "CANDLES", "FUTURES_CHAIN", "CONTRACT_DETAILS", "OPEN_INTEREST"];
+const marketCapabilities = ["DISCOVERY", "INSTRUMENT_DIRECTORY", "QUOTE", "CANDLES", "FUTURES_CHAIN", "CONTRACT_DETAILS", "OPEN_INTEREST", "FUNDING", "ORDER_BOOK", "TRADES"];
 const economicCapabilities = ["ECONOMIC_CALENDAR", "MACROECONOMIC", "NEWS"];
 
 export function ProviderBindings() {
@@ -26,6 +27,7 @@ export function ProviderBindings() {
   const [capability, setCapability] = useState("DISCOVERY");
   const [connectionId, setConnectionId] = useState("");
   const [priority, setPriority] = useState("1");
+  const [authorityPurpose, setAuthorityPurpose] = useState("DISCOVERY");
   const [message, setMessage] = useState("");
 
   const selectedLane = enabledLanes.some(item => `${item.asset_class}:${item.instrument_type}` === lane)
@@ -39,7 +41,7 @@ export function ProviderBindings() {
   const create = useMutation({
     mutationFn: () => {
       const [asset_class, instrument_type] = selectedLane.split(":");
-      return api(`/accounts/${selectedAccountId}/provider-bindings`, { method: "POST", body: JSON.stringify({ binding_scope: scope, ...(scope === "MARKET_RESEARCH" ? { lane: { asset_class, instrument_type } } : {}), capability, authority_purpose: scope === "MARKET_RESEARCH" ? "DISCOVERY" : "REFERENCE", connection_id: connectionId, priority: Number(priority) }) });
+      return api(`/accounts/${selectedAccountId}/provider-bindings`, { method: "POST", body: JSON.stringify({ binding_scope: scope, ...(scope === "MARKET_RESEARCH" ? { lane: { asset_class, instrument_type } } : {}), capability, authority_purpose: scope === "MARKET_RESEARCH" ? authorityPurpose : "REFERENCE", connection_id: connectionId, priority: Number(priority) }) });
     },
     onSuccess: async () => { setMessage("Provider binding saved. Use Test & verify to confirm this exact authority."); await invalidate(); },
     onError: (error: Error) => setMessage(error.message),
@@ -71,8 +73,9 @@ export function ProviderBindings() {
       {scope === "MARKET_RESEARCH" && enabledLanes.length === 0 ? <p className="notice bad">This account has no enabled research lanes. Update its matrix in Research first.</p> : null}
       <div className="form-grid"><label>Capability<select value={capability} onChange={event => setCapability(event.target.value)}>{choices.map(item => <option key={item}>{item}</option>)}</select></label><label>Priority<input type="number" min="1" value={priority} onChange={event => setPriority(event.target.value)} /></label></div>
       <label>Configured connection<select required value={connectionId} onChange={event => setConnectionId(event.target.value)}><option value="">Select a connection</option>{activeConnections.map(connection => <option key={connection.id} value={connection.id}>{String(connection.name)} · {String(connection.provider)} · {String(connection.health ?? "UNTESTED")}</option>)}</select></label>
+      {scope === "MARKET_RESEARCH" ? <label>Authority purpose<select value={authorityPurpose} onChange={event => setAuthorityPurpose(event.target.value)}>{["DISCOVERY", "HISTORY", "REFERENCE", "EXECUTABLE_QUOTE", "CONTRACT_TERMS", "BROKER_RECONCILIATION"].map(value => <option key={value}>{value}</option>)}</select><small>Bind independent price history as CANDLES + HISTORY. Macro, positioning and intermarket data use REFERENCE. Only broker sources can provide executable CFD prices and contract terms.</small></label> : null}
       <button className="btn primary" disabled={!selectedAccountId || !connectionId || create.isPending || (scope === "MARKET_RESEARCH" && !selectedLane)} onClick={() => create.mutate()}>{create.isPending ? "Saving…" : "Save provider binding"}</button>
     </article>
-    <article className="card"><h3>Current provider bindings</h3>{bindings.data?.length ? <div className="table-wrap"><table><thead><tr><th>Use</th><th>Coverage</th><th>Capability</th><th>Connection</th><th>Status</th><th /></tr></thead><tbody>{bindings.data.map(binding => { const bindingLane = binding.lane as Lane | undefined; return <tr key={binding.id}><td>{String(binding.binding_scope ?? "MARKET_RESEARCH").replaceAll("_", " ")}</td><td>{bindingLane ? `${bindingLane.asset_class} · ${bindingLane.instrument_type}` : "Economic context"}</td><td>{String(binding.capability)}</td><td>{connectionNames.get(String(binding.connection_id)) ?? String(binding.connection_id)}</td><td>{String(binding.verification_status)}</td><td><div className="actions">{binding.verification_status === "VERIFIED" ? <span>Verified</span> : <button className="btn compact" disabled={testAndVerify.isPending} onClick={() => testAndVerify.mutate(binding)}>Test & verify</button>}<button className="btn compact danger" disabled={remove.isPending} onClick={() => remove.mutate(binding)}>Remove</button></div></td></tr>; })}</tbody></table></div> : <p className="empty">No provider bindings for this account.</p>}</article>
+    <article className="card"><h3>Current provider bindings</h3>{bindings.data?.length ? <ProgressiveList items={newestFirst(bindings.data)} label="provider bindings" scopeKey={selectedAccountId} pageSize={6}>{visible => <div className="table-wrap"><table><thead><tr><th>Use</th><th>Coverage</th><th>Capability</th><th>Connection</th><th>Status</th><th /></tr></thead><tbody>{visible.map(binding => { const bindingLane = binding.lane as Lane | undefined; return <tr key={binding.id}><td>{String(binding.binding_scope ?? "MARKET_RESEARCH").replaceAll("_", " ")}</td><td>{bindingLane ? `${bindingLane.asset_class} · ${bindingLane.instrument_type}` : "Economic context"}</td><td>{String(binding.capability)}</td><td>{connectionNames.get(String(binding.connection_id)) ?? String(binding.connection_id)}</td><td>{String(binding.verification_status)}</td><td><div className="actions">{binding.verification_status === "VERIFIED" ? <span>Verified</span> : <button className="btn compact" disabled={testAndVerify.isPending} onClick={() => testAndVerify.mutate(binding)}>Test & verify</button>}<button className="btn compact danger" disabled={remove.isPending} onClick={() => remove.mutate(binding)}>Remove</button></div></td></tr>; })}</tbody></table></div>}</ProgressiveList> : <p className="empty">No provider bindings for this account.</p>}</article>
   </section>;
 }

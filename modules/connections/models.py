@@ -18,6 +18,10 @@ class ConnectionProvider(StrEnum):
     COINGECKO = "COINGECKO"
     FRED = "FRED"
     CFTC = "CFTC"
+    DUKASCOPY = "DUKASCOPY"
+    CCXT = "CCXT"
+    YAHOO_FINANCE = "YAHOO_FINANCE"
+    ECB = "ECB"
     FUTURES_REFERENCE = "FUTURES_REFERENCE"
     CALENDAR = "CALENDAR"
     NEWS = "NEWS"
@@ -34,6 +38,10 @@ PROVIDER_LABELS = {
     ConnectionProvider.COINGECKO: "CoinGecko",
     ConnectionProvider.FRED: "FRED",
     ConnectionProvider.CFTC: "CFTC Commitments of Traders",
+    ConnectionProvider.DUKASCOPY: "Dukascopy independent history",
+    ConnectionProvider.CCXT: "CCXT public exchanges (including Binance derivatives)",
+    ConnectionProvider.YAHOO_FINANCE: "Yahoo Finance intermarket context",
+    ConnectionProvider.ECB: "European Central Bank data",
     ConnectionProvider.FUTURES_REFERENCE: "Futures reference / contract chain",
     ConnectionProvider.CALENDAR: "Calendar",
     ConnectionProvider.NEWS: "News",
@@ -104,6 +112,23 @@ class ConnectionProfile(BaseModel):
             feed_url = str(self.configuration.get("feed_url", ""))
             if feed_url:
                 self.configuration["feed_url"] = validated_endpoint(feed_url)
+        if self.provider == ConnectionProvider.CCXT:
+            exchange = self.configuration.get("exchange", "coinbase")
+            if exchange not in {"coinbase", "binance", "binanceusdm", "kraken", "okx", "bybit"}:
+                raise ValueError("unsupported public research exchange")
+            self.configuration["exchange"] = exchange
+        if (
+            self.provider
+            in {
+                ConnectionProvider.DUKASCOPY,
+                ConnectionProvider.CCXT,
+                ConnectionProvider.YAHOO_FINANCE,
+                ConnectionProvider.ECB,
+                ConnectionProvider.CFTC,
+            }
+            and self.credential_id is not None
+        ):
+            raise ValueError("public research connections do not accept private credentials")
         return self
 
 

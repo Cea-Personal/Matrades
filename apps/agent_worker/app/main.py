@@ -9,8 +9,8 @@ from uuid import UUID
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
-from modules.agents.models import AgentDefinition, ModelProfile, RuntimeType
 from modules.agents.model_assignments import default_profile
+from modules.agents.models import AgentDefinition, ModelProfile, RuntimeType
 from modules.agents.permissions import PermissionSet
 from modules.agents.prompts import PromptSet, resolve_prompts
 from modules.agents.registry import REQUIRED_AGENT_IDS
@@ -42,14 +42,22 @@ def _default_profile(logical_id: str | None = None) -> ModelProfile:
     return default_profile(logical_id, fallback_model=settings.default_codex_model)
 
 
-async def publish_codex_heartbeat(router: AgentRuntimeRouter, stopped: asyncio.Event) -> None:
+def codex_slots_healthy(routers: list[AgentRuntimeRouter]) -> bool:
+    return any(
+        bool(getattr(router.clients.get(RuntimeType.CODEX_APP_SERVER), "healthy", False))
+        for router in routers
+    )
+
+
+async def publish_codex_heartbeat(
+    routers: list[AgentRuntimeRouter], stopped: asyncio.Event
+) -> None:
     settings = get_settings()
     redis = Redis.from_url(settings.redis_url)
-    client = router.clients.get(RuntimeType.CODEX_APP_SERVER)
     try:
         while not stopped.is_set():
             try:
-                if client is not None and bool(getattr(client, "healthy", False)):
+                if codex_slots_healthy(routers):
                     await redis.set(
                         CODEX_APP_SERVER_HEARTBEAT_KEY,
                         "healthy",
@@ -141,7 +149,9 @@ async def serve_agent_requests(
                             **dict(request.get("payload", {})),
                             "output_schema": request.get("output_schema"),
                         },
-                        deadline_seconds=settings.research_agent_timeout_seconds,
+                        # Leave time for persistence and the Redis reply before
+                        # the gateway's own request deadline expires.
+                        deadline_seconds=max(1, settings.research_agent_timeout_seconds - 5),
                     )
                     await store.create(
                         "agent_execution",
@@ -157,7 +167,13 @@ async def serve_agent_requests(
                         record_id=execution.id,
                         event_type="agent.execution_completed",
                     )
-                response = {"result": result}
+                if isinstance(result, dict):
+                    response = {"result": result}
+                else:
+                    # Preserve the runtime/model failure instead of replacing it
+                    # with the misleading gateway "invalid response" error.
+                    detail = execution.error or "agent runtime returned no structured result"
+                    response = {"error": f"{execution.status.value}: {detail}"}
             except Exception as exc:
                 logger.exception("Logical agent %s failed", logical_id)
                 response = {"error": f"{type(exc).__name__}: {exc}"}
@@ -166,6 +182,26 @@ async def serve_agent_requests(
                 await redis.expire(response_key, settings.research_agent_timeout_seconds + 30)
     finally:
         await redis.aclose()
+
+
+async def start_agent_slots(
+    overrides: dict[str, object], concurrency: int
+) -> list[AgentRuntimeRouter]:
+    """Give each Redis consumer its own runtime and Codex App Server process."""
+    routers: list[AgentRuntimeRouter] = []
+    try:
+        for _ in range(concurrency):
+            router = AgentRuntimeRouter.from_settings(overrides)
+            routers.append(router)
+            await router.start()
+    except BaseException:
+        await asyncio.gather(*(router.close() for router in routers), return_exceptions=True)
+        raise
+    return routers
+
+
+async def serve_agent_slots(routers: list[AgentRuntimeRouter], stopped: asyncio.Event) -> None:
+    await asyncio.gather(*(serve_agent_requests(router, stopped) for router in routers))
 
 
 async def serve() -> None:
@@ -194,23 +230,21 @@ async def serve() -> None:
         logger.exception(
             "Unable to load persisted agent runtime settings; using environment defaults"
         )
-    router = AgentRuntimeRouter.from_settings(overrides)
-    await router.start()
-    logger.info("Codex App Server initialized")
+    concurrency = get_settings().agent_worker_concurrency
+    routers = await start_agent_slots(overrides, concurrency)
+    logger.info("Agent runtime initialized with %d independent slots", len(routers))
     stopped = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, stopped.set)
-    heartbeat = asyncio.create_task(publish_codex_heartbeat(router, stopped))
-    request_server = asyncio.create_task(
-        serve_agent_requests(router, stopped)
-    )
+    heartbeat = asyncio.create_task(publish_codex_heartbeat(routers, stopped))
+    request_server = asyncio.create_task(serve_agent_slots(routers, stopped))
     try:
         await stopped.wait()
     finally:
         stopped.set()
         await asyncio.gather(heartbeat, request_server)
-        await router.close()
+        await asyncio.gather(*(router.close() for router in routers))
 
 
 if __name__ == "__main__":

@@ -11,7 +11,7 @@ from packages.strategy_sdk.taxonomy import Horizon, StrategyFamily, StrategyOrig
 
 class Condition(BaseModel):
     feature: str
-    operator: Literal[">", ">=", "<", "<=", "==", "crosses_above", "crosses_below"]
+    operator: Literal[">", ">=", "<", "<=", "=="]
     value: Decimal | str
 
 
@@ -68,6 +68,12 @@ class StrategySpecification(BaseModel):
 
     @model_validator(mode="after")
     def bounds(self):
+        for key, maximum in (("structure_window", 200), ("atr_period", 100)):
+            value = self.parameters.get(key)
+            if value is not None and (
+                not value.is_finite() or value != int(value) or not 2 <= value <= maximum
+            ):
+                raise ValueError(f"{key} must be an integer between 2 and {maximum}")
         if self.risk_per_trade > Decimal("100"):
             raise ValueError("risk per trade exceeds 100 percent")
         if self.take_profit and len(self.take_profit) > 5:

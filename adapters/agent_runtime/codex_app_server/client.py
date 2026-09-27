@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import tomllib
 from pathlib import Path
 from typing import Any
 
 CODEX_APP_SERVER_JSONL_LIMIT = 8 * 1024 * 1024
+logger = logging.getLogger(__name__)
 
 
 class CodexAppServerClient:
@@ -19,10 +21,12 @@ class CodexAppServerClient:
         binary: str = "codex",
         cwd: Path | None = None,
         native_agents_dir: Path | None = None,
+        orchestrator_model: str = "gpt-5.5",
     ) -> None:
         self.binary = binary
         self.cwd = cwd or Path.cwd()
         self.native_agents_dir = native_agents_dir or self.cwd / ".codex" / "agents"
+        self.orchestrator_model = orchestrator_model
         self.process: asyncio.subprocess.Process | None = None
         self._request_id = 0
         self._lock = asyncio.Lock()
@@ -34,9 +38,19 @@ class CodexAppServerClient:
     async def start(self) -> None:
         if self.healthy:
             return
+        # The image contains the project-scoped .codex/agents directory but no
+        # .git directory. Codex otherwise treats /app as untrusted and silently
+        # skips that role configuration. Trust only this concrete application
+        # workspace, never a parent or arbitrary directory.
+        project_config = (
+            ["-c", f'projects.{json.dumps(str(self.cwd.resolve()))}.trust_level="trusted"']
+            if self.native_agents_dir.is_dir()
+            else []
+        )
         self.process = await asyncio.create_subprocess_exec(
             self.binary,
             "app-server",
+            *project_config,
             "--listen",
             "stdio://",
             cwd=self.cwd,
@@ -74,100 +88,146 @@ class CodexAppServerClient:
     async def invoke(self, payload: dict[str, Any]) -> dict[str, Any]:
         async with self._lock:
             await self.start()
-            model = str(payload.get("model", ""))
             logical_id = str(payload.get("agent_role", "")).strip()
+            instructions = self._orchestrator_instructions()
+            if logical_id and logical_id != "orchestrator":
+                instructions += (
+                    "\nCURRENT PARENT-ONLY ROUTE: Call spawn_agent exactly once with "
+                    f'agent_type="{logical_id}" and fork_context=true, then wait for '
+                    "the child. The inherited user turn is the specialist's task, not "
+                    "an instruction for the child to delegate. If you are the spawned "
+                    "specialist, perform the review yourself and do not spawn again."
+                )
             thread = await self._request(
                 "thread/start",
                 {
-                    "model": model,
+                    "model": self.orchestrator_model,
                     "cwd": str(self.cwd),
                     # The application owns the top-level orchestration contract. The
                     # requested logical role is then delegated through Codex's native
-                    # spawnAgent tool, which resolves its project-scoped TOML role.
-                    "developerInstructions": self._orchestrator_instructions(),
+                    # spawn_agent tool, which resolves its project-scoped TOML role.
+                    "developerInstructions": instructions,
                     "approvalPolicy": "never",
                     # Codex App Server uses kebab-case sandbox policy values.
                     # Keep this read-only: research agents must not write files
                     # or perform broker/execution actions.
                     "sandbox": "read-only",
                     "serviceName": "matrades",
-                    "ephemeral": True,
+                    # Context inheritance requires a non-ephemeral parent in
+                    # the installed Codex App Server. Delete it in finally.
+                    "ephemeral": False,
                 },
             )
             thread_id = thread["thread"]["id"]
-            delegation = ""
-            if logical_id and logical_id != "orchestrator":
-                delegation = (
-                    "NATIVE SUBAGENT DELEGATION:\n"
-                    f"Delegate this request to exactly one Codex-native custom agent named "
-                    f"`{logical_id}` using `spawnAgent`. Include the complete structured input, "
-                    "the system and user contracts, and the output schema in the child prompt. "
-                    "Wait for the child to finish, then return the child's JSON object unchanged. "
-                    "Do not answer the specialist request yourself.\n\n"
-                )
-            prompt = (
-                delegation +
-                f"SYSTEM CONTRACT:\n{payload.get('system', '')}\n\n"
-                f"USER CONTRACT:\n{payload.get('user', '')}\n\n"
-                "Return only one JSON object matching the requested output schema. "
-                "Do not run commands, modify files, access credentials, or perform "
-                "broker actions.\n\n"
-                f"STRUCTURED INPUT:\n{json.dumps(payload.get('input', payload), default=str)}"
-            )
-            params: dict[str, Any] = {
-                "threadId": thread_id,
-                "input": [{"type": "text", "text": prompt}],
-                "cwd": str(self.cwd),
-                "approvalPolicy": "never",
-                # `turn/start` uses the app-server policy enum spelling, which
-                # differs from the `thread/start` sandbox string above.
-                "sandboxPolicy": {"type": "readOnly", "access": {"type": "fullAccess"}},
-                "model": model,
-            }
-            if payload.get("output_schema"):
-                params["outputSchema"] = payload["output_schema"]
-            turn = await self._request("turn/start", params)
-            turn_id = turn["turn"]["id"]
-            deltas: list[str] = []
-            completed_messages: list[str] = []
-            assert self.process is not None and self.process.stdout is not None
-            while True:
-                message = await self._read_message(
-                    read_timeout_seconds=120,
-                    closed_message="Codex app-server exited before turn completion",
-                    include_stderr=True,
-                )
-                method = message.get("method")
-                params_value = message.get("params", {})
-                if method == "item/completed":
-                    item = params_value.get("item", {})
-                    if item.get("type") == "agentMessage" and item.get("text"):
-                        completed_messages.append(str(item["text"]))
-                elif method == "item/agentMessage/delta":
-                    delta = params_value.get("delta")
-                    if delta:
-                        deltas.append(str(delta))
-                elif method == "turn/completed":
-                    completed = params_value.get("turn", {})
-                    if completed.get("id") != turn_id:
-                        continue
-                    if completed.get("status") not in {"completed", "succeeded"}:
-                        error = completed.get("error") or completed.get("status")
-                        raise RuntimeError(str(error))
-                    break
-                elif method == "error":
-                    raise RuntimeError(str(params_value.get("error", params_value)))
-            # Current app-server releases emit both streaming deltas and the final
-            # completed item. Prefer the authoritative completed item so the JSON
-            # payload is not accidentally concatenated twice.
-            text = "".join(completed_messages or deltas).strip()
             try:
-                result = json.loads(text)
-            except json.JSONDecodeError as exc:
-                raise ValueError("Codex response was not valid structured JSON") from exc
-            if not isinstance(result, dict):
-                raise ValueError("Codex response must be a JSON object")
-            return result
+                return await self._invoke_thread(payload, logical_id, thread_id)
+            finally:
+                # Non-ephemeral parent/child sessions contain market evidence.
+                # Always remove them, including on timeout or malformed output.
+                cleanup = asyncio.create_task(
+                    self._request("thread/delete", {"threadId": thread_id})
+                )
+                try:
+                    await asyncio.shield(cleanup)
+                except asyncio.CancelledError:
+                    # Hold the per-client lock until cleanup finishes; otherwise
+                    # the next lane could consume this request's reply.
+                    try:
+                        await cleanup
+                    except Exception:
+                        logger.warning("Codex research thread cleanup failed", exc_info=True)
+                    raise
+                except Exception:
+                    logger.warning("Codex research thread cleanup failed", exc_info=True)
+
+    async def _invoke_thread(
+        self, payload: dict[str, Any], logical_id: str, thread_id: str
+    ) -> dict[str, Any]:
+        prompt = (
+            f"SYSTEM CONTRACT:\n{payload.get('system', '')}\n\n"
+            f"USER CONTRACT:\n{payload.get('user', '')}\n\n"
+            "Return only one JSON object matching the requested output schema. "
+            "Do not run commands, modify files, access credentials, or perform "
+            "broker actions.\n\n"
+            f"OUTPUT SCHEMA:\n{json.dumps(payload.get('output_schema') or {}, default=str)}\n\n"
+            f"STRUCTURED INPUT:\n{json.dumps(payload.get('input', payload), default=str)}"
+        )
+        params: dict[str, Any] = {
+            "threadId": thread_id,
+            "input": [{"type": "text", "text": prompt}],
+            "cwd": str(self.cwd),
+            "approvalPolicy": "never",
+            # `turn/start` uses the app-server policy enum spelling, which
+            # differs from the `thread/start` sandbox string above.
+            "sandboxPolicy": {"type": "readOnly", "access": {"type": "fullAccess"}},
+            "model": self.orchestrator_model,
+        }
+        if payload.get("output_schema"):
+            params["outputSchema"] = payload["output_schema"]
+        turn = await self._request("turn/start", params)
+        turn_id = turn["turn"]["id"]
+        final_messages: list[str] = []
+        unphased_messages: list[str] = []
+        delegated = False
+        collaboration_events: list[str] = []
+        assert self.process is not None and self.process.stdout is not None
+        while True:
+            message = await self._read_message(
+                read_timeout_seconds=120,
+                closed_message="Codex app-server exited before turn completion",
+                include_stderr=True,
+            )
+            method = message.get("method")
+            params_value = message.get("params", {})
+            if method == "item/completed":
+                if params_value.get("threadId", thread_id) != thread_id:
+                    continue
+                if params_value.get("turnId", turn_id) != turn_id:
+                    continue
+                item = params_value.get("item", {})
+                if item.get("type") in {"collabToolCall", "collabAgentToolCall"}:
+                    tool = str(item.get("tool", ""))
+                    status = str(item.get("status", ""))
+                    collaboration_events.append(f"{tool}:{status}"[:80])
+                    if tool in {"spawn_agent", "spawnAgent"} and status in {
+                        "completed",
+                        "succeeded",
+                    }:
+                        delegated = True
+                if item.get("type") == "agentMessage" and item.get("text"):
+                    if item.get("phase") == "final_answer":
+                        final_messages.append(str(item["text"]))
+                    elif not item.get("phase"):
+                        # Older app-server releases did not label the final
+                        # item. In that case only the last complete message
+                        # can be the result, never a concatenation of items.
+                        unphased_messages.append(str(item["text"]))
+            elif method == "turn/completed":
+                completed = params_value.get("turn", {})
+                if completed.get("id") != turn_id:
+                    continue
+                if completed.get("status") not in {"completed", "succeeded"}:
+                    error = completed.get("error") or completed.get("status")
+                    raise RuntimeError(str(error))
+                break
+            elif method == "error":
+                raise RuntimeError(str(params_value.get("error", params_value)))
+        # Deltas and commentary are not the final response. Native subagent
+        # delegation can emit several complete agent messages in one turn;
+        # joining them makes even valid JSON outputs unparseable.
+        if logical_id and logical_id != "orchestrator" and not delegated:
+            raise RuntimeError(
+                f"Codex did not complete native spawn_agent delegation for {logical_id} "
+                f"(collaboration events: {', '.join(collaboration_events) or 'none'})"
+            )
+        text = (final_messages or unphased_messages or [""])[-1].strip()
+        try:
+            result = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise ValueError("Codex response was not valid structured JSON") from exc
+        if not isinstance(result, dict):
+            raise ValueError("Codex response must be a JSON object")
+        return result
 
     def _orchestrator_instructions(self) -> str:
         """Load the project-scoped native orchestrator role for the parent thread."""
@@ -184,7 +244,7 @@ class CodexAppServerClient:
             # rather than silently changing the logical role.
             pass
         return (
-            "Act as the Matrades orchestrator. Use Codex-native spawnAgent for every requested "
+            "Act as the Matrades orchestrator. Use Codex-native spawn_agent for every requested "
             "specialist role, wait for the child result, preserve the requested JSON schema, "
             "and never perform broker, risk, policy, authorization, or file mutations."
         )

@@ -29,6 +29,7 @@ from modules.research.scheduling import (
     normalize_schedule,
     schedule_timezone,
 )
+from modules.strategies.autonomy import StrategyAutomationPolicy, automation_policy
 from packages.shared.config import get_settings
 from packages.shared.store import ResourceStore
 
@@ -180,6 +181,7 @@ async def create_account(
             **payload.model_dump(mode="json"),
             "research_schedule": _default_research_schedule(),
             "forex_factory_schedule": _default_forex_factory_schedule(),
+            "strategy_validation_automation": StrategyAutomationPolicy().model_dump(mode="json"),
         },
         actor_id=actor.actor_id,
         event_type="account.created",
@@ -201,15 +203,65 @@ async def update_account(
     updated = await store.update(
         record,
         {
+            **record.data,
             **payload.model_dump(mode="json"),
             "research_schedule": record.data.get("research_schedule", _default_research_schedule()),
             "forex_factory_schedule": record.data.get(
                 "forex_factory_schedule", _default_forex_factory_schedule()
             ),
+            "strategy_validation_automation": record.data.get(
+                "strategy_validation_automation",
+                StrategyAutomationPolicy().model_dump(mode="json"),
+            ),
         },
         actor_id=actor.actor_id,
     )
     return updated.public()
+
+
+@router.get("/accounts/{account_id}/strategy-automation")
+async def get_strategy_automation(
+    account_id: UUID,
+    actor: Annotated[Actor, Depends(current_actor)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    account = await ResourceStore(db).get("account", account_id, actor.owner_id)
+    if account is None or account.state == "DELETED":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "account not found")
+    return {
+        "account_id": str(account.id),
+        **automation_policy(account.data).model_dump(mode="json"),
+    }
+
+
+@router.put("/accounts/{account_id}/strategy-automation")
+async def update_strategy_automation(
+    account_id: UUID,
+    payload: StrategyAutomationPolicy,
+    actor: Annotated[Actor, Depends(require_roles(Role.OWNER))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    store = ResourceStore(db)
+    account = await store.get("account", account_id, actor.owner_id)
+    if account is None or account.state == "DELETED":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "account not found")
+    saved_at = datetime.now(UTC).isoformat()
+    updated = await store.update(
+        account,
+        {
+            **account.data,
+            "strategy_validation_automation": payload.model_dump(mode="json"),
+            "strategy_validation_automation_saved_at": saved_at,
+            "strategy_validation_automation_saved_by": str(actor.actor_id),
+        },
+        actor_id=actor.actor_id,
+        event_type="strategy.automation_policy_updated",
+    )
+    return {
+        "account_id": str(updated.id),
+        **payload.model_dump(mode="json"),
+        "saved_at": saved_at,
+    }
 
 
 @router.get("/accounts/{account_id}/research-schedule")

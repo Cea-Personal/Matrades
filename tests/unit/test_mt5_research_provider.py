@@ -2,13 +2,17 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import httpx
+import pytest
 
 from adapters.broker.mt5_bridge.client import Mt5BridgeClient
 from adapters.market_data.mt5_research import Mt5ResearchDataProvider
 from packages.shared.domain_types import AssetClass, InstrumentType, ResearchLaneKey
 
 
-async def test_mt5_market_snapshot_becomes_executable_metal_cfd_evidence() -> None:
+@pytest.mark.parametrize(
+    "asset,symbol", [(AssetClass.METALS, "XAGUSD.a"), (AssetClass.FOREX, "EURUSD.a")]
+)
+async def test_mt5_market_snapshot_becomes_executable_metal_cfd_evidence(asset, symbol) -> None:
     account_id = uuid4()
     observed_at = datetime.now(UTC)
 
@@ -26,9 +30,9 @@ async def test_mt5_market_snapshot_becomes_executable_metal_cfd_evidence() -> No
                 "timeframe": "H1",
                 "instruments": [
                     {
-                        "symbol": "XAGUSD.a",
-                        "path": "Metals",
-                        "description": "Silver",
+                        "symbol": symbol,
+                        "path": "Metals" if asset == AssetClass.METALS else "Forex",
+                        "description": "Silver" if asset == AssetClass.METALS else "Euro US dollar",
                         "bid": "31.10",
                         "ask": "31.12",
                         "digits": 3,
@@ -62,19 +66,18 @@ async def test_mt5_market_snapshot_becomes_executable_metal_cfd_evidence() -> No
     provider.client = Mt5BridgeClient(
         "https://bridge.test",
         b"secret",
-        httpx.AsyncClient(
-            base_url="https://bridge.test", transport=httpx.MockTransport(bridge)
-        ),
+        httpx.AsyncClient(base_url="https://bridge.test", transport=httpx.MockTransport(bridge)),
     )
     try:
         values = await provider.gather_lane(
-            ResearchLaneKey(asset_class=AssetClass.METALS, instrument_type=InstrumentType.CFD)
+            ResearchLaneKey(asset_class=asset, instrument_type=InstrumentType.CFD)
         )
     finally:
         await provider.close()
 
     assert len(values) == 1
-    assert values[0].listing.symbol == "XAGUSD.a"
+    assert values[0].listing.symbol == symbol
+    assert values[0].listing.asset_class == asset
     assert values[0].listing.executable is True
     assert values[0].specification.contract_multiplier == 5000
     assert values[0].specification.provenance["execution_authority"] == "MT5_BROKER"

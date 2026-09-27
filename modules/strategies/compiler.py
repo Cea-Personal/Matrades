@@ -6,6 +6,7 @@ import pprint
 from dataclasses import dataclass
 from decimal import Decimal
 
+from modules.strategies.signals import entry_matches
 from packages.strategy_sdk.schema import StrategySpecification
 
 OPS = {
@@ -24,14 +25,7 @@ class CompiledStrategy:
     generated_code: str
 
     def evaluate(self, features: dict[str, Decimal]) -> bool:
-        for rule in self.specification.entry:
-            if rule.operator not in OPS or rule.feature not in features:
-                return False
-            right = features.get(str(rule.value), rule.value)
-            right = Decimal(str(right))
-            if not OPS[rule.operator](features[rule.feature], right):
-                return False
-        return True
+        return entry_matches(self.specification, features)
 
 
 def compile_strategy(spec: StrategySpecification) -> CompiledStrategy:
@@ -57,6 +51,8 @@ This module evaluates signals only. It never submits broker orders.
 """
 
 from decimal import Decimal
+from modules.strategies.signals import entry_matches
+from packages.strategy_sdk.schema import StrategySpecification
 
 SPECIFICATION = {encoded}
 
@@ -85,7 +81,10 @@ def _condition_matches(condition: dict, features: dict[str, Decimal]) -> bool:
 
 
 def signal(features: dict[str, Decimal]) -> bool:
-    """Return whether every entry condition is satisfied for this snapshot."""
-    return all(_condition_matches(condition, features)
-               for condition in SPECIFICATION["entry"])
+    """Use Matrades' shared regime, entry, confirmation and invalidation rules.
+
+    This source requires the matching Matrades evaluator package; session and
+    event context are checked by the backtest/monitor before a fill or decision.
+    """
+    return entry_matches(StrategySpecification.model_validate(SPECIFICATION), features)
 '''

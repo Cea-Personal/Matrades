@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ProgressiveList, newestFirst } from "@/components/ProgressiveList";
 import { api, type Resource } from "@/lib/api";
 
 type SearchResponse = { run_id: string; state: string; query: string; discovered: number; videos: { video_id: string; title: string; url: string }[]; provider_requested_at: string };
@@ -67,6 +68,6 @@ export function YouTubeDiscovery() {
       <div className="actions"><button className="btn primary" disabled={save.isPending || !editable.query || (editable.enabled && !editable.weekdays.length)} onClick={() => save.mutate()}>{save.isPending ? "Saving…" : editable.configured ? "Replace YouTube schedule" : "Save YouTube schedule"}</button>{editable.configured ? <button className="btn" onClick={() => { setDraft(null); setEditing(false); }}>Cancel</button> : null}</div>
     </> : <p>Loading schedule…</p>}
     <h3>Recent SerpApi invocation history</h3>
-    {runs.data?.length ? <ul className="record-list">{runs.data.map(run => <li key={run.id}><strong>{run.trigger} · {run.state}</strong><span>{run.query}</span><small>Provider called: {run.provider_requested_at ? new Date(run.provider_requested_at).toLocaleString() : run.scheduled_at ? `queued ${new Date(run.scheduled_at).toLocaleString()}` : "not called yet"} · indexed {run.created ?? 0} / discovered {run.discovered ?? 0}</small></li>)}</ul> : <p className="empty">No SerpApi calls recorded yet. Without a saved schedule, calls are manual only.</p>}
+    {runs.data?.length ? <ProgressiveList items={newestFirst(runs.data)} label="YouTube research runs">{visible => <ul className="record-list">{visible.map(run => <li key={run.id}><strong>{run.trigger} · {run.state}</strong><span>{run.query}</span><small>Provider called: {run.provider_requested_at ? new Date(run.provider_requested_at).toLocaleString() : run.scheduled_at ? `queued ${new Date(run.scheduled_at).toLocaleString()}` : "not called yet"} · indexed {run.created ?? 0} / discovered {run.discovered ?? 0}</small></li>)}</ul>}</ProgressiveList> : <p className="empty">No SerpApi calls recorded yet. Without a saved schedule, calls are manual only.</p>}
   </article>;
 }

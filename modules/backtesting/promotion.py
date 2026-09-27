@@ -1,7 +1,14 @@
 def promotable(evidence: dict[str, bool]) -> bool:
-    return bool(evidence) and all(
-        evidence.get(stage, False)
-        for stage in ("backtest", "out_of_sample", "walk_forward", "stress", "policy", "paper")
+    return (
+        bool(evidence)
+        and all(
+            evidence.get(stage, False)
+            for stage in ("backtest", "out_of_sample", "walk_forward", "stress", "policy", "paper")
+        )
+        and all(
+            evidence.get(stage, True)
+            for stage in ("parameter_sensitivity", "cost_stress", "event_driven_execution")
+        )
     )
 
 

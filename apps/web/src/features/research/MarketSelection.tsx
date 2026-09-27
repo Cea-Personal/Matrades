@@ -4,8 +4,12 @@ import { useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { WorkspaceTabs } from "@/components/WorkspaceTabs";
+import { Disclosure } from "@/components/Disclosure";
+import { ProgressiveList, newestFirst } from "@/components/ProgressiveList";
 import { api, type Resource } from "@/lib/api";
 import { TopPairStrategies } from "@/features/strategies/TopPairStrategies";
+import { ResearchDataPanel } from "./ResearchDataPanel";
 
 type Fingerprint = {
   regime: string;
@@ -42,7 +46,8 @@ type TypedLaneResult = {
   lane: { asset_class: string; instrument_type: string };
   status: string;
   reason_code?: string;
-  candidate?: { listing: { symbol: string; venue: string }; score: number; evidence: string[] };
+  failure_detail?: string;
+  candidate?: { listing: { symbol: string; venue: string }; score: number; evidence: string[]; fingerprint?: { market_session?: string } };
 };
 
 export function MarketSelection() {
@@ -70,6 +75,9 @@ export function MarketSelection() {
 
   const typedLatest = typedRuns.data
     ?.filter(item => String(item.account_id) === selectedAccountId)
+    .sort((left, right) => Date.parse(String(right.created_at)) - Date.parse(String(left.created_at)))[0];
+  const latestCompleted = typedRuns.data
+    ?.filter(item => String(item.account_id) === selectedAccountId && item.state === "COMPLETED")
     .sort((left, right) => Date.parse(String(right.created_at)) - Date.parse(String(left.created_at)))[0];
   const latest = typedLatest;
   const typedResults = (typedLatest?.lane_results as TypedLaneResult[] | undefined) ?? [];
@@ -105,19 +113,45 @@ export function MarketSelection() {
   const degradedReasons = (latest?.degraded_reasons as string[] | undefined) ?? [];
   const missingCategories = (latest?.missing_categories as string[] | undefined) ?? [];
 
-  return <section className="section-stack">
-    <header>
+  return <section className="section-stack"><header>
       <p className="eyebrow">Autonomous research</p>
       <h1>Autonomous market research</h1>
       <p className="muted">The research agents autonomously discover and rank the best candidate in every enabled asset-class × instrument-type lane.</p>
     </header>
-
-    <article className="card form-stack">
-      <div><h2>Per-account research cycle</h2><p className="muted">The scheduler checks each account every minute. Next scheduled cycle for this account: {nextRun} ({editableSchedule?.timezone ?? "UTC"})</p></div>
-      <label>Trading account<select value={selectedAccountId} onChange={event => { setAccountId(event.target.value); setScheduleDraft(null); setScheduleEditing(false); }}>
+<article className="card workspace-context"><label>Trading account<select value={selectedAccountId} onChange={event => { setAccountId(event.target.value); setScheduleDraft(null); setScheduleEditing(false); }}>
         {!accounts.data?.length && <option value="">Configure an account first</option>}
         {accounts.data?.map(account => <option key={account.id} value={account.id}>{String(account.name)}</option>)}
-      </select></label>
+      </select></label><small className="muted">Next run: {nextRun}</small></article>
+{message && <p className="notice">{message}</p>}
+<WorkspaceTabs label="Market research sections" sections={[{ id: "latest", label: "Latest cycle", content: <div className="section-stack"><article className="card form-stack">
+      <div><h2>Typed research matrix · account {String(accounts.data?.find(item => item.id === selectedAccountId)?.name ?? "")}</h2><p className="muted">Read-only here. Only configured lanes, latest statuses, and selected candidates are shown. Full decision evidence is archived in Extras.</p></div>
+      {enabledLanes.length ? <div className="grid two">{enabledLanes.map(lane => {
+        const result = typedResults.find(item => item.lane.asset_class === lane.asset_class && item.lane.instrument_type === lane.instrument_type);
+        return <article className="card form-stack" key={`${lane.asset_class}:${lane.instrument_type}`}><strong>{lane.asset_class} · {lane.instrument_type}</strong><p className={result?.status === "READY" ? "good" : result?.status === "NO_TRADE" ? "warn" : "muted"}>{result?.status ?? "NOT_RUN"}</p>{result?.candidate ? <><p>{result.candidate.listing.symbol} · {result.candidate.listing.venue}</p><small>Score {result.candidate.score.toFixed(2)}</small>{result.candidate.fingerprint?.market_session === "WEEKEND_CLOSED" ? <small className="warn">Market closed · last-session research only; no entry signal</small> : null}</> : <><small>{result?.reason_code?.replaceAll("_", " ") ?? "No completed lane result yet"}</small>{result?.failure_detail ? <small>{result.failure_detail}</small> : null}</>}</article>;
+      })}</div> : <p className="empty">No research candidates are enabled for this account. Configure the account research matrix first.</p>}
+      <div className="actions"><button className="btn primary" disabled={!selectedAccountId || runTyped.isPending || !enabledLanes.length} onClick={() => runTyped.mutate()}>{runTyped.isPending ? "Queuing…" : "Run configured matrix now"}</button><Link className="btn" href="/extras?folder=market-research">View detailed evidence in Extras</Link><span className="muted">Matrix version {matrix.data?.version ?? 1} · {enabledLanes.length} configured candidates</span></div>
+    </article>
+
+{!selectedAccountId ? <p className="empty">Select a trading account to view its cycle information.</p> : typedRuns.isPending ? <p>Loading research…</p> : latest ? <>
+      <article className="card">
+        <h2>Latest cycle · {selectedAccountName}</h2><div className="actions"><strong>Cycle status: <span className={latest.state === "DEGRADED" ? "bad" : "good"}>{latest.state}</span></strong><small>Updated {new Date(latest.updated_at).toLocaleString()}</small></div>
+        {latest.state === "RESEARCHING" || latest.state === "QUEUED" ? <p className="muted">Provider discovery and bounded agent review are in progress…</p> : null}
+        {latest.state === "DEGRADED" ? <div><h3>DEGRADED</h3><p>No recommendation was fabricated for unavailable categories: {missingCategories.join(", ") || "agent evidence incomplete"}.</p><ul>{degradedReasons.map(reason => <li key={reason}>{reason}</li>)}</ul></div> : null}
+      </article>
+      <Disclosure title="Candidate scores & profiling"><div className="grid">{candidates.map(item => <article className="card" key={item.category}>
+        <p className="muted">{item.category}</p><h2>{item.instrument}</h2><strong className="good">Score {item.score.toFixed(2)}</strong>
+        <dl><dt>Regime</dt><dd>{item.fingerprint.regime}</dd><dt>Trend</dt><dd>{item.fingerprint.trend_score.toFixed(3)}</dd><dt>Volatility</dt><dd>{item.fingerprint.volatility_score.toFixed(3)}</dd><dt>Data quality</dt><dd>{Math.round(item.fingerprint.data_quality * 100)}%</dd><dt>Source</dt><dd>{item.fingerprint.source}</dd></dl>
+        <Disclosure title="Candidate evidence"><h3>Evidence</h3><ul>{[...item.evidence, ...item.agent_evidence].map((value, index) => <li key={`${index}-${value}`}>{value}</li>)}</ul></Disclosure>
+
+      </article>)}</div></Disclosure>
+      {latestCompleted ? <>
+        {latestCompleted.id !== latest.id ? <p className="muted">Strategy suggestions below are from the last completed market cycle while the newest cycle is {latest.state.toLowerCase().replaceAll("_", " ")}.</p> : null}
+        <TopPairStrategies runId={latestCompleted.id} links={(latestCompleted.strategy_research as { instrument?: string; state: string; reason?: string }[] | undefined) ?? []} />
+      </> : <p className="empty">Strategy suggestions will appear after the first market cycle completes.</p>}
+      <div className="actions"><span className="muted">Candidates are selected by the scheduled research cycle and passed to strategy research automatically.</span><button className="btn" disabled={runTyped.isPending} onClick={() => runTyped.mutate()}>Run typed matrix again</button></div>
+    </> : <p className="empty">No persisted research run exists for {selectedAccountName}. Its scheduler will run automatically, or you can run it now.</p>}</div> },{ id: "schedule", label: "Schedule", content: <div className="section-stack"><article className="card form-stack">
+      <div><h2>Per-account research cycle</h2><p className="muted">The scheduler checks each account every minute. Next scheduled cycle for this account: {nextRun} ({editableSchedule?.timezone ?? "UTC"})</p></div>
+
       {editableSchedule?.configured && !scheduleEditing ? <div className="inset form-stack"><strong>Saved account schedule</strong><span>{editableSchedule.enabled ? `${editableSchedule.run_at} · ${editableSchedule.timezone}` : "Disabled"}</span><small>Next run: {nextRun}{editableSchedule.saved_at ? ` · last saved ${new Date(editableSchedule.saved_at).toLocaleString()}` : ""}</small><div className="actions"><button className="btn" onClick={() => setScheduleEditing(true)}>Edit / replace schedule</button><button className="btn danger" disabled={removeSchedule.isPending} onClick={() => removeSchedule.mutate()}>{removeSchedule.isPending ? "Removing…" : "Remove schedule"}</button></div></div> : editableSchedule ? <>
         <div className="form-grid"><label>Run time<input type="time" value={editableSchedule.run_at} onChange={event => changeSchedule({ run_at: event.target.value })} /></label><label>Timezone<input value={editableSchedule.timezone} placeholder="Africa/Kigali" onChange={event => changeSchedule({ timezone: event.target.value })} /></label></div>
         <label><input type="checkbox" checked={editableSchedule.enabled} onChange={event => changeSchedule({ enabled: event.target.checked })} /> Enable scheduled cycle</label>
@@ -125,35 +159,5 @@ export function MarketSelection() {
         <div className="actions"><button className="btn primary" disabled={saveSchedule.isPending || (editableSchedule.enabled && editableSchedule.weekdays.length === 0)} onClick={() => saveSchedule.mutate()}>{saveSchedule.isPending ? "Saving…" : editableSchedule.configured ? "Replace account schedule" : "Save new account schedule"}</button>{editableSchedule.configured ? <button className="btn" onClick={() => { setScheduleDraft(null); setScheduleEditing(false); }}>Cancel</button> : null}</div>
       </> : <p className="empty">Select an account to configure its research schedule.</p>}
       <p className="muted">Manual runs use the enabled typed matrix below; a symbol list never determines the instrument type.</p>
-    </article>
-
-    <article className="card form-stack">
-      <div><h2>Typed research matrix · account {String(accounts.data?.find(item => item.id === selectedAccountId)?.name ?? "")}</h2><p className="muted">Read-only here. Only configured lanes, latest statuses, and selected candidates are shown. Full decision evidence is archived in Extras.</p></div>
-      {enabledLanes.length ? <div className="grid two">{enabledLanes.map(lane => {
-        const result = typedResults.find(item => item.lane.asset_class === lane.asset_class && item.lane.instrument_type === lane.instrument_type);
-        return <article className="card form-stack" key={`${lane.asset_class}:${lane.instrument_type}`}><strong>{lane.asset_class} · {lane.instrument_type}</strong><p className={result?.status === "READY" ? "good" : result?.status === "NO_TRADE" ? "warn" : "muted"}>{result?.status ?? "NOT_RUN"}</p>{result?.candidate ? <><p>{result.candidate.listing.symbol} · {result.candidate.listing.venue}</p><small>Score {result.candidate.score.toFixed(2)}</small></> : <small>{result?.reason_code?.replaceAll("_", " ") ?? "No completed lane result yet"}</small>}</article>;
-      })}</div> : <p className="empty">No research candidates are enabled for this account. Configure the account research matrix first.</p>}
-      <div className="actions"><button className="btn primary" disabled={!selectedAccountId || runTyped.isPending || !enabledLanes.length} onClick={() => runTyped.mutate()}>{runTyped.isPending ? "Queuing…" : "Run configured matrix now"}</button><Link className="btn" href="/extras?folder=market-research">View detailed evidence in Extras</Link><span className="muted">Matrix version {matrix.data?.version ?? 1} · {enabledLanes.length} configured candidates</span></div>
-    </article>
-
-    {message && <p className="notice">{message}</p>}
-    <article className="card"><h2>Cycle outcome · {selectedAccountName}</h2><p className="muted">Only the latest cycle, candidates, terminal lane statuses, and evidence for this trading account are shown below.</p></article>
-    {!selectedAccountId ? <p className="empty">Select a trading account to view its cycle information.</p> : typedRuns.isPending ? <p>Loading research…</p> : latest ? <>
-      <article className="card">
-        <div className="actions"><strong>Cycle status: <span className={latest.state === "DEGRADED" ? "bad" : "good"}>{latest.state}</span></strong><small>Updated {new Date(latest.updated_at).toLocaleString()}</small></div>
-        {latest.state === "RESEARCHING" || latest.state === "QUEUED" ? <p className="muted">Provider discovery and bounded agent review are in progress…</p> : null}
-        {latest.state === "DEGRADED" ? <div><h3>DEGRADED</h3><p>No recommendation was fabricated for unavailable categories: {missingCategories.join(", ") || "agent evidence incomplete"}.</p><ul>{degradedReasons.map(reason => <li key={reason}>{reason}</li>)}</ul></div> : null}
-      </article>
-      <div className="grid">{candidates.map(item => <article className="card" key={item.category}>
-        <p className="muted">{item.category}</p><h2>{item.instrument}</h2><strong className="good">Score {item.score.toFixed(2)}</strong>
-        <dl><dt>Regime</dt><dd>{item.fingerprint.regime}</dd><dt>Trend</dt><dd>{item.fingerprint.trend_score.toFixed(3)}</dd><dt>Volatility</dt><dd>{item.fingerprint.volatility_score.toFixed(3)}</dd><dt>Data quality</dt><dd>{Math.round(item.fingerprint.data_quality * 100)}%</dd><dt>Source</dt><dd>{item.fingerprint.source}</dd></dl>
-        <h3>Evidence</h3><ul>{[...item.evidence, ...item.agent_evidence].map((value, index) => <li key={`${index}-${value}`}>{value}</li>)}</ul>
-
-      </article>)}</div>
-      <TopPairStrategies runId={latest.id} links={(latest.strategy_research as { instrument?: string; state: string; reason?: string }[] | undefined) ?? []} />
-      <div className="actions"><span className="muted">Candidates are selected by the scheduled research cycle and passed to strategy research automatically.</span><button className="btn" disabled={runTyped.isPending} onClick={() => runTyped.mutate()}>Run typed matrix again</button></div>
-    </> : <p className="empty">No persisted research run exists for {selectedAccountName}. Its scheduler will run automatically, or you can run it now.</p>}
-
-    <article className="card"><h2>Market research archive · {selectedAccountName}</h2><p className="muted">Only completed cycles for this trading account are listed. Every artifact has an immutable completion timestamp.</p>{!selectedAccountId ? <p className="empty">Select a trading account to view its research archive.</p> : artifacts.isPending ? <p>Loading this account&apos;s archive…</p> : artifacts.data?.length ? <ul className="record-list">{artifacts.data.map(item => <li key={item.run_id}><strong>{item.state}</strong><span>{item.relative_path}</span><small>Completed timestamp: {new Date(item.completed_at).toLocaleString()} · SHA-256 {item.checksum.slice(0, 12)}…</small></li>)}</ul> : <p className="empty">No archived market-research cycles exist for {selectedAccountName}.</p>}</article>
-  </section>;
+    </article></div> },{ id: "history", label: "Research history", content: <div className="section-stack"><article className="card"><h2>Market research archive · {selectedAccountName}</h2><p className="muted">Only completed cycles for this trading account are listed. Every artifact has an immutable completion timestamp.</p>{!selectedAccountId ? <p className="empty">Select a trading account to view its research archive.</p> : artifacts.isPending ? <p>Loading this account&apos;s archive…</p> : artifacts.data?.length ? <ProgressiveList items={newestFirst(artifacts.data)} label="market research records" scopeKey={selectedAccountId}>{visible => <ul className="record-list">{visible.map(item => <li key={item.run_id}><strong>{item.state}</strong><span>{item.relative_path}</span><small>Completed timestamp: {new Date(item.completed_at).toLocaleString()} · SHA-256 {item.checksum.slice(0, 12)}…</small></li>)}</ul>}</ProgressiveList> : <p className="empty">No archived market-research cycles exist for {selectedAccountName}.</p>}</article></div> },{ id: "data", label: "Historical data", content: <div className="section-stack"><ResearchDataPanel key={selectedAccountId} accountId={selectedAccountId} /></div> }]} /></section>;
 }

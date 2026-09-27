@@ -8,6 +8,10 @@ class StrategyOrigin(StrEnum):
 
 class StrategyFamily(StrEnum):
     TREND = "TREND"
+    MOMENTUM = "MOMENTUM"
+    PULLBACK = "PULLBACK"
+    RANGE = "RANGE"
+    LIQUIDITY_SWEEP = "LIQUIDITY_SWEEP"
     MEAN_REVERSION = "MEAN_REVERSION"
     BREAKOUT = "BREAKOUT"
     LIQUIDITY = "LIQUIDITY"

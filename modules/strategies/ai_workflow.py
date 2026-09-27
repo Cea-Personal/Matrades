@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 from modules.research.ports import ResearchAgentGateway
+from modules.research.quantitative_features import TECHNICAL_FEATURES
+from packages.shared.config import settings
 from packages.strategy_sdk.schema import StrategySpecification
 from packages.strategy_sdk.taxonomy import StrategyOrigin
 
@@ -20,15 +23,81 @@ SUPPORTED_FEATURES = {
     "moving_average",
     "volatility",
     "volume",
-}
+    "prior_high",
+    "prior_low",
+    "slow_average",
+    "trend_efficiency",
+    "trend_direction",
+    "relative_volatility",
+    "news_regime",
+} | TECHNICAL_FEATURES
 SUPPORTED_OPERATORS = {">", ">=", "<", "<=", "=="}
+BASE_CONDITION_VALUES = sorted(
+    SUPPORTED_FEATURES
+    | {"-1", "0", "1", "10", "20", "25", "30", "50", "70", "75", "80", "90", "100"}
+)
+
+
+class InvalidStrategyCondition(ValueError):
+    """An agent rule cannot be evaluated without changing its meaning."""
+
+
+def allowed_condition_values(evidence_pack: dict[str, Any]) -> list[str]:
+    """Offer a small, point-in-time numeric vocabulary from discovery candles."""
+    literals = set(BASE_CONDITION_VALUES)
+    candles = evidence_pack.get("historical_discovery", {}).get("recent_candles", [])
+    if not isinstance(candles, list):
+        return sorted(literals)
+    values: list[dict[str, Decimal]] = []
+    for candle in candles:
+        if not isinstance(candle, dict):
+            continue
+        try:
+            point = {
+                field: Decimal(str(candle[field]))
+                for field in ("open", "high", "low", "close", "volume")
+            }
+        except (InvalidOperation, KeyError, TypeError):
+            continue
+        if all(value.is_finite() for value in point.values()):
+            values.append(point)
+
+    def add_quantiles(numbers: list[Decimal]) -> None:
+        numbers.sort()
+        if numbers:
+            for position in (len(numbers) // 4, len(numbers) // 2, 3 * len(numbers) // 4):
+                literal = format(numbers[position], "f")
+                if len(literal) <= 32:
+                    literals.add(literal)
+
+    for field in ("open", "high", "low", "close", "volume"):
+        add_quantiles([point[field] for point in values])
+    ranges = [point["high"] - point["low"] for point in values]
+    add_quantiles(
+        [values[index]["close"] - values[index - 1]["close"] for index in range(1, len(values))]
+    )
+    add_quantiles(
+        [
+            sum((point["close"] for point in values[max(0, index - 4) : index + 1]), Decimal(0))
+            / min(index + 1, 5)
+            for index in range(len(values))
+        ]
+    )
+    add_quantiles(
+        [
+            sum(ranges[max(0, index - 4) : index + 1], Decimal(0)) / min(index + 1, 5)
+            for index in range(len(ranges))
+        ]
+    )
+    return sorted(literals)
+
 
 CONDITION_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "feature": {"type": "string", "enum": sorted(SUPPORTED_FEATURES)},
         "operator": {"type": "string", "enum": sorted(SUPPORTED_OPERATORS)},
-        "value": {"type": "string"},
+        "value": {"type": "string", "enum": BASE_CONDITION_VALUES},
     },
     "required": ["feature", "operator", "value"],
     "additionalProperties": False,
@@ -40,7 +109,17 @@ STRATEGY_SCHEMA: dict[str, Any] = {
         "name": {"type": "string"},
         "family": {
             "type": "string",
-            "enum": ["TREND", "MEAN_REVERSION", "BREAKOUT", "LIQUIDITY", "EVENT"],
+            "enum": [
+                "TREND",
+                "MOMENTUM",
+                "PULLBACK",
+                "RANGE",
+                "MEAN_REVERSION",
+                "BREAKOUT",
+                "LIQUIDITY",
+                "LIQUIDITY_SWEEP",
+                "EVENT",
+            ],
         },
         "horizon": {"type": "string", "enum": ["INTRADAY", "SWING", "POSITION"]},
         "instruments": {"type": "array", "items": {"type": "string"}, "minItems": 1},
@@ -65,7 +144,6 @@ STRATEGY_SCHEMA: dict[str, Any] = {
         },
         "sessions": {"type": "array", "items": {"type": "string"}},
         "event_rules": {"type": "array", "items": {"type": "string"}},
-        "risk_per_trade": {"type": "string"},
         "trade_rules": {
             "type": "object",
             "properties": {
@@ -110,7 +188,6 @@ STRATEGY_SCHEMA: dict[str, Any] = {
         "position_management",
         "sessions",
         "event_rules",
-        "risk_per_trade",
         "trade_rules",
         "parameters",
     ],
@@ -203,6 +280,12 @@ class StrategyGenerationWorkflow:
             raise ValueError(
                 "typed strategy evidence requires listing and specification references"
             )
+        condition_values = allowed_condition_values(evidence_pack)
+        output_schema = deepcopy(STRATEGY_GENERATION_SCHEMA)
+        hypothesis_schema = output_schema["properties"]["hypotheses"]["items"]
+        strategy_schema = hypothesis_schema["properties"]["strategy"]
+        condition_schema = strategy_schema["properties"]["entry"]["items"]
+        condition_schema["properties"]["value"]["enum"] = condition_values
         role = (
             "strategy_researcher" if origin == StrategyOrigin.AI_GENERATED else "strategy_assistant"
         )
@@ -219,8 +302,26 @@ class StrategyGenerationWorkflow:
                     "complete_deterministic_rules": True,
                     "supported_features": sorted(SUPPORTED_FEATURES),
                     "supported_operators": sorted(SUPPORTED_OPERATORS),
+                    "regime_rules": (
+                        "Use TRENDING/RANGING, BULLISH/BEARISH/FLAT, "
+                        "HIGH_VOLATILITY/LOW_VOLATILITY/NORMAL_VOLATILITY. "
+                        "News tags PRE_NEWS/POST_NEWS/NORMAL_NEWS require calendar coverage; "
+                        "news_regime is -1/1/0 respectively, -2 when coverage is unavailable. "
+                        "Separate alternatives in the array; combine required dimensions "
+                        "with colons (TRENDING:BULLISH:HIGH_VOLATILITY). "
+                        "Unsupported labels cannot create entries. Profiles use discovery only."
+                    ),
+                    "allowed_condition_values": condition_values,
                     "human_approval_required": True,
                     "do_not_select_winner": True,
+                    "simulation_risk_percent": str(
+                        settings.strategy_research_simulation_risk_percent
+                    ),
+                    "simulation_risk_only": (
+                        "The application supplies one numeric assumption for comparable "
+                        "backtests. Do not choose risk_per_trade or interpret it as live "
+                        "sizing, policy approval, or execution authority."
+                    ),
                     "price_protection": (
                         "Provide trade_rules for each hypothesis: LONG or SHORT, NEXT_BAR_OPEN, "
                         "stop distance as a multiple of the mean high-low range of the last "
@@ -238,14 +339,14 @@ class StrategyGenerationWorkflow:
                     ),
                 },
             },
-            STRATEGY_GENERATION_SCHEMA,
+            output_schema,
         )
         raw_hypotheses = response.get("hypotheses")
         if not isinstance(raw_hypotheses, list) or len(raw_hypotheses) != 3:
             raise ValueError("strategy agent must return exactly three hypotheses")
         hypotheses: list[StrategyHypothesis] = []
         seen_ids: set[str] = set()
-        for raw in raw_hypotheses:
+        for hypothesis_index, raw in enumerate(raw_hypotheses):
             if not isinstance(raw, dict) or not isinstance(raw.get("strategy"), dict):
                 raise ValueError("strategy agent returned an invalid hypothesis")
             identifier = str(raw.get("hypothesis_id") or "").strip()
@@ -260,37 +361,40 @@ class StrategyGenerationWorkflow:
                 {
                     **raw["strategy"],
                     **typed_fields,
+                    "risk_per_trade": settings.strategy_research_simulation_risk_percent,
                     "origin": origin.value,
-                    "evaluator_version": "strategy-evaluator-v1",
+                    "evaluator_version": "strategy-evaluator-v2",
                 }
             )
             if specification.instruments != [instrument]:
                 raise ValueError("strategy hypothesis must use only the approved instrument")
             if specification.trade_rules is None:
                 raise ValueError("strategy hypothesis requires explicit price protection rules")
-            conditions = [
-                *specification.entry,
-                *specification.confirmations,
-                *specification.filters,
-                *specification.exit,
-                *specification.invalidation,
-                specification.stop_loss,
-                *specification.take_profit,
-            ]
-            if any(
-                item.feature not in SUPPORTED_FEATURES or item.operator not in SUPPORTED_OPERATORS
-                for item in conditions
-            ):
-                raise ValueError("strategy hypothesis uses an unsupported evaluator rule")
-            for condition in conditions:
-                if str(condition.value) in SUPPORTED_FEATURES:
-                    continue
-                try:
-                    finite = Decimal(str(condition.value)).is_finite()
-                except InvalidOperation:
-                    finite = False
-                if not finite:
-                    raise ValueError("strategy rule must compare a feature or finite number")
+            groups = {
+                "entry": specification.entry,
+                "confirmations": specification.confirmations,
+                "filters": specification.filters,
+                "exit": specification.exit,
+                "invalidation": specification.invalidation,
+                "stop_loss": [specification.stop_loss],
+                "take_profit": specification.take_profit,
+            }
+            for group, conditions in groups.items():
+                for index, condition in enumerate(conditions):
+                    if (
+                        condition.feature not in SUPPORTED_FEATURES
+                        or condition.operator not in SUPPORTED_OPERATORS
+                    ):
+                        raise InvalidStrategyCondition(
+                            f"hypothesis {hypothesis_index + 1} {group}[{index}] "
+                            "uses an unsupported evaluator rule"
+                        )
+                    value = str(condition.value)
+                    if value not in condition_values:
+                        raise InvalidStrategyCondition(
+                            f"hypothesis {hypothesis_index + 1} {group}[{index}] "
+                            "uses an unsupported condition value"
+                        )
             hypotheses.append(
                 StrategyHypothesis(
                     hypothesis_id=identifier,

@@ -5,14 +5,19 @@ from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
+from fastapi import HTTPException
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from apps.api.app.routes.strategies import DraftInput, create_draft, list_strategies
 from apps.worker.app.tasks import strategies as tasks
 from modules.backtesting.engine import BacktestCandle
 from modules.connections.models import ConnectionProvider
+from modules.identity.authorization import Actor, Role
 from modules.strategies import research_pipeline
 from packages.shared.persistence import Base
 from packages.shared.store import ResourceStore
+from packages.strategy_sdk.schema import StrategySpecification
 from tests.unit.test_strategy_trade_setup import strategy
 
 
@@ -117,16 +122,201 @@ async def test_each_pair_is_pinned_once_and_one_missing_provider_does_not_block_
     assert await tasks._queue_top_pair_strategies(run_id) == first
 
 
+async def test_verified_binding_launches_strategy_agent_for_ready_selection(database, monkeypatch):
+    owner, run_id, selections = await seed(database)
+    connection_id = uuid4()
+    async with database() as session:
+        store = ResourceStore(session)
+        selection = await store.get("market_selection", selections[0].id, owner)
+        binding = await store.create(
+            "provider_binding",
+            owner,
+            {
+                "account_id": selection.data["account_id"],
+                "lane": selection.data["lane"],
+                "capability": "DISCOVERY",
+                "authority_purpose": "DISCOVERY",
+                "connection_id": str(connection_id),
+                "verification_status": "VERIFIED",
+            },
+        )
+        await store.update(
+            selection,
+            {**selection.data, "connection_binding_id": str(binding.id)},
+        )
+
+    async def resolve(*args):
+        return SimpleNamespace(
+            id=connection_id,
+            profile=SimpleNamespace(provider=ConnectionProvider.TWELVE_DATA),
+        )
+
+    async def find(*args):
+        return None
+
+    monkeypatch.setattr(research_pipeline, "resolve_connection", resolve)
+    monkeypatch.setattr(research_pipeline, "find_connection", find)
+    sent = []
+    monkeypatch.setattr(tasks.generate_strategy_draft, "delay", sent.append)
+
+    queued = await tasks._queue_top_pair_strategies(run_id)
+
+    assert len(queued) == 1
+    assert sent == queued
+    async with database() as session:
+        store = ResourceStore(session)
+        market_run = await store.get("research_run", run_id, owner)
+        assert market_run.data["strategy_research"][0]["state"] == "QUEUED"
+        strategy_run = await store.get("strategy_research_run", UUID(queued[0]), owner)
+        assert strategy_run.data["market_selection_id"] == str(selections[0].id)
+
+
+async def test_latest_context_shows_all_current_pairs_and_rejects_older_selection(
+    database, monkeypatch
+):
+    owner, old_run_id, old_selections = await seed(database)
+
+    async def find(*args):
+        return SimpleNamespace(id=uuid4())
+
+    monkeypatch.setattr(research_pipeline, "find_connection", find)
+    monkeypatch.setattr("apps.api.app.routes.strategies._dispatch_generation", lambda *_: None)
+    actor = Actor(uuid4(), owner, Role.OWNER)
+    async with database() as session:
+        store = ResourceStore(session)
+        new_run = await store.create(
+            "research_run",
+            owner,
+            {"account_id": old_selections[0].data["account_id"]},
+            state="COMPLETED",
+        )
+        current = []
+        for prior in old_selections:
+            current.append(
+                await store.create(
+                    "market_selection",
+                    owner,
+                    {**prior.data, "research_run_id": str(new_run.id)},
+                    state="ACTIVE_MARKET_ANALYSIS",
+                )
+            )
+        old = await store.get("market_selection", old_selections[0].id, owner)
+        await store.update(old, {**old.data, "touched": True})
+        context = await research_pipeline.latest_strategy_context(session, owner)
+        assert context["market_research_run_id"] == str(new_run.id)
+        assert {item["instrument"] for item in context["selections"]} == {"EUR/USD", "BTC-USD"}
+        assert all(item["ready"] for item in context["selections"])
+        with pytest.raises(HTTPException) as rejected:
+            await create_draft(
+                DraftInput(origin="AI_GENERATED", market_selection_id=old.id), actor, session
+            )
+        assert rejected.value.status_code == 409
+        draft = await create_draft(
+            DraftInput(origin="AI_GENERATED", market_selection_id=current[0].id), actor, session
+        )
+        assert draft["research_basis"]["market_selection_id"] == str(current[0].id)
+        assert draft["research_basis"]["market_research_run_id"] != str(old_run_id)
+
+
+async def test_degraded_draft_returns_saved_job_evidence(database):
+    owner, market_run_id, _ = await seed(database)
+    actor = Actor(uuid4(), owner, Role.VIEWER)
+    async with database() as session:
+        store = ResourceStore(session)
+        draft = await store.create(
+            "strategy_draft",
+            owner,
+            {
+                "research_basis": {
+                    "market_research_run_id": str(market_run_id),
+                    "instrument": "EUR/USD",
+                }
+            },
+            state="DEGRADED",
+        )
+        run = await store.create(
+            "strategy_research_run",
+            owner,
+            {
+                "draft_id": str(draft.id),
+                "evidence_pack": {"instrument": "EUR/USD"},
+                "failure": "TimeoutError",
+            },
+            state="DEGRADED",
+        )
+        await store.update(draft, {**draft.data, "research_run_id": str(run.id)})
+        result = await list_strategies(actor, session, market_run_id)
+        assert len(result) == 1
+        assert result[0]["evidence_pack"]["instrument"] == "EUR/USD"
+        assert result[0]["failure"] == "TimeoutError"
+
+
+async def test_validation_failure_records_field_without_echoing_agent_input(database):
+    owner, _, _ = await seed(database)
+    async with database() as session:
+        store = ResourceStore(session)
+        draft = await store.create("strategy_draft", owner, {}, state="RESEARCHING")
+        run = await store.create(
+            "strategy_research_run", owner, {"draft_id": str(draft.id)}, state="RESEARCHING"
+        )
+    specification = strategy("LONG").model_dump(mode="json")
+    specification["risk_per_trade"] = "private agent prose"
+    with pytest.raises(ValidationError) as failure:
+        StrategySpecification.model_validate(specification)
+    await tasks._mark_strategy_research_failed(run.id, failure.value)
+    async with database() as session:
+        store = ResourceStore(session)
+        failed = await store.get("strategy_research_run", run.id, owner)
+        degraded_draft = await store.get("strategy_draft", draft.id, owner)
+        assert failed.state == "DEGRADED"
+        assert failed.data["failure_detail"] == "risk_per_trade: decimal_parsing"
+        assert degraded_draft.data["failure_detail"] == failed.data["failure_detail"]
+        assert "private agent prose" not in str(failed.data)
+
+
+async def test_new_cycle_keeps_last_completed_basis_visible(database, monkeypatch):
+    owner, completed_run_id, _ = await seed(database)
+
+    async def find(*args):
+        return SimpleNamespace(id=uuid4())
+
+    monkeypatch.setattr(research_pipeline, "find_connection", find)
+    async with database() as session:
+        await ResourceStore(session).create("research_run", owner, {}, state="QUEUED")
+        context = await research_pipeline.latest_strategy_context(session, owner)
+        assert context["market_research_run_id"] == str(completed_run_id)
+        assert context["newer_market_research_state"] == "QUEUED"
+        assert {item["instrument"] for item in context["selections"]} == {"EUR/USD", "BTC-USD"}
+
+
 @pytest.mark.parametrize("profitable", [True, False])
-async def test_top_pair_research_persists_levels_or_no_trade(database, monkeypatch, profitable):
-    owner, run_id, _ = await seed(database)
+@pytest.mark.parametrize("cfd", [False, True])
+async def test_top_pair_research_persists_levels_or_no_trade(
+    database, monkeypatch, profitable, cfd, tmp_path
+):
+    monkeypatch.setattr(tasks.settings, "research_data_root", tmp_path)
+    owner, run_id, selections = await seed(database)
+    if cfd:
+        async with database() as session:
+            store = ResourceStore(session)
+            for prior in selections:
+                item = await store.get("market_selection", prior.id, owner)
+                lane = {**item.data["lane"], "instrument_type": "CFD"}
+                await store.update(
+                    item,
+                    {
+                        **item.data,
+                        "lane": lane,
+                        "candidate": {**item.data["candidate"], "lane": lane},
+                    },
+                )
     connection_id = uuid4()
 
     async def find(*args):
         return SimpleNamespace(id=connection_id)
 
     async def resolve(*args):
-        return SimpleNamespace(id=connection_id)
+        return SimpleNamespace(id=connection_id, profile=SimpleNamespace(provider="COINBASE"))
 
     async def history(connection, instrument, start, end, timeframe, **kwargs):
         return [
@@ -146,6 +336,7 @@ async def test_top_pair_research_persists_levels_or_no_trade(database, monkeypat
             pass
 
         async def invoke(self, role, payload, schema):
+            assert role == "strategy_researcher"
             pack = payload["evidence_pack"]
             assert pack["venue_instrument_id"]
             assert pack["specification_version_id"]
@@ -177,14 +368,25 @@ async def test_top_pair_research_persists_levels_or_no_trade(database, monkeypat
     queued = await tasks._queue_top_pair_strategies(run_id)
     assert len(queued) == 2
     result = await tasks._generate_strategy(UUID(queued[0]))
-    assert result["state"] == ("AWAITING_STRATEGY_APPROVAL" if profitable else "NO_TRADE")
-    if profitable:
-        assert Decimal(result["trade_setup"]["stop_loss"]) < Decimal(result["trade_setup"]["entry"])
-        assert len(result["trade_setup"]["take_profits"]) == 2
+    assert result["state"] == (
+        "AWAITING_STRATEGY_APPROVAL" if profitable or cfd else "NO_QUALIFYING_STRATEGY"
+    )
+    assert "trade_setup" not in result
+    if profitable or cfd:
         assert result["proposed_specification"]["venue_instrument_id"]
     else:
-        assert result["trade_setup"]["entry"] is None
         assert len(result["preliminary_screen"]["results"]) == 3
+    if cfd:
+        assert len(result["hypotheses"]) == 17
+        assert len({h["specification"]["family"] for h in result["hypotheses"]}) == 7
+        assert result["library_candidate_draft_ids"]
+        async with database() as session:
+            store = ResourceStore(session)
+            for candidate_id in result["library_candidate_draft_ids"]:
+                alternative = await store.get("strategy_draft", UUID(candidate_id), owner)
+                assert alternative.state == "AWAITING_STRATEGY_APPROVAL"
+                assert alternative.data["research_basis"]["account_id"]
+                assert "trade_setup" not in alternative.data
     repeated = await tasks._generate_strategy(UUID(queued[0]))
     assert repeated["state"] == result["state"]
 
@@ -203,3 +405,63 @@ def test_completed_market_task_dispatches_strategy_research(monkeypatch):
     monkeypatch.setattr(research.queue_top_pair_strategies, "delay", sent.append)
     assert research.run_research_cycle.run(str(run_id)) == {"state": "COMPLETED"}
     assert sent == [str(run_id)]
+
+
+async def test_failed_backtest_unsticks_version_and_records_failed_gates(database):
+    owner = uuid4()
+    async with database() as session:
+        store = ResourceStore(session)
+        version = await store.create(
+            "strategy_version",
+            owner,
+            {"latest_backtest_state": "QUEUED", "validation_evidence": {"compiler": True}},
+            state="BACKTESTING",
+        )
+        run = await store.create(
+            "strategy_backtest",
+            owner,
+            {"strategy_version_id": str(version.id)},
+            state="QUEUED",
+        )
+        await store.update(
+            version,
+            {**version.data, "latest_backtest_id": str(run.id)},
+            state="BACKTESTING",
+        )
+    await tasks._mark_backtest_failed(run.id, TimeoutError())
+    async with database() as session:
+        store = ResourceStore(session)
+        failed = await store.get("strategy_backtest", run.id, owner)
+        version = await store.get("strategy_version", version.id, owner)
+        assert failed.state == "FAILED"
+        assert version.state == "VALIDATING"
+        assert version.data["latest_backtest_state"] == "FAILED"
+        assert all(
+            version.data["validation_evidence"][gate] is False
+            for gate in ("backtest", "out_of_sample", "walk_forward", "stress", "policy")
+        )
+
+
+async def test_backtest_recovery_dispatches_queued_and_stale_running(database, monkeypatch):
+    owner = uuid4()
+    async with database() as session:
+        store = ResourceStore(session)
+        queued = await store.create("strategy_backtest", owner, {}, state="QUEUED")
+        stale = await store.create(
+            "strategy_backtest",
+            owner,
+            {"started_at": (datetime.now(UTC) - timedelta(minutes=21)).isoformat()},
+            state="RUNNING",
+        )
+        fresh = await store.create(
+            "strategy_backtest",
+            owner,
+            {"started_at": datetime.now(UTC).isoformat()},
+            state="RUNNING",
+        )
+    sent = []
+    monkeypatch.setattr(tasks.run_strategy_backtest, "delay", sent.append)
+    recovered = await tasks._resume_strategy_backtests()
+    assert set(recovered) == {str(queued.id), str(stale.id)}
+    assert set(sent) == set(recovered)
+    assert str(fresh.id) not in recovered

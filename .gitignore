@@ -28,3 +28,4 @@ test-results/
 *.log
 data/blobs/
 data/research_cycles/
+data/quantitative_research/

@@ -5,6 +5,9 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 from uuid import NAMESPACE_URL, uuid5
+from zoneinfo import ZoneInfo
+
+import httpx
 
 from adapters.market_data.coinbase.client import CoinbaseClient
 from adapters.market_data.twelve_data.client import TwelveDataClient
@@ -30,6 +33,17 @@ class ResearchDataUnavailable(RuntimeError):
 
 def _symbols(value: str) -> list[str]:
     return [symbol.strip().upper() for symbol in value.split(",") if symbol.strip()]
+
+
+def _provider_time(value: object, timezone: str = "UTC") -> datetime | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(value, UTC)
+    result = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    if result.tzinfo is None:
+        result = result.replace(tzinfo=ZoneInfo(timezone))
+    return result.astimezone(UTC)
 
 
 class LiveResearchDataProvider:
@@ -63,6 +77,52 @@ class LiveResearchDataProvider:
             else None
         )
         self.twelve_data = TwelveDataClient(api_key) if api_key else None
+        self._twelve_data_retry_delay_seconds = 65
+
+    async def _twelve_data_snapshots(
+        self, symbols: list[str], category: MarketCategory
+    ) -> list[ResearchSnapshot]:
+        """Keep quota failures distinct from an empty market universe.
+
+        Twelve Data's minute quota can be exhausted by a preceding lane in the
+        same cycle. Retry only HTTP 429 symbols after one reset window; never
+        retry invalid symbols or unrelated provider errors.
+        """
+        snapshots: list[ResearchSnapshot] = []
+        failures: list[Exception] = []
+        pending = symbols
+        for attempt in range(2):
+            results = await asyncio.gather(
+                *(self._twelve_data_snapshot(symbol, category) for symbol in pending),
+                return_exceptions=True,
+            )
+            throttled: list[str] = []
+            for symbol, result in zip(pending, results, strict=True):
+                if isinstance(result, ResearchSnapshot):
+                    snapshots.append(result)
+                elif (
+                    isinstance(result, httpx.HTTPStatusError) and result.response.status_code == 429
+                ):
+                    throttled.append(symbol)
+                elif isinstance(result, Exception):
+                    failures.append(result)
+            if throttled and attempt == 0:
+                await asyncio.sleep(self._twelve_data_retry_delay_seconds)
+                pending = throttled
+                continue
+            if throttled and not snapshots:
+                raise ResearchDataUnavailable(
+                    f"Twelve Data HTTP 429 rate limit persisted for "
+                    f"{category.value} after one retry"
+                )
+            break
+        if not snapshots:
+            types = ", ".join(sorted({type(exc).__name__ for exc in failures}))
+            detail = f" ({types})" if types else ""
+            raise ResearchDataUnavailable(
+                f"No fresh {category.value} observations were returned{detail}"
+            )
+        return snapshots
 
     async def gather(self, category: MarketCategory) -> list[ResearchSnapshot]:
         if category == MarketCategory.CRYPTO:
@@ -83,7 +143,7 @@ class LiveResearchDataProvider:
             universe = (
                 self.forex_universe if category == MarketCategory.FOREX else self.metals_universe
             )
-            tasks = [self._twelve_data_snapshot(symbol, category) for symbol in _symbols(universe)]
+            return await self._twelve_data_snapshots(_symbols(universe), category)
         results = await asyncio.gather(*tasks, return_exceptions=True)
         snapshots = [item for item in results if isinstance(item, ResearchSnapshot)]
         if not snapshots:
@@ -123,14 +183,10 @@ class LiveResearchDataProvider:
                     "stock instrument directory is not configured",
                     lane_status=LaneStatus.NOT_CONFIGURED,
                 )
-            snapshots = await asyncio.gather(
-                *[
-                    self._twelve_data_snapshot(symbol, MarketCategory.FOREX)
-                    for symbol in _symbols(self.settings.research_stocks_universe)
-                ],
-                return_exceptions=True,
+            snapshots = await self._twelve_data_snapshots(
+                _symbols(self.settings.research_stocks_universe),
+                MarketCategory.FOREX,
             )
-            snapshots = [item for item in snapshots if isinstance(item, ResearchSnapshot)]
         else:
             snapshots = await self.gather(category)
         typed: list[TypedResearchSnapshot] = []
@@ -188,6 +244,9 @@ class LiveResearchDataProvider:
                     source=snapshot.source,
                     source_version=snapshot.source_version,
                     source_cut_id=snapshot.source_version,
+                    quote_observed_at=snapshot.quote_observed_at,
+                    candle_observed_at=snapshot.candle_observed_at,
+                    spread_verified=snapshot.spread_verified,
                     macro_score=snapshot.macro_score,
                     sentiment_score=snapshot.sentiment_score,
                     event_risk=snapshot.event_risk,
@@ -209,9 +268,8 @@ class LiveResearchDataProvider:
             raise ResearchDataUnavailable(f"Insufficient candles for {symbol}")
         bid = float(quote.get("bid") or quote.get("close") or closes[-1])
         ask = float(quote.get("ask") or quote.get("close") or closes[-1])
-        if ask < bid:
-            bid, ask = ask, bid
         observed_at = datetime.now(UTC)
+        timezone = (series.get("meta") or {}).get("exchange_timezone") or "UTC"
         return ResearchSnapshot(
             instrument=symbol,
             category=category,
@@ -222,6 +280,9 @@ class LiveResearchDataProvider:
             observed_at=observed_at,
             source="twelve_data",
             source_version=f"time_series:1h:{len(values)}",
+            quote_observed_at=_provider_time(quote.get("timestamp")),
+            candle_observed_at=_provider_time(values[-1].get("datetime"), timezone),
+            spread_verified=bool(quote.get("bid") and quote.get("ask")),
         )
 
     async def _coinbase_snapshot(self, symbol: str) -> ResearchSnapshot:
@@ -243,6 +304,9 @@ class LiveResearchDataProvider:
             observed_at=datetime.now(UTC),
             source="coinbase_exchange",
             source_version=f"candles:3600:{len(ordered)}",
+            quote_observed_at=_provider_time(ticker.get("time")),
+            candle_observed_at=_provider_time(ordered[-1][0]),
+            spread_verified=bool(ticker.get("bid") and ticker.get("ask")),
         )
 
     async def close(self) -> None:

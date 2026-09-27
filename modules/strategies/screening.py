@@ -23,6 +23,8 @@ class HypothesisScreenResult(BaseModel):
     net_profit: Decimal
     passed_gates: int
     gates: dict[str, bool]
+    family: str
+    regime_performance: dict = Field(default_factory=dict)
 
 
 class PreliminaryScreen(BaseModel):
@@ -36,10 +38,14 @@ def screen_hypotheses(
     hypotheses: list[StrategyHypothesis],
     holdout: list[BacktestCandle],
     configuration: BacktestConfiguration,
+    *,
+    calendar: list[dict] | None = None,
 ) -> PreliminaryScreen:
     results: list[HypothesisScreenResult] = []
     for hypothesis in sorted(hypotheses, key=lambda item: item.hypothesis_id):
-        backtest = PointInTimeBacktester().run(hypothesis.specification, holdout, configuration)
+        backtest = PointInTimeBacktester().run(
+            hypothesis.specification, holdout, configuration, calendar=calendar
+        )
         net_profit = Decimal(backtest.metrics["net_profit"])
         passed_gates = sum(backtest.gates.values())
         reasons: list[str] = []
@@ -59,6 +65,8 @@ def screen_hypotheses(
                 net_profit=net_profit,
                 passed_gates=passed_gates,
                 gates=backtest.gates,
+                family=hypothesis.specification.family.value,
+                regime_performance=backtest.regime_performance,
             )
         )
     eligible_results = [item for item in results if item.eligible]
@@ -73,3 +81,20 @@ def screen_hypotheses(
         selected_hypothesis_id=selected.hypothesis_id if selected else None,
         results=results,
     )
+
+
+def retain_family_alternatives(
+    hypotheses: list[StrategyHypothesis], screen: PreliminaryScreen
+) -> list[StrategyHypothesis]:
+    """Retain positive CFD family/direction alternatives, not just one global winner."""
+    by_id = {h.hypothesis_id: h for h in hypotheses}
+    chosen = {}
+    for result in sorted(
+        screen.results, key=lambda r: (-r.passed_gates, -r.score, r.hypothesis_id)
+    ):
+        hypothesis = by_id[result.hypothesis_id]
+        spec = hypothesis.specification
+        if not result.eligible or spec.instrument_type != "CFD" or spec.trade_rules is None:
+            continue
+        chosen.setdefault((spec.family.value, spec.trade_rules.direction), hypothesis)
+    return list(chosen.values())

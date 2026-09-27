@@ -29,6 +29,8 @@ test("renders strategy research and validation controls", async ({ page }) => {
   await signInForUi(page);
   await page.goto("/strategies");
   await expect(page.getByRole("heading", { name: "Strategy research & validation" })).toBeVisible();
+  await page.getByText("Manual strategy generation", { exact: true }).click();
   await expect(page.getByRole("heading", { name: "Generate strategy" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Run backtest" })).toBeVisible();
+  await page.getByRole("tab", { name: "Backtest & paper" }).click();
+  await expect(page.getByRole("heading", { name: "Run formal backtest" })).toBeVisible();
 });

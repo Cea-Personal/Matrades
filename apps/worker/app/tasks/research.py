@@ -16,6 +16,7 @@ from adapters.news.forex_factory import DEFAULT_FOREX_FACTORY_FEED, fetch_forex_
 from apps.worker.app.celery_app import celery_app
 from apps.worker.app.tasks.strategies import queue_top_pair_strategies
 from modules.agents.rpc import OwnerScopedAgentGateway, RedisAgentGateway
+from modules.backtesting.basis import ALLOWED_PROVIDERS
 from modules.connections.models import ConnectionProvider, MarketDataCapability, ProviderBinding
 from modules.connections.resolution import find_connection, resolve_connection
 from modules.research.artifacts import ResearchCycleArchive
@@ -45,7 +46,11 @@ def _verified_market_bindings(
 ) -> list[ProviderBinding]:
     """Validate market bindings without treating economic context as a market lane."""
     return [
-        ProviderBinding.model_validate(item.data)
+        # Binding payloads created by the API do not include an `id`. Without
+        # the resource record's ID, Pydantic generates a new UUID on every
+        # read; selections then pin a nonexistent binding and strategy
+        # research is blocked even after a READY market lane.
+        ProviderBinding.model_validate({**item.data, "id": item.id})
         for item in records
         if item.data.get("account_id") == account_id
         and item.data.get("verification_status") == "VERIFIED"
@@ -69,9 +74,7 @@ def _typed_instrument_data(
         "listing": candidate.listing.model_dump(mode="json"),
         "specification": candidate.specification.model_dump(mode="json"),
         "specification_version_id": str(candidate.specification.id),
-        "connection_binding_id": (
-            str(lane_result.binding_id) if lane_result.binding_id else None
-        ),
+        "connection_binding_id": (str(lane_result.binding_id) if lane_result.binding_id else None),
         "source_cut_refs": lane_result.source_cut_refs,
         "freshness": candidate.specification.freshness,
     }
@@ -82,8 +85,7 @@ async def _execute_research_cycle(run_id: UUID) -> dict:
     typed_matrix_version = 1
     configured_lanes: set[str] | None = None
     lane_binding_ids: dict[str, UUID] = {}
-    mt5_lane_keys: set[str] = set()
-    mt5 = None
+    lane_connections = {}
     async with unit_of_work() as session:
         record = await session.get(ResourceRecord, run_id)
         if record is None or record.kind != "research_run":
@@ -110,8 +112,7 @@ async def _execute_research_cycle(run_id: UUID) -> dict:
         custom_news = await find_connection(session, owner_id, ConnectionProvider.NEWS)
         if typed_lanes:
             connections = {
-                item.id: item
-                for item in await ResourceStore(session).list("connection", owner_id)
+                item.id: item for item in await ResourceStore(session).list("connection", owner_id)
             }
             bindings = _verified_market_bindings(
                 await ResourceStore(session).list("provider_binding", owner_id),
@@ -125,25 +126,22 @@ async def _execute_research_cycle(run_id: UUID) -> dict:
                 MarketDataCapability.FUTURES_CHAIN,
             }
             configured_lanes = set()
-            for binding in bindings:
+            for binding in sorted(bindings, key=lambda item: (item.priority, str(item.id))):
                 connection = connections.get(binding.connection_id)
                 if (
                     binding.capability in eligible_capabilities
                     and connection is not None
                     and connection.data.get("health") in {"HEALTHY", "STALE"}
+                    and connection.data.get("provider")
+                    in ALLOWED_PROVIDERS.get(binding.lane.asset_class.value, set())
                 ):
+                    if binding.lane.as_string() in lane_binding_ids:
+                        continue
                     configured_lanes.add(binding.lane.as_string())
                     lane_binding_ids.setdefault(binding.lane.as_string(), binding.id)
-                    if (
-                        connection.data.get("provider") == ConnectionProvider.MT5_BRIDGE.value
-                        and binding.lane.asset_class.value == "METALS"
-                        and binding.lane.instrument_type.value == "CFD"
-                    ):
-                        mt5_lane_keys.add(binding.lane.as_string())
-                        if mt5 is None or mt5.id != binding.connection_id:
-                            mt5 = await resolve_connection(
-                                session, owner_id, binding.connection_id
-                            )
+                    lane_connections[binding.lane.as_string()] = await resolve_connection(
+                        session, owner_id, binding.connection_id
+                    )
 
     enabled = {
         provider_name
@@ -156,13 +154,27 @@ async def _execute_research_cycle(run_id: UUID) -> dict:
     twelve_configuration = twelve.profile.configuration if twelve else {}
     coinbase_configuration = coinbase.profile.configuration if coinbase else {}
     lane_providers = {}
-    if mt5 and mt5.secret and mt5_lane_keys:
-        mt5_provider = Mt5ResearchDataProvider(
-            str(mt5.profile.configuration["bridge_url"]),
-            mt5.secret,
-            UUID(str(record.data["account_id"])),
-        )
-        lane_providers = {lane_key: mt5_provider for lane_key in mt5_lane_keys}
+    for lane_key, resolved in lane_connections.items():
+        if resolved.profile.provider == ConnectionProvider.MT5_BRIDGE:
+            if resolved.secret:
+                lane_providers[lane_key] = Mt5ResearchDataProvider(
+                    str(resolved.profile.configuration["bridge_url"]),
+                    resolved.secret,
+                    UUID(str(record.data["account_id"])),
+                )
+            else:
+                configured_lanes.discard(lane_key)
+        else:
+            configuration = resolved.profile.configuration
+            lane_providers[lane_key] = LiveResearchDataProvider(
+                settings,
+                twelve_data_api_key=resolved.secret
+                if resolved.profile.provider == ConnectionProvider.TWELVE_DATA
+                else None,
+                enabled_providers={resolved.profile.provider},
+                forex_universe=configuration.get("forex_universe"),
+                crypto_universe=configuration.get("crypto_universe"),
+            )
     provider = LiveResearchDataProvider(
         settings,
         twelve_data_api_key=twelve.secret if twelve else None,

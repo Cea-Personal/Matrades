@@ -24,7 +24,7 @@ export function Sidebar() {
         {links.map(([href, label]) => <Link href={href} key={href} aria-current={pathname === href ? "page" : undefined} onClick={() => setOpen(false)}>{label}</Link>)}
         <div className="nav-folder">
           <Link className="nav-folder-title" href="/extras" aria-current={pathname === "/extras" ? "page" : undefined} onClick={() => setOpen(false)}><span aria-hidden="true">⌁</span> Extras</Link>
-          {folders.map(([folder, label]) => <Link className="nav-folder-link" href={{ pathname: "/extras", query: { folder } }} key={folder} onClick={() => setOpen(false)}>{label}</Link>)}
+          <details key={pathname === "/extras" ? "archive" : "workspace"} open={pathname === "/extras"} className="nav-folder-details"><summary>Evidence folders</summary>{folders.map(([folder, label]) => <Link className="nav-folder-link" href={{ pathname: "/extras", query: { folder } }} key={folder} onClick={() => setOpen(false)}>{label}</Link>)}</details>
         </div>
       </nav>
       <SessionMenu />

@@ -115,6 +115,71 @@ async def probe_connection(
             response.raise_for_status()
             capabilities = ["macro.read"]
             fresh = bool(response.json().get("seriess"))
+        elif profile.provider == ConnectionProvider.CFTC:
+            from adapters.market_data.public_research import COT_DATASETS
+
+            report = str(profile.configuration.get("report", "LEGACY"))
+            if report not in COT_DATASETS:
+                raise RuntimeError("configure a supported CFTC report type")
+            response = await http.get(
+                f"https://publicreporting.cftc.gov/resource/{COT_DATASETS[report]}.json",
+                params={"$limit": 1},
+            )
+            response.raise_for_status()
+            fresh = bool(response.json())
+            capabilities = ["CFTC_COT", "OPEN_INTEREST"]
+            writes = False
+        elif profile.provider == ConnectionProvider.DUKASCOPY:
+            response = await http.get(
+                "https://datafeed.dukascopy.com/datafeed/EURUSD/2024/00/02/12h_ticks.bi5"
+            )
+            response.raise_for_status()
+            fresh = bool(response.content)
+            capabilities = ["candles.read", "history.read", "trades", "research.bid_ask"]
+            writes = False
+        elif profile.provider == ConnectionProvider.CCXT:
+            import ccxt.async_support as ccxt
+
+            exchange = getattr(ccxt, str(profile.configuration.get("exchange", "coinbase")))(
+                {"enableRateLimit": True, "timeout": 8000}
+            )
+            try:
+                fresh = bool(await exchange.load_markets())
+                capabilities = [
+                    name
+                    for method, name in (
+                        ("fetchOHLCV", "candles.read"),
+                        ("fetchOrderBook", "ORDER_BOOK"),
+                        ("fetchTicker", "quotes.read"),
+                        ("fetchTrades", "TRADES"),
+                        ("fetchFundingRate", "FUNDING"),
+                        ("fetchOpenInterest", "OPEN_INTEREST"),
+                    )
+                    if exchange.has.get(method)
+                ]
+                capabilities += ["research.public", "instrument_directory.read"]
+                version = ccxt.__version__
+                writes = False
+            finally:
+                await exchange.close()
+        elif profile.provider == ConnectionProvider.ECB:
+            response = await http.get(
+                "https://data-api.ecb.europa.eu/service/data/EXR/D.USD.EUR.SP00.A",
+                params={"format": "csvdata", "lastNObservations": 1},
+            )
+            response.raise_for_status()
+            fresh = "OBS_VALUE" in response.text
+            capabilities = ["macro.read"]
+            writes = False
+        elif profile.provider == ConnectionProvider.YAHOO_FINANCE:
+            response = await http.get(
+                "https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC",
+                params={"range": "5d", "interval": "1d"},
+            )
+            response.raise_for_status()
+            fresh = bool(response.json().get("chart", {}).get("result"))
+            capabilities = ["candles.read", "CORPORATE_ACTIONS", "intermarket.read"]
+            writes = False
         elif profile.provider == ConnectionProvider.SERPAPI:
             response = await http.get(
                 "https://serpapi.com/search.json",
@@ -166,7 +231,7 @@ async def probe_connection(
                 "calendar.read" if profile.provider == ConnectionProvider.CALENDAR else "news.read"
             ]
             fresh = True
-        else:
+        elif profile.provider == ConnectionProvider.MT5_BRIDGE:
             bridge_url = str(profile.configuration["bridge_url"])
             response = await http.get(
                 f"{bridge_url}/health", headers=_mt5_headers(credential_secret or "")
@@ -192,6 +257,8 @@ async def probe_connection(
                         "; this bridge advertises broker-write capability, so review execution "
                         "permissions and every attached EA before enabling it"
                     )
+        else:
+            raise RuntimeError("this provider has no supported connection probe")
         return ConnectionProbe(
             status="HEALTHY" if fresh else "STALE",
             latency_ms=int((time.monotonic() - started) * 1000),

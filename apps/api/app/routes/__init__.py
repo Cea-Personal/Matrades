@@ -11,6 +11,7 @@ from apps.api.app.routes.knowledge import assistant_router as knowledge_assistan
 from apps.api.app.routes.knowledge import router as knowledge_router
 from apps.api.app.routes.operations import router as operations_router
 from apps.api.app.routes.research import router as research_router
+from apps.api.app.routes.research_data import router as research_data_router
 from apps.api.app.routes.research_matrix import router as research_matrix_router
 from apps.api.app.routes.risk import router as risk_router
 from apps.api.app.routes.strategies import router as strategies_router
@@ -26,6 +27,7 @@ api_router.include_router(extras_router)
 api_router.include_router(risk_router)
 api_router.include_router(trade_proposals_router)
 api_router.include_router(research_router)
+api_router.include_router(research_data_router)
 api_router.include_router(research_matrix_router)
 api_router.include_router(trade_management_router)
 api_router.include_router(trade_plans_router)

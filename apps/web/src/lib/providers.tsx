@@ -1,9 +1,9 @@
 "use client";
 
-import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
+import { notifyManager, QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Route } from "next";
 import { usePathname, useRouter } from "next/navigation";
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useState, useSyncExternalStore } from "react";
 
 import { api, API_ROOT } from "@/lib/api";
 
@@ -40,19 +40,18 @@ function RealtimeInvalidator() {
 
 function QueryFailureBanner() {
   const queryClient = useQueryClient();
-  const [message, setMessage] = useState("");
-  useEffect(
-    () =>
-      queryClient.getQueryCache().subscribe(() => {
-        const failure = queryClient
-          .getQueryCache()
-          .getAll()
-          .find((query) => query.state.status === "error");
-        const error = failure?.state.error;
-        setMessage(error instanceof Error ? error.message : error ? "Live data is unavailable" : "");
-      }),
+  const subscribe = useCallback(
+    (onChange: () => void) => queryClient.getQueryCache().subscribe(notifyManager.batchCalls(onChange)),
     [queryClient],
   );
+  const snapshot = useCallback(() => {
+    const failure = queryClient.getQueryCache().getAll().find(query => query.state.status === "error");
+    const error = failure?.state.error;
+    return error instanceof Error ? error.message : error ? "Live data is unavailable" : "";
+  }, [queryClient]);
+  // Query cache events can occur during another view's render. Batched store
+  // notifications avoid a cross-component state update while retaining errors.
+  const message = useSyncExternalStore(subscribe, snapshot, () => "");
   return message ? <div className="global-error" role="alert">Live data degraded: {message}</div> : null;
 }
 

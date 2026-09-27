@@ -4,7 +4,14 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 
 from modules.backtesting.engine import BacktestCandle
-from modules.strategies.signals import candle_features, entry_matches, protection_levels
+from modules.research.sessions import weekend_close
+from modules.strategies.pair_profile import (
+    news_features,
+    regime_from_features,
+    regime_key,
+    regime_matches,
+)
+from modules.strategies.signals import entry_matches, protection_levels, strategy_features
 from packages.strategy_sdk.schema import StrategySpecification
 
 
@@ -15,6 +22,7 @@ def build_strategy_setup(
     now: datetime,
     timeframe_seconds: int,
     tick_size: Decimal | None = None,
+    calendar: list[dict] | None = None,
 ) -> dict:
     result = {
         "status": "WAIT",
@@ -23,6 +31,7 @@ def build_strategy_setup(
         "stop_loss": None,
         "take_profits": [],
         "risk_per_trade_percent": str(strategy.risk_per_trade),
+        "risk_basis": "RESEARCH_SIMULATION_ONLY",
         "entry_conditions": [item.model_dump(mode="json") for item in strategy.entry],
         "invalidation": [item.model_dump(mode="json") for item in strategy.invalidation],
         "position_management": strategy.model_dump(mode="json")["position_management"],
@@ -32,6 +41,12 @@ def build_strategy_setup(
     }
     if strategy.trade_rules is None or len(candles) < 2:
         return {**result, "reason": "Price rules or candle evidence are unavailable"}
+    if weekend_close(strategy.asset_class, now):
+        return {
+            **result,
+            "status": "MARKET_CLOSED",
+            "reason": "Market session is closed; refresh prices after reopening before entry",
+        }
     latest = candles[-1]
     expires_at = latest.observed_at + timedelta(seconds=timeframe_seconds * 2)
     result.update(
@@ -44,7 +59,12 @@ def build_strategy_setup(
     )
     if now >= expires_at or latest.observed_at > now:
         return {**result, "status": "STALE", "reason": "Refresh candle evidence before entry"}
-    features = candle_features(candles, len(candles) - 1)
+    features = strategy_features(strategy, candles, len(candles) - 1)
+    features.update(news_features(strategy.instruments[0], now, calendar))
+    regime = regime_from_features(features)
+    result.update({"regime": regime, "regime_key": regime_key(regime)})
+    if not regime_matches(strategy.regimes, features):
+        return {**result, "reason": "Current regime is outside the strategy's validated rules"}
     try:
         stop, targets = protection_levels(
             strategy.trade_rules, latest.close, features["volatility"], tick_size

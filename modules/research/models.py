@@ -37,6 +37,9 @@ class ResearchSnapshot(BaseModel):
     observed_at: AwareDatetime
     source: str
     source_version: str
+    quote_observed_at: AwareDatetime | None = None
+    candle_observed_at: AwareDatetime | None = None
+    spread_verified: bool = False
     macro_score: float | None = Field(default=None, ge=-1, le=1)
     sentiment_score: float | None = Field(default=None, ge=-1, le=1)
     event_risk: float | None = Field(default=None, ge=0, le=1)
@@ -109,6 +112,10 @@ class TypedResearchSnapshot(BaseModel):
     source: str
     source_version: str
     source_cut_id: str
+    quote_observed_at: AwareDatetime | None = None
+    candle_observed_at: AwareDatetime | None = None
+    spread_verified: bool = False
+    timeframe_seconds: int = Field(default=3600, gt=0)
     macro_score: float | None = Field(default=None, ge=-1, le=1)
     sentiment_score: float | None = Field(default=None, ge=-1, le=1)
     event_risk: float | None = Field(default=None, ge=0, le=1)
@@ -125,6 +132,12 @@ class TypedMarketFingerprint(BaseModel):
     volatility_score: float
     liquidity_score: float
     data_quality: float = Field(ge=0, le=1)
+    criteria: dict[str, float | None] = Field(default_factory=dict)
+    limitations: list[str] = Field(default_factory=list)
+    market_session: str = "UNKNOWN"
+    quote_observed_at: AwareDatetime | None = None
+    candle_observed_at: AwareDatetime | None = None
+    session_close_reference: AwareDatetime | None = None
 
 
 class TypedResearchCandidate(BaseModel):

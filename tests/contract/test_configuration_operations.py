@@ -18,6 +18,8 @@ def test_configuration_exposes_forex_factory_as_a_news_source() -> None:
     assert "get" in paths["/api/v1/configuration/accounts/{account_id}/research-schedule"]
     assert "put" in paths["/api/v1/configuration/accounts/{account_id}/research-schedule"]
     assert "delete" in paths["/api/v1/configuration/accounts/{account_id}/research-schedule"]
+    assert "get" in paths["/api/v1/configuration/accounts/{account_id}/strategy-automation"]
+    assert "put" in paths["/api/v1/configuration/accounts/{account_id}/strategy-automation"]
     assert "get" in paths["/api/v1/configuration/accounts/{account_id}/forex-factory-schedule"]
     assert "put" in paths["/api/v1/configuration/accounts/{account_id}/forex-factory-schedule"]
     assert "delete" in paths["/api/v1/configuration/accounts/{account_id}/forex-factory-schedule"]

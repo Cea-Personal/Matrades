@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.api.app.dependencies import current_actor, get_db, require_roles
 from apps.worker.app.tasks.research import run_research_cycle
 from modules.connections.models import (
+    ConnectionProvider,
     MarketDataCapability,
     ProviderAuthorityPurpose,
 )
@@ -232,6 +233,16 @@ async def create_account_provider_binding(
     connection = await store.get("connection", payload.connection_id, actor.owner_id)
     if connection is None or connection.state == "DELETED":
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "connection not found")
+    if connection.data.get("provider") in {
+        ConnectionProvider.DUKASCOPY.value,
+        ConnectionProvider.CCXT.value,
+        ConnectionProvider.YAHOO_FINANCE.value,
+        ConnectionProvider.CFTC.value,
+        ConnectionProvider.ECB.value,
+    } and payload.authority_purpose not in {"HISTORY", "REFERENCE"}:
+        raise HTTPException(
+            422, "public research sources can only bind HISTORY or REFERENCE authority"
+        )
     if payload.binding_scope == "MARKET_RESEARCH":
         active_matrix = next(
             (
@@ -283,14 +294,23 @@ async def verify_account_provider_binding(
     store = ResourceStore(db)
     await _account(store, actor, account_id)
     record = await store.get("provider_binding", binding_id, actor.owner_id)
-    if record is None or record.data.get("account_id") != str(account_id):
+    if (
+        record is None
+        or record.state == "DELETED"
+        or record.data.get("account_id") != str(account_id)
+    ):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "provider binding not found")
     connection = await store.get(
         "connection", UUID(str(record.data["connection_id"])), actor.owner_id
     )
     health = connection.data.get("health") if connection is not None else None
     health = health or (connection.data.get("state") if connection is not None else None)
-    if connection is None or health not in {"HEALTHY", "STALE"}:
+    if (
+        connection is None
+        or connection.state == "DELETED"
+        or not connection.data.get("active", True)
+        or health not in {"HEALTHY", "STALE"}
+    ):
         raise HTTPException(
             status.HTTP_409_CONFLICT, "connection must be healthy before binding verification"
         )

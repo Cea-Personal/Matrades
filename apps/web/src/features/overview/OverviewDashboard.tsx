@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useId, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { ProgressiveList } from "@/components/ProgressiveList";
 import { api, type Resource } from "@/lib/api";
 import { OverviewIcon, type OverviewIconName } from "./OverviewIcon";
 
@@ -95,7 +96,7 @@ export function OverviewDashboard() {
     { label: "Trade Plans", value: operations.data?.trade_plans.length, detail: todayCount(operations.data?.trade_plans), icon: "plan", tone: "blue", href: "/trading", error: operations.isError },
     { label: "Execution commands", value: operations.data?.execution_commands.length, detail: todayCount(operations.data?.execution_commands), icon: "terminal", tone: "red", href: "/operations", error: operations.isError },
   ];
-  const latestRuns = [...(research.data ?? [])].filter(run => run.state !== "DELETED").sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at)).filter((run, index, all) => all.findIndex(other => other.account_id === run.account_id) === index);
+  const latestRuns = [...(research.data ?? [])].filter(run => run.state === "COMPLETED").sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at)).filter((run, index, all) => all.findIndex(other => other.account_id === run.account_id) === index);
   const suggestions = latestRuns.flatMap(run => ((run.lane_results ?? []) as Lane[]).flatMap((lane, index) => {
     if (lane.status !== "READY" || !lane.candidate) return [];
     const candidate = lane.candidate;
@@ -105,16 +106,13 @@ export function OverviewDashboard() {
       const basis = item.research_basis as { market_research_run_id?: string; instrument?: string } | undefined;
       return basis?.market_research_run_id === run.id && basis?.instrument === candidate.listing.symbol;
     }) : undefined;
-    const setup = draft?.trade_setup as { status: string; expires_at?: string } | undefined;
-    const valid = now && setup?.expires_at && Date.parse(setup.expires_at) > now.getTime();
-    const expired = now && setup?.expires_at && Date.parse(setup.expires_at) <= now.getTime();
-    const status = strategies.isError ? "Unavailable" : expired || setup?.status === "STALE" ? "Stale" : setup?.status === "SIGNAL" ? valid ? "Setup found" : "Watch" : setup?.status === "NO_TRADE" ? "No trade" : "Watch";
+    const status = strategies.isError ? "Unavailable" : ["NO_TRADE", "NO_QUALIFYING_STRATEGY"].includes(draft?.state ?? "") ? "No qualifying strategy" : draft?.state === "AWAITING_STRATEGY_APPROVAL" ? "Review proposal" : draft?.state === "DRAFT" ? "Create version" : draft?.state === "SPECIFIED" ? "In validation" : draft?.state === "DEGRADED" ? "Research failed" : "Researching";
     return [{ id: `${run.id}:${index}`, symbol: candidate.listing.symbol, asset: candidate.listing.asset_class ?? candidate.lane?.asset_class ?? "MARKET", score: candidate.score, status }];
-  })).sort((a, b) => b.score - a.score).slice(0, 3);
+  })).sort((a, b) => b.score - a.score).slice(0, 4);
   const recent = [
     ...(research.data ?? []).filter(item => item.state !== "DELETED").map(item => ({ id: item.id, date: item.created_at, title: "Market research", detail: `${((item.lane_results ?? []) as Lane[]).filter(lane => lane.status === "READY").length} pairs selected · ${item.state.toLowerCase().replaceAll("_", " ")}`, icon: "research" as const, tone: "green", href: "/research" as const })),
     ...(strategies.data ?? []).filter(item => item.state !== "DELETED").map(item => ({ id: item.id, date: item.created_at, title: "Strategy research", detail: (item.proposed_specification as { name?: string } | undefined)?.name ?? item.state.toLowerCase().replaceAll("_", " "), icon: "idea" as const, tone: "violet", href: "/strategies" as const })),
-  ].sort((a, b) => Date.parse(b.date) - Date.parse(a.date)).slice(0, 4);
+  ].sort((a, b) => Date.parse(b.date) - Date.parse(a.date));
 
   return <section className="overview">
     <header className="overview-header">
@@ -149,7 +147,7 @@ export function OverviewDashboard() {
       </article>
 
       <article className="overview-panel overview-suggestions" aria-labelledby="suggestions-heading">
-        <div className="panel-heading"><h2 id="suggestions-heading">Top 3 Trade Suggestions <span>(Latest)</span></h2><Link className="panel-arrow" href="/strategies" aria-label="View all trade suggestions"><OverviewIcon name="chevron" /></Link></div>
+        <div className="panel-heading"><h2 id="suggestions-heading">Top 4 Trade Suggestions <span>(Latest)</span></h2><Link className="panel-arrow" href="/strategies" aria-label="View all trade suggestions"><OverviewIcon name="chevron" /></Link></div>
         {research.isError ? <p className="overview-empty">Trade suggestions unavailable.</p> : research.isPending ? <p className="overview-empty">Loading market research…</p> : suggestions.length ? <ul className="suggestion-list">{suggestions.map(item => {
           const asset = item.asset.toUpperCase();
           const tone = asset === "METALS" ? "gold" : asset === "CRYPTOCURRENCY" || asset === "CRYPTO" ? "orange" : "blue";
@@ -162,7 +160,7 @@ export function OverviewDashboard() {
       <article className="overview-panel overview-recent" aria-labelledby="recent-heading">
         <div className="panel-heading"><h2 id="recent-heading">Recent Research</h2><Link href={{ pathname: "/extras", query: { folder: "market-research" } }}>View all</Link></div>
         {research.isError || strategies.isError ? <p className="overview-empty">Some research activity is unavailable.</p> : null}
-        {recent.length ? <ul className="research-list">{recent.map(item => <li key={item.id}><Link href={item.href}><span className={`overview-icon ${item.tone}`}><OverviewIcon name={item.icon} /></span><span className="research-copy"><strong>{item.title}</strong><small title={item.detail}>{item.detail}</small></span><time dateTime={item.date} title={new Date(item.date).toLocaleString()}>{relativeTime(item.date, now)}</time></Link></li>)}</ul> : <div className="overview-empty">{research.isPending || strategies.isPending ? "Loading research activity…" : "Completed and ongoing research will appear here."}</div>}
+        {recent.length ? <ProgressiveList items={recent} label="research activity">{visible => <ul className="research-list">{visible.map(item => <li key={item.id}><Link href={item.href}><span className={`overview-icon ${item.tone}`}><OverviewIcon name={item.icon} /></span><span className="research-copy"><strong>{item.title}</strong><small title={item.detail}>{item.detail}</small></span><time dateTime={item.date} title={new Date(item.date).toLocaleString()}>{relativeTime(item.date, now)}</time></Link></li>)}</ul>}</ProgressiveList> : <div className="overview-empty">{research.isPending || strategies.isPending ? "Loading research activity…" : "Completed and ongoing research will appear here."}</div>}
       </article>
     </div>
   </section>;

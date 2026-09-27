@@ -20,7 +20,7 @@ class Mt5ResearchDataProvider:
 
     async def gather_lane(self, lane: ResearchLaneKey) -> list[TypedResearchSnapshot]:
         if (
-            lane.asset_class is not AssetClass.METALS
+            lane.asset_class not in {AssetClass.METALS, AssetClass.FOREX}
             or lane.instrument_type is not InstrumentType.CFD
         ):
             raise ResearchDataUnavailable(f"MT5 research is not configured for {lane.as_string()}")
@@ -32,13 +32,24 @@ class Mt5ResearchDataProvider:
         results: list[TypedResearchSnapshot] = []
         venue = snapshot.server or snapshot.broker or "MT5"
         for item in snapshot.instruments:
+            text = f"{item.symbol} {item.path} {item.description}".upper()
+            is_metal = any(token in text for token in ("XAU", "XAG", "GOLD", "SILVER"))
+            fiat = {"USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD"}
+            symbol = item.symbol.upper().replace("/", "")
+            is_forex = not is_metal and symbol[:3] in fiat and symbol[3:6] in fiat
+            if (lane.asset_class == AssetClass.METALS and not is_metal) or (
+                lane.asset_class == AssetClass.FOREX and not is_forex
+            ):
+                continue
             if len(item.candles) < 3 or item.trade_mode == 0:
                 continue
             listing_id = uuid5(
                 NAMESPACE_URL,
                 f"matrades:mt5:{self.account_id}:{venue}:{item.symbol}:CFD",
             )
-            underlying_id = uuid5(NAMESPACE_URL, f"matrades:metal:{item.symbol.upper()}")
+            underlying_id = uuid5(
+                NAMESPACE_URL, f"matrades:{lane.asset_class.value}:{item.symbol.upper()}"
+            )
             terms_key = ":".join(
                 str(value)
                 for value in (
@@ -59,7 +70,7 @@ class Mt5ResearchDataProvider:
                 venue=venue,
                 provider="mt5_bridge",
                 symbol=item.symbol,
-                asset_class=AssetClass.METALS,
+                asset_class=lane.asset_class,
                 instrument_type=InstrumentType.CFD,
                 executable=True,
                 aliases={item.symbol, item.symbol.upper()},
@@ -94,7 +105,10 @@ class Mt5ResearchDataProvider:
                 TypedResearchSnapshot(
                     listing=listing,
                     specification=specification,
-                    closes=[float(candle.close) for candle in item.candles],
+                    closes=[
+                        float(candle.close)
+                        for candle in sorted(item.candles, key=lambda candle: candle.observed_at)
+                    ],
                     bid=float(item.bid),
                     ask=float(item.ask),
                     volume=float(item.candles[-1].tick_volume),
@@ -102,10 +116,24 @@ class Mt5ResearchDataProvider:
                     source="mt5_bridge",
                     source_version=f"{snapshot.timeframe}:{len(item.candles)}:{snapshot.sequence}",
                     source_cut_id=source_cut,
+                    quote_observed_at=snapshot.observed_at,
+                    spread_verified=True,
+                    candle_observed_at=max(candle.observed_at for candle in item.candles),
+                    timeframe_seconds={
+                        "M1": 60,
+                        "M5": 300,
+                        "M15": 900,
+                        "M30": 1800,
+                        "H1": 3600,
+                        "H4": 14400,
+                        "D1": 86400,
+                    }.get(snapshot.timeframe, 3600),
                 )
             )
         if not results:
-            raise ResearchDataUnavailable("MT5 published no tradable metal CFDs with candles")
+            raise ResearchDataUnavailable(
+                f"MT5 published no tradable {lane.asset_class.value} CFDs with candles"
+            )
         return results
 
     async def close(self) -> None:

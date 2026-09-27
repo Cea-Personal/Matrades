@@ -1,11 +1,31 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from decimal import Decimal
 
 import pytest
 
-from modules.strategies.ai_workflow import StrategyGenerationWorkflow
+from modules.strategies.ai_workflow import (
+    STRATEGY_GENERATION_SCHEMA,
+    InvalidStrategyCondition,
+    StrategyGenerationWorkflow,
+    allowed_condition_values,
+)
+from packages.shared.config import settings
 from packages.strategy_sdk.taxonomy import StrategyOrigin
+
+
+def test_generation_schema_requires_all_declared_object_fields() -> None:
+    def check(schema: dict) -> None:
+        if schema.get("type") == "object":
+            properties = schema.get("properties", {})
+            assert set(schema.get("required", [])) == set(properties)
+            for child in properties.values():
+                check(child)
+        if schema.get("type") == "array":
+            check(schema["items"])
+
+    check(STRATEGY_GENERATION_SCHEMA)
 
 
 def strategy(name: str) -> dict:
@@ -72,11 +92,13 @@ class FixtureStrategyAgents:
     def __init__(self, *, invalid_reference: bool = False) -> None:
         self.invoked: list[str] = []
         self.payload: dict = {}
+        self.output_schema: dict = {}
         self.invalid_reference = invalid_reference
 
     async def invoke(self, logical_id: str, payload: dict, output_schema: dict) -> dict:
         self.invoked.append(logical_id)
         self.payload = payload
+        self.output_schema = output_schema
         assert payload["origin"] in {"AI_GENERATED", "AI_ASSISTED"}
         assert output_schema["properties"]["hypotheses"]["minItems"] == 3
         hypotheses = []
@@ -153,6 +175,72 @@ async def test_generation_rejects_instrument_drift() -> None:
 
     agents.invoke = drift  # type: ignore[method-assign]
     with pytest.raises(ValueError, match="approved instrument"):
+        await StrategyGenerationWorkflow(agents).generate_hypotheses(
+            StrategyOrigin.AI_GENERATED, evidence_pack()
+        )
+
+
+async def test_agent_risk_prose_cannot_break_research_sizing(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "strategy_research_simulation_risk_percent", Decimal("0.25"))
+    agents = FixtureStrategyAgents()
+    original = agents.invoke
+
+    async def prose(logical_id: str, payload: dict, output_schema: dict) -> dict:
+        hypothesis_schema = output_schema["properties"]["hypotheses"]["items"]
+        strategy_schema = hypothesis_schema["properties"]["strategy"]
+        assert "risk_per_trade" not in strategy_schema["required"]
+        assert "risk_per_trade" not in strategy_schema["properties"]
+        response = deepcopy(await original(logical_id, payload, output_schema))
+        response["hypotheses"][0]["strategy"]["risk_per_trade"] = (
+            "Research only; no live sizing authority"
+        )
+        response["hypotheses"][1]["strategy"].pop("risk_per_trade")
+        response["hypotheses"][2]["strategy"]["risk_per_trade"] = "99"
+        return response
+
+    agents.invoke = prose  # type: ignore[method-assign]
+    hypotheses = await StrategyGenerationWorkflow(agents).generate_hypotheses(
+        StrategyOrigin.AI_GENERATED, evidence_pack()
+    )
+    assert [item.specification.risk_per_trade for item in hypotheses] == [
+        Decimal("0.25"), Decimal("0.25"), Decimal("0.25")
+    ]
+
+
+async def test_discovery_values_constrain_every_strategy_condition() -> None:
+    pack = evidence_pack()
+    pack["historical_discovery"]["recent_candles"] = [
+        {"open": "100", "high": "103", "low": "99", "close": "102", "volume": "50"},
+        {"open": "102", "high": "105", "low": "101", "close": "104", "volume": "70"},
+    ]
+    assert "104" in allowed_condition_values(pack)
+    assert "4" in allowed_condition_values(pack)
+    assert "moving_average(20)" not in allowed_condition_values(pack)
+    agents = FixtureStrategyAgents()
+    await StrategyGenerationWorkflow(agents).generate_hypotheses(
+        StrategyOrigin.AI_GENERATED, pack
+    )
+    hypothesis_schema = agents.output_schema["properties"]["hypotheses"]["items"]
+    strategy_schema = hypothesis_schema["properties"]["strategy"]
+    entry_values = strategy_schema["properties"]["entry"]["items"]["properties"]["value"]["enum"]
+    stop_values = strategy_schema["properties"]["stop_loss"]["properties"]["value"]["enum"]
+    assert entry_values == stop_values == allowed_condition_values(pack)
+
+
+async def test_generation_rejects_unsupported_expression_without_reinterpreting_it() -> None:
+    agents = FixtureStrategyAgents()
+    original = agents.invoke
+
+    async def unsupported(logical_id: str, payload: dict, output_schema: dict) -> dict:
+        response = deepcopy(await original(logical_id, payload, output_schema))
+        response["hypotheses"][0]["strategy"]["entry"][0]["value"] = "moving_average(20)"
+        return response
+
+    agents.invoke = unsupported  # type: ignore[method-assign]
+    with pytest.raises(
+        InvalidStrategyCondition,
+        match=r"hypothesis 1 entry\[0\] uses an unsupported condition value",
+    ):
         await StrategyGenerationWorkflow(agents).generate_hypotheses(
             StrategyOrigin.AI_GENERATED, evidence_pack()
         )

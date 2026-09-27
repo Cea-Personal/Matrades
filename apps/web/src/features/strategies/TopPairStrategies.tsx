@@ -29,19 +29,19 @@ export function TradeSetupSummary({ setup }: { setup: StrategyTradeSetup }) {
   const expired = Boolean(setup.expires_at && Date.parse(setup.expires_at) <= now);
   return <div className="inset form-stack">
     <h4>Trade setup · {expired ? "STALE" : setup.status}</h4>
-    <p>{expired ? "Refresh market research before using these levels." : setup.reason}</p>
+    <p>{expired ? "Waiting for the strategy monitor to receive fresh market data." : setup.reason}</p>
     {setup.entry && !expired ? <>
       <dl>
         <dt>Direction</dt><dd>{setup.direction}</dd>
         <dt>Indicative entry</dt><dd>{setup.entry}</dd>
         <dt>Stop loss</dt><dd>{setup.stop_loss}</dd>
-        <dt>Strategy risk budget</dt><dd>{setup.risk_per_trade_percent}%</dd>
+        <dt>Research simulation risk assumption</dt><dd>{setup.risk_per_trade_percent}%</dd>
         {setup.take_profits?.map((target, index) => <div key={index}>
           <dt>Take profit {index + 1}</dt>
           <dd>{target.price} · {Number(target.reward_risk).toFixed(2)}R · {(Number(target.fraction) * 100).toFixed(1)}%</dd>
         </div>)}
       </dl>
-      <p className="muted">Entry uses the next bar open after the signal. These indicative levels use the latest closed candle; protection is recalculated at the actual fill.</p>
+      <p className="muted">Entry uses the next bar open after the signal. These indicative levels use the latest closed candle; protection is recalculated at the actual fill. The simulation risk assumption is not approved trade sizing.</p>
     </> : null}
     {setup.pending_checks?.length ? <p className="muted">Before entry: {setup.pending_checks.join(" · ")}</p> : null}
     {setup.observed_at ? <small>Price evidence: {new Date(setup.observed_at).toLocaleString()} · Valid until {setup.expires_at ? new Date(setup.expires_at).toLocaleString() : "—"}</small> : null}
@@ -55,19 +55,20 @@ export function TopPairStrategies({ runId, links }: { runId: string; links: Pipe
     refetchInterval: 5000,
   });
   return <article className="card form-stack">
-    <h2>Top-pair strategies & entry levels</h2>
+    <h2>Top-pair strategy research</h2>
     <p className="muted">Each selected pair is researched automatically. Three strategies are compared on withheld history, including stops, profit targets and trading costs.</p>
     {links.filter(item => item.state === "BLOCKED").map((item, index) => <p className="notice" key={index}>{item.instrument}: {item.reason}</p>)}
     {drafts.isError ? <p className="notice">Unable to load strategy research: {drafts.error.message}</p> : null}
     {drafts.data?.length ? <div className="grid">{drafts.data.map(item => {
-      const basis = item.research_basis as { instrument?: string } | undefined;
+      const basis = item.research_basis as { instrument?: string; market_observed_at?: string; historical_provider?: string } | undefined;
       const spec = item.proposed_specification as { name?: string } | undefined;
-      const setup = item.trade_setup as StrategyTradeSetup | undefined;
       return <section className="card form-stack" key={item.id}>
         <h3>{basis?.instrument} · {spec?.name ?? "Strategy research"}</h3>
-        <span className="status">{item.state.replaceAll("_", " ")}</span>
+        <small>Market evidence: {basis?.market_observed_at ? new Date(basis.market_observed_at).toLocaleString() : "—"} · Historical provider: {basis?.historical_provider ?? "—"}</small>
+        <span className="status">{item.state === "NO_TRADE" ? "NO QUALIFYING STRATEGY" : item.state.replaceAll("_", " ")}</span>
+        {item.failure ? <p className="notice">Research failed: {String(item.failure)}{item.failure_detail ? ` · ${String(item.failure_detail)}` : ""}</p> : null}
         {item.rationale ? <p>{String(item.rationale)}</p> : null}
-        {setup ? <TradeSetupSummary setup={setup} /> : <p className="muted">{item.state === "DEGRADED" ? "Research could not complete. Review the data connection and run a new cycle." : "Preparing evidence and comparing strategy hypotheses…"}</p>}
+        <p className="muted">{item.state === "DEGRADED" ? "Research could not complete. Review the data connection and run a new cycle." : ["NO_TRADE", "NO_QUALIFYING_STRATEGY"].includes(item.state) ? "No hypothesis passed the preliminary screen. Review the research evidence before developing another strategy." : item.state === "AWAITING_STRATEGY_APPROVAL" ? "Review the proposed rules, then accept or reject the proposal. Formal validation and paper trading follow." : "Strategy rules and validation progress are available on the strategies page."}</p>
       </section>;
     })}</div> : <p className="muted">Strategy research starts as soon as top-pair selection completes.</p>}
     <Link className="btn" href="/strategies">View strategy evidence & validation</Link>

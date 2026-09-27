@@ -22,6 +22,7 @@ input int    InpRequestTimeoutMs = 5000;
 input int    InpMarketDataPublishSeconds = 60;
 input int    InpResearchCandleCount = 100;
 input int    InpMaxResearchMetalSymbols = 20;
+input string InpResearchForexSymbols = "EURUSD,GBPUSD,USDJPY,AUDUSD,USDCAD";
 
 ulong g_sequence = 0;
 ulong g_market_data_sequence = 0;
@@ -262,20 +263,37 @@ string CandlesJson(string symbol)
    return(result);
   }
 
+bool IsResearchForexSymbol(string symbol)
+  {
+   string pair=SymbolInfoString(symbol,SYMBOL_CURRENCY_BASE)+
+               SymbolInfoString(symbol,SYMBOL_CURRENCY_PROFIT);
+   StringToUpper(pair);
+   string requested=","+InpResearchForexSymbols+",";
+   StringToUpper(requested);
+   StringReplace(requested," ","");
+   return(StringLen(pair)==6 && StringFind(requested,","+pair+",")>=0);
+  }
+
 string MetalInstrumentsJson()
   {
    string result="[";
    int accepted=0;
+   int metals_accepted=0;
+   int forex_accepted=0;
    int total=SymbolsTotal(false);
    int maximum=InpMaxResearchMetalSymbols;
    if(maximum<1)
       maximum=1;
    if(maximum>50)
       maximum=50;
-   for(int index=0;index<total && accepted<maximum;index++)
+   for(int index=0;index<total && accepted<50;index++)
      {
       string symbol=SymbolName(index,false);
-      if(StringLen(symbol)==0 || !IsMetalSymbol(symbol) || !SymbolSelect(symbol,true))
+      bool metal=IsMetalSymbol(symbol);
+      bool forex=IsResearchForexSymbol(symbol);
+      if(StringLen(symbol)==0 || (!metal && !forex) ||
+         (metal && metals_accepted>=maximum) || (forex && forex_accepted>=10) ||
+         !SymbolSelect(symbol,true))
          continue;
       double bid=SymbolInfoDouble(symbol,SYMBOL_BID);
       double ask=SymbolInfoDouble(symbol,SYMBOL_ASK);
@@ -307,6 +325,8 @@ string MetalInstrumentsJson()
       result+=",\"trade_mode\":"+IntegerToString((long)SymbolInfoInteger(symbol,SYMBOL_TRADE_MODE));
       result+=",\"candles\":"+candles+"}";
       accepted++;
+      if(metal) metals_accepted++;
+      else forex_accepted++;
      }
    result+="]";
    return(result);

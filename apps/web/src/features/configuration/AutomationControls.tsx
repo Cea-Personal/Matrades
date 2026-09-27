@@ -116,7 +116,7 @@ export function AutomationControls() {
 
   const activeAccounts = (accounts.data ?? []).filter(item => item.state !== "DELETED");
   return <section className="section-stack">
-    <header><p className="eyebrow">Execution authority</p><h1>Automation controls</h1><p className="muted">Permissions are independent, account-scoped, versioned, and re-read immediately before every broker command. Kill switches are durable and visible.</p></header>
+    <header><p className="eyebrow">Execution authority</p><h2>Automation controls</h2><p className="muted">Permissions are independent, account-scoped, versioned, and re-read immediately before every broker command. Kill switches are durable and visible.</p></header>
     {message ? <p className={execute.isError ? "notice bad" : "notice good"}>{message}</p> : null}
     <article className="card form-stack">
       <h2>Safety stops</h2>

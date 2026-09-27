@@ -90,6 +90,20 @@ def test_wait_confirmation_stale_and_zero_volatility():
         TradeRules(direction="LONG", stop_volatility_multiple=1, take_profit_r_multiples=[2, 1])
 
 
+def test_weekend_evidence_cannot_generate_an_actionable_forex_setup():
+    values = candles()
+    result = build_strategy_setup(
+        strategy(asset_class="FOREX"),
+        values,
+        now=datetime(2026, 9, 26, 11, tzinfo=UTC),
+        timeframe_seconds=3600,
+    )
+    assert result["status"] == "MARKET_CLOSED"
+    assert result["entry"] is None
+    assert result["take_profits"] == []
+    assert result["execution_authorized"] is False
+
+
 @pytest.mark.parametrize("direction", ["LONG", "SHORT"])
 def test_backtest_stop_wins_ambiguous_bar_and_gap_gets_worse_fill(direction):
     values = candles()

@@ -9,6 +9,7 @@ def test_economic_bindings_do_not_enter_typed_market_validation() -> None:
     connection_id = str(uuid4())
     records = [
         SimpleNamespace(
+            id=uuid4(),
             data={
                 "binding_scope": "ECONOMIC_CONTEXT",
                 "account_id": account_id,
@@ -17,9 +18,10 @@ def test_economic_bindings_do_not_enter_typed_market_validation() -> None:
                 "authority_purpose": "REFERENCE",
                 "connection_id": connection_id,
                 "verification_status": "VERIFIED",
-            }
+            },
         ),
         SimpleNamespace(
+            id=uuid4(),
             data={
                 "binding_scope": "MARKET_RESEARCH",
                 "account_id": account_id,
@@ -28,7 +30,7 @@ def test_economic_bindings_do_not_enter_typed_market_validation() -> None:
                 "authority_purpose": "DISCOVERY",
                 "connection_id": connection_id,
                 "verification_status": "VERIFIED",
-            }
+            },
         ),
     ]
 
@@ -37,12 +39,14 @@ def test_economic_bindings_do_not_enter_typed_market_validation() -> None:
     assert len(bindings) == 1
     assert bindings[0].lane.as_string() == "FOREX:CFD"
     assert bindings[0].capability.value == "DISCOVERY"
+    assert bindings[0].id == records[1].id
 
 
 def test_legacy_verified_market_binding_with_a_lane_remains_supported() -> None:
     account_id = str(uuid4())
     records = [
         SimpleNamespace(
+            id=uuid4(),
             data={
                 "account_id": account_id,
                 "lane": {"asset_class": "METALS", "instrument_type": "CFD"},
@@ -50,7 +54,7 @@ def test_legacy_verified_market_binding_with_a_lane_remains_supported() -> None:
                 "authority_purpose": "HISTORY",
                 "connection_id": str(uuid4()),
                 "verification_status": "VERIFIED",
-            }
+            },
         )
     ]
 
@@ -58,3 +62,4 @@ def test_legacy_verified_market_binding_with_a_lane_remains_supported() -> None:
 
     assert len(bindings) == 1
     assert bindings[0].lane.as_string() == "METALS:CFD"
+    assert bindings[0].id == records[0].id

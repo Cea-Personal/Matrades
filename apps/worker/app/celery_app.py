@@ -21,15 +21,34 @@ celery_app.conf.update(
     imports=(
         "apps.worker.app.tasks.operations",
         "apps.worker.app.tasks.research",
+        "apps.worker.app.tasks.research_data",
         "apps.worker.app.tasks.forex_factory",
         "apps.worker.app.tasks.knowledge",
         "apps.worker.app.tasks.strategies",
         "apps.worker.app.tasks.trading",
         "apps.worker.app.tasks.execution",
+        "apps.worker.app.tasks.strategy_monitoring",
+        "apps.worker.app.tasks.strategy_autonomy",
     ),
     beat_schedule={
+        "research-data-import-recovery": {
+            "task": "apps.worker.app.tasks.research_data.recover_imports",
+            "schedule": 60.0,
+        },
+        "strategy-paper-and-live-monitoring": {
+            "task": "apps.worker.app.tasks.strategy_monitoring.schedule_monitoring",
+            "schedule": 60.0,
+        },
         "top-pair-strategy-recovery": {
             "task": "apps.worker.app.tasks.strategies.resume_top_pair_research",
+            "schedule": 60.0,
+        },
+        "strategy-backtest-delivery-recovery": {
+            "task": "apps.worker.app.tasks.strategies.resume_strategy_backtests",
+            "schedule": 60.0,
+        },
+        "owner-authorized-strategy-validation": {
+            "task": "apps.worker.app.tasks.strategy_autonomy.schedule_strategy_autonomy",
             "schedule": 60.0,
         },
         "per-account-autonomous-research": {

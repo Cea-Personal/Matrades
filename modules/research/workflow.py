@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from modules.research.features import fingerprint
+from modules.research.features import IneligibleResearchEvidence, fingerprint, typed_fingerprint
 from modules.research.matrix import aggregate_status
 from modules.research.models import (
     AgentReview,
@@ -13,7 +13,6 @@ from modules.research.models import (
     ResearchCandidate,
     ResearchCycleResult,
     ResearchLaneResult,
-    TypedMarketFingerprint,
     TypedResearchCandidate,
     TypedResearchRun,
     TypedResearchSnapshot,
@@ -91,10 +90,23 @@ def _provider_failure_detail(exc: Exception) -> str | None:
     return str(exc).strip()[:500] or None
 
 
+def _agent_failure_detail(exc: Exception) -> str:
+    """Keep the underlying runtime diagnostic in the typed lane result."""
+    detail = str(exc).strip()
+    return f"{type(exc).__name__}: {detail}"[:500]
+
+
 def _market_research_review_contract(role: str) -> dict[str, Any]:
     """Keep analytical selection separate from later broker execution authority."""
     return {
         "stage": "MARKET_CANDIDATE_RESEARCH",
+        "session_policy": (
+            "Deterministic eligibility gates have already checked timestamp validity. "
+            "A measured fingerprint marked WEEKEND_CLOSED permits bounded last-session "
+            "history for research only. Do not request REASSESS solely because those "
+            "quotes/candles predate the weekend; no actionable entry is permitted until "
+            "the market reopens and fresh evidence is obtained."
+        ),
         "review_role": role,
         "decision_semantics": {
             "PASS": "Evidence is adequate for this candidate to continue research ranking.",
@@ -299,6 +311,18 @@ class AutonomousResearchWorkflow:
                 )
                 continue
             typed = [TypedResearchSnapshot.model_validate(item) for item in snapshots]
+            observed_candidates = [item.listing.symbol for item in typed]
+            source_cut_refs = list(dict.fromkeys(item.source_cut_id for item in typed))
+            measured = {}
+            rejected = []
+            eligible = []
+            for item in typed:
+                try:
+                    measured[item.listing.symbol] = typed_fingerprint(item)
+                    eligible.append(item)
+                except IneligibleResearchEvidence as exc:
+                    rejected.append(f"{item.listing.symbol}:{exc}")
+            typed = eligible
             if not typed:
                 results.append(
                     ResearchLaneResult(
@@ -306,14 +330,16 @@ class AutonomousResearchWorkflow:
                         lane=lane,
                         status=LaneStatus.NO_TRADE,
                         reason_code="NO_ELIGIBLE_CANDIDATE",
+                        exclusions=rejected,
+                        observed_candidates=observed_candidates,
+                        source_cut_refs=source_cut_refs,
                         completed_at=datetime.now(UTC),
                     )
                 )
                 continue
-            observed_candidates = [item.listing.symbol for item in typed]
-            source_cut_refs = list(dict.fromkeys(item.source_cut_id for item in typed))
             reviews: list[AgentReview] = []
-            adjusted_scores = {item.listing.symbol: min(100.0, item.volume) for item in typed}
+            base_scores = {symbol: values[1] for symbol, values in measured.items()}
+            adjusted_scores = dict(base_scores)
             analyst_failed = False
             for role in (*ANALYST_ROLES, ASSET_CLASS_ROLES[lane.asset_class]):
                 try:
@@ -323,6 +349,10 @@ class AutonomousResearchWorkflow:
                             "lane": lane.model_dump(mode="json"),
                             "candidates": [item.model_dump(mode="json") for item in typed],
                             "source_cut_refs": source_cut_refs,
+                            "measured_criteria": {
+                                symbol: values[0].model_dump(mode="json")
+                                for symbol, values in measured.items()
+                            },
                             "review_contract": _market_research_review_contract(role),
                         },
                         AGENT_OUTPUT_SCHEMA,
@@ -345,14 +375,19 @@ class AutonomousResearchWorkflow:
                     for symbol, adjustment in score_adjustments.items():
                         if symbol in adjusted_scores:
                             adjusted_scores[symbol] = max(
-                                0.0, min(100.0, adjusted_scores[symbol] + adjustment)
+                                max(0.0, base_scores[symbol] - 15.0),
+                                min(
+                                    100.0,
+                                    base_scores[symbol] + 15.0,
+                                    adjusted_scores[symbol] + adjustment,
+                                ),
                             )
                 except Exception as exc:
                     reviews.append(
                         AgentReview(
                             logical_id=role,
                             status="UNAVAILABLE",
-                            evidence=[f"Agent invocation failed: {type(exc).__name__}"],
+                            evidence=[f"Agent invocation failed: {_agent_failure_detail(exc)}"],
                         )
                     )
                     results.append(
@@ -361,6 +396,7 @@ class AutonomousResearchWorkflow:
                             lane=lane,
                             status=LaneStatus.UNAVAILABLE,
                             reason_code=f"AGENT_ERROR:{role}:{type(exc).__name__}",
+                            failure_detail=_agent_failure_detail(exc),
                             exclusions=[f"agent={role}"],
                             source_cut_refs=source_cut_refs,
                             observed_candidates=observed_candidates,
@@ -379,9 +415,7 @@ class AutonomousResearchWorkflow:
                             status=LaneStatus.NO_TRADE,
                             reason_code="ANALYST_REASSESS",
                             exclusions=[
-                                review.logical_id
-                                for review in reviews
-                                if review.status != "PASS"
+                                review.logical_id for review in reviews if review.status != "PASS"
                             ],
                             source_cut_refs=source_cut_refs,
                             observed_candidates=observed_candidates,
@@ -401,6 +435,10 @@ class AutonomousResearchWorkflow:
                         "lane": lane.model_dump(mode="json"),
                         "candidates": [item.model_dump(mode="json") for item in ranked_snapshots],
                         "source_cut_refs": source_cut_refs,
+                        "measured_criteria": {
+                            symbol: values[0].model_dump(mode="json")
+                            for symbol, values in measured.items()
+                        },
                         "review_contract": _market_research_review_contract("critic"),
                     },
                     AGENT_OUTPUT_SCHEMA,
@@ -430,6 +468,20 @@ class AutonomousResearchWorkflow:
                         )
                     )
                     continue
+                for symbol, adjustment in _bounded_adjustments(response).items():
+                    if symbol in adjusted_scores:
+                        adjusted_scores[symbol] = max(
+                            max(0.0, base_scores[symbol] - 15.0),
+                            min(
+                                100.0,
+                                base_scores[symbol] + 15.0,
+                                adjusted_scores[symbol] + adjustment,
+                            ),
+                        )
+                ranked_snapshots = sorted(
+                    typed,
+                    key=lambda item: (-adjusted_scores[item.listing.symbol], item.listing.symbol),
+                )
             except Exception as exc:
                 reviews.append(
                     AgentReview(
@@ -453,18 +505,7 @@ class AutonomousResearchWorkflow:
                 continue
             candidates: list[TypedResearchCandidate] = []
             for rank, snapshot in enumerate(ranked_snapshots, start=1):
-                fingerprint = TypedMarketFingerprint(
-                    listing_id=snapshot.listing.id,
-                    asset_class=lane.asset_class,
-                    instrument_type=lane.instrument_type,
-                    observed_at=snapshot.observed_at,
-                    source_cut_id=snapshot.source_cut_id,
-                    regime="UNCLASSIFIED",
-                    trend_score=0.0,
-                    volatility_score=0.0,
-                    liquidity_score=snapshot.volume,
-                    data_quality=1.0,
-                )
+                market_fingerprint, _, measured_evidence = measured[snapshot.listing.symbol]
                 candidates.append(
                     TypedResearchCandidate(
                         lane=lane,
@@ -472,12 +513,10 @@ class AutonomousResearchWorkflow:
                         specification=snapshot.specification,
                         rank=rank,
                         score=round(adjusted_scores[snapshot.listing.symbol], 4),
-                        fingerprint=fingerprint,
-                        evidence=[f"source_cut={snapshot.source_cut_id}"] + [
-                            evidence
-                            for review in reviews
-                            for evidence in review.evidence
-                        ],
+                        fingerprint=market_fingerprint,
+                        evidence=[f"source_cut={snapshot.source_cut_id}"]
+                        + measured_evidence
+                        + [evidence for review in reviews for evidence in review.evidence],
                     )
                 )
             results.append(
@@ -487,11 +526,48 @@ class AutonomousResearchWorkflow:
                     status=LaneStatus.READY,
                     candidate=candidates[0],
                     ranked_candidates=candidates,
-                    exclusions=[item.listing.symbol for item in ranked_snapshots[1:]],
+                    exclusions=rejected + [item.listing.symbol for item in ranked_snapshots[1:]],
                     source_cut_refs=source_cut_refs,
                     observed_candidates=observed_candidates,
                     agent_reviews=reviews,
                     completed_at=datetime.now(UTC),
                 )
             )
+        # Prefer distinct underlyings / forex currency exposures among lane winners.
+        # This is an exposure heuristic, not return correlation or account-position risk.
+        selected_underlyings = set()
+        currency_exposures = set()
+        ready = sorted(
+            (item for item in results if item.status == LaneStatus.READY),
+            key=lambda item: (-item.candidate.score, item.lane.as_string()),
+        )
+        for result in ready:
+            for candidate in result.ranked_candidates:
+                symbol = candidate.listing.symbol.upper().replace("/", "")
+                direction = candidate.fingerprint.criteria.get("direction") or 0
+                exposures = set()
+                if candidate.lane.asset_class == AssetClass.FOREX and len(symbol) == 6:
+                    exposures = {(symbol[:3], direction), (symbol[3:], -direction)}
+                duplicate = candidate.listing.underlying_id in selected_underlyings
+                overlap = len(exposures & currency_exposures)
+                penalty = min(15.0, 10.0 * duplicate + 5.0 * overlap)
+                candidate.score = round(max(0.0, candidate.score - penalty), 4)
+                candidate.fingerprint.criteria["diversification_penalty"] = penalty
+                candidate.evidence.append(
+                    f"Lane-winner exposure overlap penalty={penalty}; "
+                    "not a portfolio correlation or position-risk assessment"
+                )
+            result.ranked_candidates.sort(key=lambda item: (-item.score, item.listing.symbol))
+            for rank, candidate in enumerate(result.ranked_candidates, start=1):
+                candidate.rank = rank
+            result.candidate = result.ranked_candidates[0]
+            winner = result.candidate
+            selected_underlyings.add(winner.listing.underlying_id)
+            symbol = winner.listing.symbol.upper().replace("/", "")
+            direction = winner.fingerprint.criteria.get("direction") or 0
+            if winner.lane.asset_class == AssetClass.FOREX and len(symbol) == 6:
+                currency_exposures.update({(symbol[:3], direction), (symbol[3:], -direction)})
+            result.exclusions = [entry for entry in result.exclusions if ":" in entry] + [
+                item.listing.symbol for item in result.ranked_candidates[1:]
+            ]
         return run.model_copy(update={"lane_results": results, "state": aggregate_status(results)})

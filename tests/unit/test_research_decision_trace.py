@@ -15,7 +15,7 @@ async def test_no_trade_persists_complete_analyst_decision_trace() -> None:
     snapshot = TypedResearchSnapshot(
         listing=market,
         specification=specification(market.id),
-        closes=[1.08, 1.09, 1.10],
+        closes=[1.08 + index * 0.001 for index in range(30)],
         bid=1.0999,
         ask=1.1001,
         volume=82,
@@ -80,7 +80,7 @@ async def test_non_executable_cfd_proxy_can_advance_market_research() -> None:
     snapshot = TypedResearchSnapshot(
         listing=market,
         specification=specification(market.id),
-        closes=[1.08, 1.09, 1.10],
+        closes=[1.08 + index * 0.001 for index in range(30)],
         bid=1.0999,
         ask=1.1001,
         volume=82,

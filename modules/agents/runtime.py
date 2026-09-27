@@ -46,7 +46,9 @@ class AgentRuntimeRouter:
         clients: dict[RuntimeType, RuntimeClient] = {}
         if codex_enabled:
             clients[RuntimeType.CODEX_APP_SERVER] = CodexAppServerClient(
-                settings.codex_binary, Path.cwd()
+                settings.codex_binary,
+                Path.cwd(),
+                orchestrator_model=settings.codex_orchestrator_model,
             )
         if litellm_enabled and litellm_api_key:
             if hasattr(litellm_api_key, "get_secret_value"):
@@ -88,6 +90,7 @@ class AgentRuntimeRouter:
         if any(item.runtime != agent.runtime for item in candidates):
             raise ValueError("cross-runtime fallback prohibited")
         started = monotonic()
+        deadline = started + max(1.0, deadline_seconds)
         result = None
         actual = profile
         error = None
@@ -97,6 +100,11 @@ class AgentRuntimeRouter:
         else:
             status = ExecutionStatus.FAILED
             for actual in candidates:
+                remaining = deadline - monotonic()
+                if remaining <= 0:
+                    result = None
+                    error = "agent runtime deadline exceeded"
+                    break
                 try:
                     result = await asyncio.wait_for(
                         client.invoke(
@@ -110,13 +118,16 @@ class AgentRuntimeRouter:
                                 "output_schema": payload.get("output_schema"),
                             }
                         ),
-                        deadline_seconds,
+                        remaining,
                     )
                     if not isinstance(result, dict):
                         raise ValueError("invalid runtime response schema")
                     status, error = ExecutionStatus.SUCCEEDED, None
                     break
                 except (TimeoutError, ValueError, RuntimeError) as exc:
+                    # Do not let a failed candidate leak a stale/non-structured
+                    # value into the worker response.
+                    result = None
                     error = str(exc)
             if result is None:
                 status = ExecutionStatus.DEGRADED

@@ -4,10 +4,13 @@ async function mockOverview(page: Page, mode: "populated" | "empty" | "unavailab
   const now = new Date();
   const ago = (minutes: number) => new Date(now.getTime() - minutes * 60_000).toISOString();
   const resource = (id: string, fields: Record<string, unknown> = {}) => ({ id, owner_id: "owner", state: "ACTIVE", created_at: ago(120), updated_at: ago(120), ...fields });
-  const symbols = [["XAUUSD", "METALS"], ["EURUSD", "FOREX"], ["BTCUSD", "CRYPTOCURRENCY"]];
+  const symbols = [["XAUUSD", "METALS"], ["EURUSD", "FOREX"], ["BTCUSD", "CRYPTOCURRENCY"], ["AAPL", "STOCKS"]];
   const accounts = mode === "empty" ? [] : [resource("account-1", { name: "Primary trading account", currency: "USD", starting_balance: "200000" }), resource("account-2", { name: "Euro account", currency: "EUR", starting_balance: "10000" })];
-  const runs = mode === "empty" ? [] : [resource("run-1", { account_id: "account-1", state: "COMPLETED", lane_results: symbols.map(([symbol, asset_class], index) => ({ status: "READY", candidate: { score: 90 - index, listing: { id: symbol, symbol, asset_class } } })) })];
-  const drafts = mode === "empty" ? [] : symbols.map(([instrument], index) => resource(`draft-${index}`, { created_at: ago(60 + index), state: "GENERATED", research_basis: { market_research_run_id: "run-1", instrument }, proposed_specification: { name: `${instrument} trend confirmation` }, trade_setup: { status: index === 1 ? "WAIT" : "SIGNAL", expires_at: ago(index === 2 ? 1 : -60) } }));
+  const runs = mode === "empty" ? [] : [
+    resource("run-newer", { account_id: "account-1", state: "QUEUED", created_at: ago(1), lane_results: [] }),
+    resource("run-1", { account_id: "account-1", state: "COMPLETED", lane_results: symbols.map(([symbol, asset_class], index) => ({ status: "READY", candidate: { score: 90 - index, listing: { id: symbol, symbol, asset_class } } })) }),
+  ];
+  const drafts = mode === "empty" ? [] : symbols.map(([instrument], index) => resource(`draft-${index}`, { created_at: ago(60 + index), state: ["AWAITING_STRATEGY_APPROVAL", "DRAFT", "SPECIFIED", "NO_QUALIFYING_STRATEGY"][index], research_basis: { market_research_run_id: "run-1", instrument }, proposed_specification: { name: `${instrument} trend confirmation` } }));
   await page.route("**/api/v1/**", route => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/v1", "");
@@ -38,7 +41,7 @@ test("signed-out root redirects to authentication", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Sign in to Matrades" })).toBeVisible();
 });
 
-test("overview displays recorded data, signals and account-specific equity", async ({ page }, testInfo) => {
+test("overview displays research states and account-specific equity without implying live signals", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1520, height: 1000 });
   await mockOverview(page);
   await page.goto("/");
@@ -46,10 +49,17 @@ test("overview displays recorded data, signals and account-specific equity", asy
   await expect(page.getByRole("link", { name: "Overview", exact: true })).toHaveAttribute("aria-current", "page");
   await expect(page.getByText("$189,432", { exact: true })).toBeVisible();
   await expect(page.getByRole("img", { name: "Recorded account equity and balance history" })).toBeVisible();
-  await expect(page.getByText("Setup found", { exact: true })).toBeVisible();
-  await expect(page.getByText("Watch", { exact: true })).toBeVisible();
-  await expect(page.getByText("Stale", { exact: true })).toBeVisible();
-  await expect(page.locator(".overview-recent .research-list li")).toHaveCount(4);
+  for (const state of ["Review proposal", "Create version", "In validation", "No qualifying strategy"]) {
+    await expect(page.getByText(state, { exact: true })).toBeVisible();
+  }
+  await expect(page.getByText("Setup found", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Top 4 Trade Suggestions (Latest)" })).toBeVisible();
+  await expect(page.locator(".overview-suggestions .suggestion-list li")).toHaveCount(4);
+  await expect(page.locator(".overview-recent .research-list li")).toHaveCount(3);
+  await page.getByRole("button", { name: "Load more research activity" }).click();
+  await expect(page.locator(".overview-recent .research-list li")).toHaveCount(6);
+  await page.getByRole("button", { name: "Show fewer research activity" }).click();
+  await expect(page.locator(".overview-recent .research-list li")).toHaveCount(3);
   await expect(page.getByRole("link", { name: "View all trade suggestions" })).toHaveAttribute("href", "/strategies");
   await page.screenshot({ path: testInfo.outputPath("overview-desktop.png"), fullPage: true });
   await page.getByRole("combobox", { name: "Equity account" }).selectOption("account-2");
