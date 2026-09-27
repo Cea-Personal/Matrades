@@ -1,11 +1,14 @@
 import asyncio
 import json
+import tomllib
+from pathlib import Path
 from types import SimpleNamespace
 
 from adapters.agent_runtime.codex_app_server.client import (
     CODEX_APP_SERVER_JSONL_LIMIT,
     CodexAppServerClient,
 )
+from modules.agents.native_config import load_native_agent
 
 
 async def test_codex_jsonl_reader_accepts_frames_above_asyncio_default_limit() -> None:
@@ -33,6 +36,24 @@ async def test_malformed_jsonl_resets_process_before_next_lane() -> None:
     assert client.process is None
 
 
+async def test_rpc_preserves_notifications_arriving_before_its_reply(monkeypatch) -> None:
+    client = CodexAppServerClient()
+    client.process = SimpleNamespace(stdout=object(), returncode=None)
+    event = {"method": "item/completed", "params": {"item": {"type": "agentMessage"}}}
+    messages = iter([event, {"id": 1, "result": {"turn": {"id": "turn"}}}])
+
+    async def write(message):
+        pass
+
+    async def read_message(**kwargs):
+        return next(messages)
+
+    monkeypatch.setattr(client, "_write", write)
+    monkeypatch.setattr(client, "_read_message", read_message)
+    assert await client._request("turn/start", {}) == {"turn": {"id": "turn"}}
+    assert client._pending_notifications.popleft() == event
+
+
 async def test_invoke_uses_only_parent_final_answer_after_subagent_messages() -> None:
     client = CodexAppServerClient()
     client.process = SimpleNamespace(stdout=object(), returncode=None)
@@ -43,12 +64,19 @@ async def test_invoke_uses_only_parent_final_answer_after_subagent_messages() ->
     async def request(method: str, params: dict) -> dict:
         if method == "thread/start":
             assert params["ephemeral"] is False
-            assert params["model"] == "gpt-5.5"
+            assert params["model"] == load_native_agent("orchestrator")["model"]
+            assert params["config"]["model_reasoning_effort"] == "medium"
+            snapshot = Path(params["config"]["agents.technical_analyst.config_file"])
+            assert (
+                await asyncio.to_thread(lambda: tomllib.loads(snapshot.read_text())["model"])
+                == "explicit-specialist"
+            )
             assert 'agent_type="technical_analyst"' in params["developerInstructions"]
             assert "fork_context=true" in params["developerInstructions"]
             return {"thread": {"id": "parent-thread"}}
         if method == "turn/start":
-            assert params["model"] == "gpt-5.5"
+            assert params["model"] == load_native_agent("orchestrator")["model"]
+            assert params["effort"] == "medium"
             assert "NATIVE SUBAGENT DELEGATION" not in params["input"][0]["text"]
             assert 'OUTPUT SCHEMA:\n{"type": "object"}' in params["input"][0]["text"]
             return {"turn": {"id": "parent-turn"}}
@@ -115,7 +143,11 @@ async def test_invoke_uses_only_parent_final_answer_after_subagent_messages() ->
     client._request = request
     client._read_message = read_message
     assert await client.invoke(
-        {"agent_role": "technical_analyst", "output_schema": {"type": "object"}}
+        {
+            "agent_role": "technical_analyst",
+            "model": "explicit-specialist",
+            "output_schema": {"type": "object"},
+        }
     ) == {"decision": "PASS"}
 
 

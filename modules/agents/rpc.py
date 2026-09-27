@@ -24,6 +24,7 @@ class RedisAgentGateway:
         output_schema: dict[str, Any],
         *,
         owner_id: UUID | None = None,
+        include_execution: bool = False,
     ) -> dict[str, Any]:
         request_id = str(uuid4())
         response_key = f"{AGENT_RESPONSE_PREFIX}{request_id}"
@@ -41,6 +42,8 @@ class RedisAgentGateway:
         if response is None:
             raise TimeoutError(f"{logical_id} did not respond before the deadline")
         body = json.loads(response[1])
+        if include_execution:
+            return body
         if body.get("error"):
             raise RuntimeError(str(body["error"]))
         result = body.get("result")
@@ -62,9 +65,7 @@ class OwnerScopedAgentGateway:
     async def invoke(
         self, logical_id: str, payload: dict[str, Any], output_schema: dict[str, Any]
     ) -> dict[str, Any]:
-        return await self.gateway.invoke(
-            logical_id, payload, output_schema, owner_id=self.owner_id
-        )
+        return await self.gateway.invoke(logical_id, payload, output_schema, owner_id=self.owner_id)
 
     async def close(self) -> None:
         await self.gateway.close()

@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from adapters.agent_runtime.litellm.client import LiteLLMClient
 from apps.api.app.dependencies import current_actor, get_db, require_roles
+from modules.agents.model_assignments import default_profile
 from modules.agents.models import (
     AgentDefinition,
     AgentExecution,
@@ -21,7 +22,6 @@ from modules.agents.models import (
     ModelProfile,
     RuntimeType,
 )
-from modules.agents.model_assignments import default_profile
 from modules.agents.permissions import PermissionSet
 from modules.agents.prompts import PromptSet, resolve_prompts
 from modules.agents.registry import REQUIRED_AGENT_IDS
@@ -88,6 +88,9 @@ async def _profiles(store: ResourceStore, owner_id: UUID) -> dict[UUID, ModelPro
         result[profile.id] = profile
     for item in await store.list("agent_profile", owner_id):
         profile = ModelProfile.model_validate(item.data)
+        profile = profile.model_copy(
+            update={"parameters": {**profile.parameters, "assignment": "agent_profile"}}
+        )
         result[profile.id] = profile
     return result
 
@@ -107,18 +110,40 @@ async def list_agents(
     actor: Annotated[Actor, Depends(current_actor)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    agents = await _agents(ResourceStore(db), actor.owner_id)
-    return [
-        {
-            **agents[logical_id].model_dump(mode="json"),
-            "recommended_profile_id": str(_default_profile(logical_id).id),
-            "recommended_model": _default_profile(logical_id).model,
-            "recommended_reasoning_effort": _default_profile(logical_id).parameters[
-                "reasoning_effort"
-            ],
-        }
-        for logical_id in REQUIRED_AGENT_IDS
-    ]
+    store = ResourceStore(db)
+    agents = await _agents(store, actor.owner_id)
+    profiles = await _profiles(store, actor.owner_id)
+    rows = []
+    for logical_id in REQUIRED_AGENT_IDS:
+        agent = agents[logical_id]
+        native = _default_profile(logical_id)
+        configured = profiles.get(agent.profile_id or native.id)
+        rows.append(
+            {
+                **agent.model_dump(mode="json"),
+                "recommended_profile_id": str(native.id),
+                "recommended_model": native.model,
+                "recommended_reasoning_effort": native.parameters["reasoning_effort"],
+                "native_config_file": native.parameters["source_file"],
+                "configured_model": configured.model if configured else None,
+                "configured_reasoning_effort": (
+                    configured.parameters.get("reasoning_effort")
+                    or (
+                        native.parameters["reasoning_effort"]
+                        if configured.runtime == RuntimeType.CODEX_APP_SERVER
+                        else None
+                    )
+                    if configured
+                    else None
+                ),
+                "model_source": (
+                    "native_agent"
+                    if configured and configured.parameters.get("assignment") == "native_agent"
+                    else "profile_override"
+                ),
+            }
+        )
+    return rows
 
 
 @router.get("/runtimes")
@@ -279,9 +304,7 @@ async def list_runtime_models(
 ):
     records = await ResourceStore(db).list("litellm_model_catalog", actor.owner_id)
     return (
-        records[0].public()
-        if records
-        else {"runtime": RuntimeType.LITELLM_GATEWAY, "models": []}
+        records[0].public() if records else {"runtime": RuntimeType.LITELLM_GATEWAY, "models": []}
     )
 
 
@@ -320,7 +343,12 @@ async def agent_status(
                 "last_error": data.get("error"),
                 "last_tested_at": execution.updated_at if execution else None,
                 "execution_id": str(execution.id) if execution else None,
-                "actual_model": data.get("actual_model"),
+                # Legacy records copied the requested model into actual_model.
+                "actual_model": data.get("actual_model") if data.get("model_verified") else None,
+                "model_verified": bool(data.get("model_verified") and data.get("actual_model")),
+                "requested_model": data.get("requested_model") or data.get("configured_model"),
+                "model_evidence_source": data.get("model_evidence_source"),
+                "orchestrator_model": data.get("orchestrator_model"),
                 "duration_ms": data.get("duration_ms"),
                 "selection_source": data.get("selection_source"),
                 "evidence": "agent_execution" if execution else "not_tested",
@@ -463,7 +491,7 @@ async def test_run(
         "required": ["status", "summary", "evidence", "uncertainties"],
         "additionalProperties": False,
     }
-    configured_profile = agent.profile_id is not None
+    configured_profile = profile.parameters.get("assignment") != "native_agent"
     if agent.runtime == RuntimeType.CODEX_APP_SERVER:
         started = monotonic()
         result: dict[str, Any] | None = None
@@ -478,7 +506,23 @@ async def test_run(
                 {**payload.input, "purpose": "configuration_test"},
                 output_schema,
                 owner_id=actor.owner_id,
+                include_execution=True,
             )
+            if isinstance(result.get("execution"), dict):
+                # The worker already persisted this exact execution. Do not
+                # create a second, newer API record with a fabricated model.
+                worker_execution = AgentExecution.model_validate(result["execution"])
+                if worker_execution.logical_id != logical_id:
+                    raise ValueError("worker returned evidence for a different agent")
+                return {
+                    "execution": worker_execution.model_dump(mode="json"),
+                    "result": result.get("result"),
+                }
+            if result.get("error"):
+                raise RuntimeError(str(result["error"]))
+            result = result.get("result")
+            if not isinstance(result, dict):
+                raise ValueError("worker returned an invalid response")
             execution_status = ExecutionStatus.SUCCEEDED
         except (TimeoutError, RuntimeError, ValueError) as exc:
             execution_status = ExecutionStatus.DEGRADED
@@ -489,9 +533,9 @@ async def test_run(
             logical_id=agent.logical_id,
             selected_runtime=agent.runtime,
             actual_runtime=agent.runtime,
-            selection_source="agent_profile" if configured_profile else "codex_default",
+            selection_source="agent_profile" if configured_profile else "native_agent",
             configured_model=profile.model,
-            actual_model=profile.model,
+            requested_model=profile.model,
             resolved_system_prompt=prompts.system,
             resolved_user_prompt=prompts.user,
             tools=("market.read", "knowledge.search"),

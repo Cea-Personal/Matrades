@@ -53,7 +53,11 @@ class AgentExecution(BaseModel):
     actual_runtime: RuntimeType
     selection_source: str
     configured_model: str
-    actual_model: str
+    requested_model: str | None = None
+    actual_model: str | None = None
+    model_verified: bool = False
+    model_evidence_source: str | None = None
+    orchestrator_model: str | None = None
     fallback_reason: str | None = None
     resolved_system_prompt: str
     resolved_user_prompt: str

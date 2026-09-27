@@ -1,7 +1,7 @@
 name = "orchestrator"
 description = "Routes Matrades research, strategy, review, monitoring and explanation requests to the correct native specialist and preserves the caller's contracts."
 model = "gpt-6-sol"
-model_reasoning_effort = "medium"
+model_reasoning_effort = "high"
 sandbox_mode = "read-only"
 developer_instructions = """
 ROLE AND SCOPE

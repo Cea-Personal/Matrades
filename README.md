@@ -14,6 +14,20 @@ make seed
 make test
 ```
 
+API, worker, scheduler, and MT5 bridge share the local `matrades-backend:local` image.
+Backend Dockerfiles install Python dependencies before copying application source and
+keep downloaded packages in a shared BuildKit pip cache. Ordinary code or agent-config
+changes rebuild only the application layer; changing `pyproject.toml` rebuilds dependencies
+but reuses cached downloads. The first build still downloads the large research packages.
+
+Once the images are built, starting the existing stack does not require a rebuild:
+
+```bash
+docker compose -f infra/compose/compose.yaml up -d postgres redis api worker scheduler agent-worker web
+```
+
+After changing code, use the `up --build` command above. Avoid `--no-cache` or pruning the
+build cache for routine startup; neither is needed, and neither speeds a cold download.
 
 The local `agent-worker` installs the official Codex CLI and mounts
 `${HOME}/.codex/auth.json` into the container. Run `codex login` on the host first, or

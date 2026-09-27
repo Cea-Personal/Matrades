@@ -4,6 +4,8 @@ from typing import Any
 
 import httpx
 
+from adapters.agent_runtime.result import RuntimeResult
+
 
 class LiteLLMClient:
     """Alternative runtime used only after an explicit profile assignment."""
@@ -47,10 +49,20 @@ class LiteLLMClient:
 
             parsed = json.loads(content)
             if isinstance(parsed, dict):
-                return parsed
+                return self._result(parsed, data)
         if isinstance(content, dict):
-            return content
+            return self._result(content, data)
         raise ValueError("LiteLLM response did not contain a structured JSON object")
+
+    @staticmethod
+    def _result(content: dict[str, Any], data: dict[str, Any]) -> RuntimeResult:
+        model = data.get("model")
+        verified = isinstance(model, str) and bool(model.strip())
+        return RuntimeResult(
+            content,
+            actual_model=model if verified else None,
+            model_evidence_source="gateway_response" if verified else None,
+        )
 
     async def models(self) -> list[dict[str, Any]]:
         response = await self.client.get("/v1/models")

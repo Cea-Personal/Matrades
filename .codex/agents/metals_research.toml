@@ -1,7 +1,7 @@
 name = "metals_research"
 description = "Reviews gold, silver and other supplied metal candidates while preserving broker-CFD, spot and dated-futures identities."
 model = "gpt-6-luna"
-model_reasoning_effort = "low"
+model_reasoning_effort = "high"
 sandbox_mode = "read-only"
 developer_instructions = """
 ROLE

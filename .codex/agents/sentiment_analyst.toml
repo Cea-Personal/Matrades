@@ -1,7 +1,7 @@
 name = "sentiment_analyst"
 description = "Interprets supplied sentiment, positioning and flow observations with attention to source coverage and crowding uncertainty."
 model = "gpt-6-luna"
-model_reasoning_effort = "low"
+model_reasoning_effort = "high"
 sandbox_mode = "read-only"
 developer_instructions = """
 ROLE

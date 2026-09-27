@@ -115,6 +115,11 @@ async def serve_agent_requests(
                         profiles[profile.id] = profile
                     for item in await store.list("agent_profile", owner_id):
                         profile = ModelProfile.model_validate(item.data)
+                        profile = profile.model_copy(
+                            update={
+                                "parameters": {**profile.parameters, "assignment": "agent_profile"}
+                            }
+                        )
                         profiles[profile.id] = profile
                     agents = {
                         agent_id: AgentDefinition(logical_id=agent_id)
@@ -152,6 +157,9 @@ async def serve_agent_requests(
                         # Leave time for persistence and the Redis reply before
                         # the gateway's own request deadline expires.
                         deadline_seconds=max(1, settings.research_agent_timeout_seconds - 5),
+                        orchestrator_profile=profiles[
+                            orchestrator.profile_id or _default_profile("orchestrator").id
+                        ],
                     )
                     await store.create(
                         "agent_execution",
@@ -168,12 +176,18 @@ async def serve_agent_requests(
                         event_type="agent.execution_completed",
                     )
                 if isinstance(result, dict):
-                    response = {"result": result}
+                    response = {
+                        "result": result,
+                        "execution": execution.model_dump(mode="json"),
+                    }
                 else:
                     # Preserve the runtime/model failure instead of replacing it
                     # with the misleading gateway "invalid response" error.
                     detail = execution.error or "agent runtime returned no structured result"
-                    response = {"error": f"{execution.status.value}: {detail}"}
+                    response = {
+                        "error": f"{execution.status.value}: {detail}",
+                        "execution": execution.model_dump(mode="json"),
+                    }
             except Exception as exc:
                 logger.exception("Logical agent %s failed", logical_id)
                 response = {"error": f"{type(exc).__name__}: {exc}"}

@@ -7,6 +7,7 @@ from typing import Any, Protocol
 
 from adapters.agent_runtime.codex_app_server.client import CodexAppServerClient
 from adapters.agent_runtime.litellm.client import LiteLLMClient
+from adapters.agent_runtime.result import RuntimeResult
 from modules.agents.execution_audit import ExecutionAudit
 from modules.agents.models import (
     AgentDefinition,
@@ -48,7 +49,6 @@ class AgentRuntimeRouter:
             clients[RuntimeType.CODEX_APP_SERVER] = CodexAppServerClient(
                 settings.codex_binary,
                 Path.cwd(),
-                orchestrator_model=settings.codex_orchestrator_model,
             )
         if litellm_enabled and litellm_api_key:
             if hasattr(litellm_api_key, "get_secret_value"):
@@ -81,11 +81,18 @@ class AgentRuntimeRouter:
         permissions: PermissionSet,
         payload: dict[str, Any],
         deadline_seconds: float = 30,
+        orchestrator_profile: ModelProfile | None = None,
     ) -> tuple[AgentExecution, dict[str, Any] | None]:
         validate_typed_context(agent, payload)
         profile: ModelProfile = profiles[agent.profile_id]
         if profile.runtime != agent.runtime:
             raise ValueError("runtime/profile mismatch")
+        if (
+            agent.runtime == RuntimeType.CODEX_APP_SERVER
+            and orchestrator_profile is not None
+            and orchestrator_profile.runtime != RuntimeType.CODEX_APP_SERVER
+        ):
+            raise ValueError("Codex specialists require a Codex orchestrator profile")
         candidates = [profile] + [profiles[item] for item in profile.fallback_profile_ids]
         if any(item.runtime != agent.runtime for item in candidates):
             raise ValueError("cross-runtime fallback prohibited")
@@ -94,6 +101,8 @@ class AgentRuntimeRouter:
         result = None
         actual = profile
         error = None
+        evidence: RuntimeResult | None = None
+        fallback_reason = None
         client = self.clients.get(agent.runtime)
         if client is None:
             status, error = ExecutionStatus.BLOCKED, "selected runtime unavailable"
@@ -112,6 +121,15 @@ class AgentRuntimeRouter:
                                 "input": payload,
                                 "agent_role": agent.logical_id,
                                 "model": actual.model,
+                                "reasoning_effort": actual.parameters.get("reasoning_effort"),
+                                "orchestrator_model": (
+                                    orchestrator_profile.model if orchestrator_profile else None
+                                ),
+                                "orchestrator_reasoning_effort": (
+                                    orchestrator_profile.parameters.get("reasoning_effort")
+                                    if orchestrator_profile
+                                    else None
+                                ),
                                 "system": prompts.system,
                                 "user": prompts.user,
                                 "tools": permissions.tools,
@@ -122,6 +140,7 @@ class AgentRuntimeRouter:
                     )
                     if not isinstance(result, dict):
                         raise ValueError("invalid runtime response schema")
+                    evidence = result if isinstance(result, RuntimeResult) else None
                     status, error = ExecutionStatus.SUCCEEDED, None
                     break
                 except (TimeoutError, ValueError, RuntimeError) as exc:
@@ -129,16 +148,26 @@ class AgentRuntimeRouter:
                     # value into the worker response.
                     result = None
                     error = str(exc)
+                    if actual.id == profile.id:
+                        fallback_reason = error
             if result is None:
                 status = ExecutionStatus.DEGRADED
         execution = AgentExecution(
             logical_id=agent.logical_id,
             selected_runtime=agent.runtime,
             actual_runtime=agent.runtime,
-            selection_source="agent_profile" if agent.profile_id else "codex_default",
+            selection_source=(
+                "native_agent"
+                if profile.parameters.get("assignment") == "native_agent"
+                else "agent_profile"
+            ),
             configured_model=profile.model,
-            actual_model=actual.model,
-            fallback_reason=error if actual.id != profile.id else None,
+            requested_model=actual.model,
+            actual_model=evidence.actual_model if evidence else None,
+            model_verified=bool(evidence and evidence.actual_model),
+            model_evidence_source=evidence.model_evidence_source if evidence else None,
+            orchestrator_model=evidence.orchestrator_model if evidence else None,
+            fallback_reason=fallback_reason if actual.id != profile.id else None,
             resolved_system_prompt=prompts.system,
             resolved_user_prompt=prompts.user,
             tools=permissions.tools,

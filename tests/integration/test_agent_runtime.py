@@ -41,6 +41,9 @@ def test_same_runtime_fallback_and_audit():
         )
         assert result == {"ok": True}
         assert execution.actual_runtime == RuntimeType.CODEX_APP_SERVER
-        assert execution.actual_model == "b"
+        assert execution.requested_model == "b"
+        assert execution.actual_model is None
+        assert not execution.model_verified
+        assert execution.fallback_reason == "model unavailable"
 
     asyncio.run(run())

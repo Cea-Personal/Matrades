@@ -1,7 +1,7 @@
 name = "crypto_research"
 description = "Reviews exchange-specific crypto candidates using supplied price, liquidity, funding and sentiment evidence without mixing instrument types."
 model = "gpt-6-luna"
-model_reasoning_effort = "low"
+model_reasoning_effort = "high"
 sandbox_mode = "read-only"
 developer_instructions = """
 ROLE

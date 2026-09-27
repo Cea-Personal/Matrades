@@ -1,5 +1,12 @@
 name: matrades
 
+# These services run the same Python packages with different entry commands.
+x-backend-image: &backend-image
+  image: matrades-backend:local
+  build:
+    context: ../..
+    dockerfile: apps/api/Dockerfile
+
 services:
   postgres:
     image: timescale/timescaledb-ha:pg17
@@ -27,9 +34,7 @@ services:
     volumes: ["redis-data:/data"]
 
   api:
-    build:
-      context: ../..
-      dockerfile: apps/api/Dockerfile
+    <<: *backend-image
     env_file:
       - path: ../../.env
         required: false
@@ -47,9 +52,7 @@ services:
       redis: { condition: service_healthy }
 
   mt5-bridge:
-    build:
-      context: ../..
-      dockerfile: apps/api/Dockerfile
+    <<: *backend-image
     env_file:
       - path: ../../.env
         required: false
@@ -65,9 +68,8 @@ services:
       api: { condition: service_started }
 
   worker:
-    build:
-      context: ../..
-      dockerfile: apps/worker/Dockerfile
+    <<: *backend-image
+    command: ["celery", "-A", "apps.worker.app.celery_app:celery_app", "worker", "--loglevel=INFO"]
     env_file:
       - path: ../../.env
         required: false
@@ -82,9 +84,7 @@ services:
       redis: { condition: service_healthy }
 
   scheduler:
-    build:
-      context: ../..
-      dockerfile: apps/worker/Dockerfile
+    <<: *backend-image
     command: ["celery", "-A", "apps.worker.app.celery_app:celery_app", "beat", "--loglevel=INFO"]
     env_file:
       - path: ../../.env
