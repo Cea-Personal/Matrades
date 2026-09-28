@@ -212,6 +212,12 @@ class ExecutionService:
                 "entry": str(plan.construction.entry),
                 "stop_loss": str(plan.construction.stop_loss),
                 "targets": [str(target) for target in plan.construction.targets],
+                # MT5 has one broker-native TP per order. The first target is
+                # the protective hard TP; later research targets are advisory.
+                "take_profit": str(plan.construction.targets[0]),
+                "max_loss_account_currency": (
+                    str(plan.risk.snapshot.candidate_trade_risk) if plan.ticket else None
+                ),
                 "venue_instrument_id": str(plan.construction.venue_instrument_id),
                 "specification_version_id": str(plan.construction.specification_version_id),
             },

@@ -39,6 +39,7 @@ class BrokerPosition(BaseModel):
     tick_value: Decimal | None = None
     margin: Decimal | None = None
     financing: Decimal | None = None
+    loss_to_stop_account_currency: Decimal | None = Field(default=None, ge=0)
 
 
 class BrokerOrder(BaseModel):
@@ -80,6 +81,7 @@ class BrokerSnapshot(BaseModel):
     balance: Decimal
     equity: Decimal
     realized_daily_pnl: Decimal
+    account_currency: str | None = None
     positions: list[BrokerPosition]
     orders: list[BrokerOrder] = Field(default_factory=list)
     fills: list[BrokerFill] = Field(default_factory=list)
@@ -131,6 +133,7 @@ class BrokerMarketInstrumentSnapshot(BaseModel):
     symbol: str = Field(min_length=1, max_length=80)
     path: str = ""
     description: str = ""
+    profit_currency: str | None = None
     bid: Decimal = Field(gt=0)
     ask: Decimal = Field(gt=0)
     digits: int = Field(ge=0, le=12)

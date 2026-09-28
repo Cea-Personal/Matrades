@@ -43,6 +43,23 @@ def assert_command_authority(
         raise PermissionError("authorization does not permit the requested action")
     if plan.risk.decision is RiskDecision.HARD_BLOCK:
         raise PermissionError("hard-blocked risk result cannot execute")
+    if command.action is ExecutionAction.PLACE_ORDER and plan.ticket is not None:
+        expected = {
+            "instrument": plan.construction.instrument,
+            "direction": plan.construction.direction.value,
+            "quantity": str(plan.construction.approved_size),
+            "quantity_unit": plan.construction.quantity_unit.value,
+            "entry": str(plan.construction.entry),
+            "stop_loss": str(plan.construction.stop_loss),
+            "take_profit": str(plan.construction.targets[0]),
+            "max_loss_account_currency": str(plan.risk.snapshot.candidate_trade_risk),
+            "venue_instrument_id": str(plan.construction.venue_instrument_id),
+            "specification_version_id": str(plan.construction.specification_version_id),
+        }
+        if any(
+            command.requested_postcondition.get(key) != value for key, value in expected.items()
+        ):
+            raise PermissionError("entry command differs from authorized broker-sized Trade Plan")
     if not permissions.allows(command.action):
         raise PermissionError("action is disabled for the account")
     if platform_kill.active or account_kill.active:

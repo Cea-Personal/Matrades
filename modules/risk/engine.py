@@ -52,6 +52,7 @@ class RiskEngine:
         max_dd = limits.get(ConstraintKind.MAX_TOTAL_DRAWDOWN)
         max_daily = limits.get(ConstraintKind.MAX_DAILY_LOSS)
         max_portfolio = limits.get(ConstraintKind.MAX_PORTFOLIO_RISK)
+        max_trade = limits.get(ConstraintKind.MAX_RISK_PER_TRADE)
         assert max_dd is not None and max_daily is not None and max_portfolio is not None
         allowed_dd = max_dd.value
         allowed_daily = max_daily.value
@@ -79,6 +80,8 @@ class RiskEngine:
             candidate.requested_size * candidate.risk_per_unit + candidate.financing_cost
         )
         capacities = [remaining_dd, remaining_daily, remaining_portfolio]
+        if max_trade is not None:
+            capacities.append(max_trade.value)
         exposures = aggregate_exposure(context.positions, candidate, requested_risk)
         correlation_remaining: list[Decimal] = []
         violations: list[str] = []
@@ -88,11 +91,15 @@ class RiskEngine:
             if exposures.get(group, Decimal("0")) > cap:
                 violations.append(group)
         capacities.extend(correlation_remaining)
+        # Fixed costs consume capacity before native-step rounding. Rounding
+        # against the gross budget could approve a loss beyond the hard cap.
+        net_capacities = [max(Decimal("0"), cap - candidate.financing_cost) for cap in capacities]
         size = compliant_size(
-            candidate.requested_size, candidate.risk_per_unit, capacities, candidate.size_increment
+            candidate.requested_size,
+            candidate.risk_per_unit,
+            net_capacities,
+            candidate.size_increment,
         )
-        if candidate.financing_cost > min(capacities):
-            size = Decimal("0")
         approved_risk = size * candidate.risk_per_unit + (
             candidate.financing_cost if size > 0 else Decimal("0")
         )

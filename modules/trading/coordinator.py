@@ -10,8 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from modules.accounts.models import AccountSnapshot
 from modules.accounts.snapshots import validate_snapshot
+from modules.policy.effective_limits import strictest_applicable
+from modules.policy.models import ConstraintKind, Enforcement
 from modules.risk.authority import authoritative_risk_context
 from modules.risk.engine import RiskEngine
+from modules.risk.live_terms import LiveTradeTerms, load_live_trade_terms
 from modules.risk.models import CandidateTrade, RiskDecision
 from modules.risk.reservations import PersistentReservationStore, ReservationState
 from modules.trading.execution import ExecutionService, transition
@@ -24,6 +27,7 @@ from modules.trading.models import (
     TradePlan,
     TradePlanState,
 )
+from modules.trading.ticket import build_trade_ticket
 from modules.trading.trade_plans import transition_trade_plan
 from packages.broker_sdk.schemas import BrokerSnapshot
 from packages.shared.store import ResourceRecord, ResourceStore
@@ -101,7 +105,9 @@ async def current_broker_snapshot(
     return snapshot
 
 
-async def _typed_candidate(session: AsyncSession, plan: TradePlan) -> CandidateTrade:
+async def _typed_candidate(
+    session: AsyncSession, plan: TradePlan, terms: LiveTradeTerms | None = None
+) -> CandidateTrade:
     records = await ResourceStore(session).list("typed_instrument", plan.owner_id)
     specification: dict | None = None
     for record in records:
@@ -115,12 +121,14 @@ async def _typed_candidate(session: AsyncSession, plan: TradePlan) -> CandidateT
         raise PermissionError("fresh effective instrument specification is required")
     risk_amount = plan.risk.snapshot.candidate_trade_risk
     size = plan.construction.approved_size
-    risk_per_unit = risk_amount / size if risk_amount > 0 else abs(
-        plan.construction.entry - plan.construction.stop_loss
+    risk_per_unit = (
+        risk_amount / size
+        if risk_amount > 0
+        else abs(plan.construction.entry - plan.construction.stop_loss)
     )
     if risk_per_unit <= 0:
         raise PermissionError("bounded positive Stop Loss risk is required")
-    return CandidateTrade(
+    candidate = CandidateTrade(
         instrument=plan.construction.instrument,
         direction=plan.construction.direction,
         market_category=plan.construction.asset_class.value,
@@ -145,6 +153,16 @@ async def _typed_candidate(session: AsyncSession, plan: TradePlan) -> CandidateT
         margin_required=Decimal(str(specification.get("margin_required", "0"))),
         financing_cost=Decimal(str(specification.get("financing_cost", "0"))),
     )
+    if terms is not None:
+        return candidate.model_copy(
+            update={
+                "size_increment": terms.quantity_step,
+                "contract_multiplier": terms.contract_multiplier,
+                "tick_size": terms.tick_size,
+                "tick_value": terms.tick_value,
+            }
+        )
+    return candidate
 
 
 async def persist_trade_plan(
@@ -181,11 +199,52 @@ async def authorize_and_queue_entry(
     if plan.state is TradePlanState.BLOCKED or plan.risk.decision is RiskDecision.HARD_BLOCK:
         return plan_record, None
     await current_broker_snapshot(session, plan.owner_id, plan.account_id)
-    candidate = await _typed_candidate(session, plan)
-    context = await authoritative_risk_context(
-        session, plan.owner_id, plan.account_id, candidate
-    )
+    terms = None
+    if plan.ticket is not None:
+        try:
+            terms = await load_live_trade_terms(
+                session,
+                plan.owner_id,
+                plan.account_id,
+                plan.construction.venue_instrument_id,
+                plan.construction.specification_version_id,
+                plan.construction.instrument_type,
+            )
+            if plan.ticket.account_currency != terms.account_currency:
+                raise ValueError("account currency changed since the Trade Plan was built")
+            terms.validate_size(plan.construction.approved_size)
+        except ValueError as exc:
+            blocked = plan.model_copy(update={"state": TradePlanState.BLOCKED})
+            plan_record = await store.update(
+                plan_record,
+                blocked.model_dump(mode="json"),
+                state=TradePlanState.BLOCKED.value,
+                actor_id=actor_id,
+                event_type="trade_plan.blocked",
+                evidence={"reasons": [str(exc)]},
+            )
+            return plan_record, None
+    candidate = await _typed_candidate(session, plan, terms)
+    context = await authoritative_risk_context(session, plan.owner_id, plan.account_id, candidate)
     risk = RiskEngine().evaluate(context, candidate)
+    if terms is not None:
+        if not context.account_currency_verified:
+            risk = risk.model_copy(
+                update={
+                    "decision": RiskDecision.HARD_BLOCK,
+                    "approved_size": Decimal("0"),
+                    "reasons": ["fresh MT5 broker account currency is unavailable"],
+                }
+            )
+        limit = strictest_applicable(context.constraints).get(ConstraintKind.MAX_RISK_PER_TRADE)
+        if limit is None or limit.enforcement is not Enforcement.HARD or limit.value <= 0:
+            risk = risk.model_copy(
+                update={
+                    "decision": RiskDecision.HARD_BLOCK,
+                    "approved_size": Decimal("0"),
+                    "reasons": ["MAX_RISK_PER_TRADE authority is no longer configured"],
+                }
+            )
     if risk.decision is RiskDecision.HARD_BLOCK:
         blocked = plan.model_copy(update={"state": TradePlanState.BLOCKED, "risk": risk})
         plan_record = await store.update(
@@ -205,6 +264,30 @@ async def authorize_and_queue_entry(
             ),
         }
     )
+    if terms is not None:
+        try:
+            plan.ticket = build_trade_ticket(
+                terms=terms,
+                instrument_type=plan.construction.instrument_type,
+                direction=plan.construction.direction,
+                entry=plan.construction.entry,
+                stop=plan.construction.stop_loss,
+                targets=plan.construction.targets,
+                fractions=[item.research_fraction for item in plan.ticket.targets],
+                risk_limit=limit.value,
+                risk=risk,
+            )
+        except ValueError as exc:
+            blocked = plan.model_copy(update={"state": TradePlanState.BLOCKED})
+            plan_record = await store.update(
+                plan_record,
+                blocked.model_dump(mode="json"),
+                state=TradePlanState.BLOCKED.value,
+                actor_id=actor_id,
+                event_type="trade_plan.blocked",
+                evidence={"reasons": [str(exc)]},
+            )
+            return plan_record, None
     reservation = await PersistentReservationStore(session).reserve(
         owner_id=plan.owner_id,
         account_id=plan.account_id,
@@ -269,9 +352,7 @@ async def authorize_and_queue_management(
         session, owner_id, plan.account_id, lock=True
     )
     service = ExecutionService()
-    authorization = service.authorize_action(
-        plan, action, permissions, platform_kill, account_kill
-    )
+    authorization = service.authorize_action(plan, action, permissions, platform_kill, account_kill)
     plan_record = await ResourceStore(session).get("trade_plan", plan.id, owner_id)
     if plan_record is None:
         raise LookupError("management action Trade Plan is not persisted")
@@ -294,9 +375,7 @@ async def authorize_and_queue_management(
         expected_broker_version=expected_broker_version,
     )
     command = transition(transition(command, CommandState.AUTHORIZED), CommandState.QUEUED)
-    return await persist_command(
-        ResourceStore(session), owner_id=owner_id, command=command
-    )
+    return await persist_command(ResourceStore(session), owner_id=owner_id, command=command)
 
 
 __all__ = [

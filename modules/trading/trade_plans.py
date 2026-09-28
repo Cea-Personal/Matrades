@@ -5,6 +5,7 @@ from uuid import UUID
 from modules.risk.models import RiskDecision, RiskResult
 from modules.risk.reservations import ReservationBook
 from modules.trading.models import TradeConstruction, TradePlan, TradePlanState
+from modules.trading.ticket import TradeTicket
 
 
 def build_trade_plan(
@@ -15,6 +16,7 @@ def build_trade_plan(
     strategy_version_id: UUID,
     market_fingerprint_id: UUID,
     risk: RiskResult,
+    ticket: TradeTicket | None = None,
     evidence_refs: tuple[str, ...],
     expires_at,
     reservations: ReservationBook | None = None,
@@ -34,6 +36,7 @@ def build_trade_plan(
         strategy_version_id=strategy_version_id,
         market_fingerprint_id=market_fingerprint_id,
         risk=risk,
+        ticket=ticket,
         evidence_refs=evidence_refs,
         expires_at=expires_at,
     )

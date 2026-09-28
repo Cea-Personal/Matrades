@@ -21,9 +21,12 @@ from modules.connections.models import ConnectionProvider
 from modules.identity.authorization import Actor, Role
 from modules.knowledge.ingestion import build_source_data
 from modules.knowledge.openai_embeddings import embed_source_data
+from modules.policy.effective_limits import strictest_applicable
+from modules.policy.models import ConstraintKind, Enforcement
 from modules.research.sessions import weekend_close
 from modules.risk.authority import authoritative_risk_context
 from modules.risk.engine import RiskEngine
+from modules.risk.live_terms import load_live_trade_terms
 from modules.risk.models import CandidateTrade, Direction
 from modules.strategies.autonomy import automation_policy
 from modules.strategies.compiler import compile_strategy
@@ -34,6 +37,7 @@ from modules.strategies.performance import select_strategy, strategy_library
 from modules.strategies.research_pipeline import latest_strategy_context, resolve_strategy_basis
 from modules.strategies.similarity import compare
 from modules.trading.models import TradeConstruction
+from modules.trading.ticket import build_trade_ticket
 from modules.trading.trade_plans import build_trade_plan
 from packages.shared.store import ResourceRecord, ResourceStore
 from packages.strategy_sdk.schema import StrategySpecification
@@ -1090,25 +1094,79 @@ async def create_approved_trade_plan(
     distance = abs(entry - stop_loss)
     if distance <= 0:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "entry and stop loss must differ")
-    candidate = CandidateTrade(
-        instrument=specification.instruments[0],
-        direction=direction,
-        market_category=str(basis["category"]).lower(),
-        requested_size=Decimal("1"),
-        entry_price=entry,
-        stop_loss=stop_loss,
-        risk_per_unit=distance,
-        asset_class=specification.asset_class,
-        instrument_type=specification.instrument_type,
-        venue_instrument_id=listing_id,
-        specification_version_id=specification_id,
-        quantity_unit=specification.quantity_unit,
-    )
-    try:
-        context = await authoritative_risk_context(
-            db, actor.owner_id, UUID(str(basis["account_id"])), candidate
+    if (direction is Direction.BUY and stop_loss >= entry) or (
+        direction is Direction.SELL and stop_loss <= entry
+    ):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "stop loss is on the wrong side of entry"
         )
+    if any(
+        (direction is Direction.BUY and target <= entry)
+        or (direction is Direction.SELL and target >= entry)
+        for target in raw_targets
+    ):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "target is on the wrong side of entry"
+        )
+    account_id = UUID(str(basis["account_id"]))
+    try:
+        terms = await load_live_trade_terms(
+            db,
+            actor.owner_id,
+            account_id,
+            listing_id,
+            specification_id,
+            specification.instrument_type,
+        )
+        if terms.quantity_unit is not specification.quantity_unit:
+            raise ValueError("strategy quantity unit differs from broker lot unit")
+        candidate = CandidateTrade(
+            instrument=specification.instruments[0],
+            direction=direction,
+            market_category=str(basis["category"]).lower(),
+            requested_size=terms.maximum_stepped_size(),
+            entry_price=entry,
+            stop_loss=stop_loss,
+            risk_per_unit=distance * terms.contract_multiplier,
+            size_increment=terms.quantity_step,
+            asset_class=specification.asset_class,
+            instrument_type=specification.instrument_type,
+            venue_instrument_id=listing_id,
+            specification_version_id=specification_id,
+            quantity_unit=terms.quantity_unit,
+            contract_multiplier=terms.contract_multiplier,
+            tick_size=terms.tick_size,
+            tick_value=terms.tick_value,
+        )
+        context = await authoritative_risk_context(db, actor.owner_id, account_id, candidate)
+        if not context.account_currency_verified:
+            raise ValueError("fresh MT5 broker account currency is required for live sizing")
+        limit = strictest_applicable(context.constraints).get(ConstraintKind.MAX_RISK_PER_TRADE)
+        if limit is None or limit.enforcement is not Enforcement.HARD or limit.value <= 0:
+            raise ValueError(
+                "configure a positive MAX_RISK_PER_TRADE limit in account currency "
+                "before live Trade Plans"
+            )
         risk = RiskEngine().evaluate(context, candidate)
+        ticket = (
+            build_trade_ticket(
+                terms=terms,
+                instrument_type=specification.instrument_type,
+                direction=direction,
+                entry=entry,
+                stop=stop_loss,
+                targets=raw_targets,
+                fractions=[
+                    Decimal(str(item["fraction"])) if item.get("fraction") is not None else None
+                    for item in setup.get("take_profits", [])
+                    if isinstance(item, dict) and item.get("price") is not None
+                ],
+                risk_limit=limit.value,
+                risk=risk,
+            )
+            if risk.approved_size > 0
+            else None
+        )
     except (LookupError, RuntimeError, ValueError) as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     construction = TradeConstruction(
@@ -1120,7 +1178,7 @@ async def create_approved_trade_plan(
         invalidation=invalidation,
         # Keep the construction structurally valid for a BLOCKED plan; the
         # builder replaces this with zero when risk authority hard-blocks it.
-        approved_size=risk.approved_size if risk.approved_size > 0 else Decimal("1"),
+        approved_size=risk.approved_size if risk.approved_size > 0 else terms.quantity_minimum,
         quantity_unit=specification.quantity_unit,
         asset_class=specification.asset_class,
         instrument_type=specification.instrument_type,
@@ -1129,11 +1187,12 @@ async def create_approved_trade_plan(
     )
     plan = build_trade_plan(
         owner_id=actor.owner_id,
-        account_id=UUID(str(basis["account_id"])),
+        account_id=account_id,
         construction=construction,
         strategy_version_id=strategy_id,
         market_fingerprint_id=UUID(str(basis["market_selection_id"])),
         risk=risk,
+        ticket=ticket,
         evidence_refs=tuple(
             [f"strategy:{strategy_id}", *[str(item) for item in draft.data.get("evidence", [])]]
         ),

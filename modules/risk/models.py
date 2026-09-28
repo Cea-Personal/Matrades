@@ -52,8 +52,8 @@ class CandidateTrade(BaseModel):
     contract_multiplier: Decimal = Decimal("1")
     tick_size: Decimal | None = None
     tick_value: Decimal | None = None
-    margin_required: Decimal = Decimal("0")
-    financing_cost: Decimal = Decimal("0")
+    margin_required: Decimal = Field(default=Decimal("0"), ge=0)
+    financing_cost: Decimal = Field(default=Decimal("0"), ge=0)
     underlying_id: UUID | None = None
 
 
@@ -67,6 +67,7 @@ class RiskContext(BaseModel):
     instrument_specifications: dict[str, dict[str, Decimal | str]] = {}
     current_source_cut_id: str | None = None
     active_reservations: list[Decimal] = []
+    account_currency_verified: bool = False
 
 
 class RiskDecision(StrEnum):

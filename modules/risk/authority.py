@@ -73,6 +73,12 @@ async def authoritative_risk_context(
             "fresh broker equity snapshot required before risk evaluation",
         )
     broker = BrokerSnapshot.model_validate(snapshots[0].data)
+    configured_currency = str(account.data.get("currency") or "").upper()
+    if broker.account_currency and broker.account_currency.upper() != configured_currency:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "broker account currency differs from configured trading account currency",
+        )
     account_snapshot = AccountSnapshot(
         account_id=account_id,
         starting_balance=Decimal(str(account.data["starting_balance"])),
@@ -127,8 +133,8 @@ async def authoritative_risk_context(
             market_category=_category(position.symbol),
             currency_exposures=_currency_exposures(position.symbol),
             remaining_loss_to_stop=(
-                abs(position.entry_price - position.stop_loss) * position.volume
-                if position.stop_loss is not None
+                position.loss_to_stop_account_currency
+                if position.stop_loss is not None and position.stop_loss > 0
                 else None
             ),
             unrealized_pnl=position.pnl,
@@ -145,6 +151,7 @@ async def authoritative_risk_context(
     ]
     specifications: dict[str, dict[str, Decimal | str]] = {}
     current_source_cut_id: str | None = None
+    latest_source_update = None
     for record in specification_records:
         raw = record.data.get("specification", record.data)
         specification_id = raw.get("id") or record.data.get("specification_version_id")
@@ -162,8 +169,11 @@ async def authoritative_risk_context(
             "tick_value": Decimal(str(raw.get("tick_value", "0") or "0")),
         }
         source_cut = specifications[str(specification_id)].get("source_cut_id")
-        if source_cut:
+        if source_cut and (
+            latest_source_update is None or record.updated_at > latest_source_update
+        ):
             current_source_cut_id = str(source_cut)
+            latest_source_update = record.updated_at
     active_reservations = list(
         (
             await db.scalars(
@@ -189,4 +199,5 @@ async def authoritative_risk_context(
         instrument_specifications=specifications,
         current_source_cut_id=current_source_cut_id,
         active_reservations=[Decimal(str(item)) for item in active_reservations],
+        account_currency_verified=bool(broker.account_currency),
     )

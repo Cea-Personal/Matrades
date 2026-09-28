@@ -14,6 +14,7 @@ from modules.trading.models import (
     TradePlan,
     TradePlanState,
 )
+from modules.trading.ticket import TargetScenario, TradeTicket
 from packages.shared.domain_types import AssetClass, InstrumentType, QuantityUnit, utc_now
 from tests.fixtures.pretrade import candidate, context
 
@@ -63,6 +64,29 @@ def switches():
     return KillSwitchState(scope="PLATFORM"), KillSwitchState(scope="ACCOUNT")
 
 
+def test_mt5_entry_command_has_hard_take_profit_and_bounded_stop_loss() -> None:
+    plan = make_plan()
+    plan.ticket = TradeTicket(
+        account_currency="USD",
+        requested_risk_limit=Decimal("1000"),
+        potential_loss_before_costs=Decimal("500"),
+        targets=[
+            TargetScenario(
+                price=Decimal("1.095"),
+                profit_before_costs=Decimal("1000"),
+                broker_hard_take_profit=True,
+            ),
+        ],
+    )
+    service = ExecutionService()
+    authorization = service.authorize(plan, permissions(plan.account_id), *switches())
+    command = service.create_command(plan, authorization, idempotency_key="entry-protected-1")
+    assert command.requested_postcondition["take_profit"] == "1.095"
+    assert command.requested_postcondition["max_loss_account_currency"] == str(
+        plan.risk.snapshot.candidate_trade_risk
+    )
+
+
 def test_authorization_requires_enabled_permission():
     plan = make_plan()
     with pytest.raises(PermissionError):
@@ -77,9 +101,7 @@ async def test_dispatch_is_idempotent_and_confirms_broker_outcome():
     service = ExecutionService()
     authorization = service.authorize(plan, permissions(plan.account_id), *switches())
     command = service.create_command(plan, authorization, idempotency_key="entry-eurusd-1")
-    duplicate = service.create_command(
-        plan, authorization, idempotency_key="entry-eurusd-1"
-    )
+    duplicate = service.create_command(plan, authorization, idempotency_key="entry-eurusd-1")
     assert duplicate.id == command.id
     assert service.ledger.outbox[0]["event_type"] == "execution.command.created"
     applied = await service.dispatch(command, authorization, RecordingAdapter())

@@ -64,7 +64,7 @@ export function StrategyMonitoring({ version }: { version?: Resource }) {
       <div className="actions">
         <button className="btn primary" disabled={!canActivate || action.isPending} onClick={() => action.mutate({ path: `/strategies/promote/${version!.id}`, notice: "Strategy monitoring activated. Current decisions appear below as fresh candles arrive." })}>Activate strategy</button>
         <button className="btn" disabled={version?.state !== "ACTIVE" || action.isPending} onClick={() => action.mutate({ path: `/strategies/${version!.id}/transitions`, body: { target: "SUSPENDED" }, notice: "Strategy monitoring suspended." })}>Suspend strategy</button>
-        <button className="btn" disabled={version?.state !== "ACTIVE" || signal?.status !== "SIGNAL" || !signal.expires_at || Date.parse(signal.expires_at) <= now || action.isPending} onClick={() => action.mutate({ path: `/strategies/${version!.id}/trade-plans`, notice: "Trade Plan created using the active strategy signal and current risk checks." })}>Create Trade Plan</button>
+        <button className="btn" disabled={version?.state !== "ACTIVE" || signal?.status !== "SIGNAL" || !signal.expires_at || Date.parse(signal.expires_at) <= now || action.isPending} onClick={() => action.mutate({ path: `/strategies/${version!.id}/trade-plans`, notice: "Trade Plan created. See Trading for broker lot size, entry, stop, and target-profit scenarios." })}>Create Trade Plan</button>
       </div>
       {monitors.isError ? <p role="alert">Unable to load monitoring: {monitors.error.message}</p> : null}
       {(monitors.data ?? []).filter(item => item.state !== "PAPER_TRADING").map(item => <div className="inset" key={item.id}>

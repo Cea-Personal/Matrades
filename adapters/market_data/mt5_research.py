@@ -79,7 +79,13 @@ class Mt5ResearchDataProvider:
                 id=uuid5(NAMESPACE_URL, f"{listing_id}:terms:{terms_key}"),
                 venue_instrument_id=listing.id,
                 effective_from=snapshot.observed_at,
-                price_currency="USD" if "USD" in item.symbol.upper() else "BROKER_QUOTE",
+                price_currency=(
+                    item.profit_currency.upper()
+                    if item.profit_currency
+                    else symbol[3:6]
+                    if (is_forex or is_metal) and len(symbol) >= 6
+                    else "BROKER_QUOTE"
+                ),
                 quantity_unit=QuantityUnit.LOTS,
                 contract_multiplier=item.trade_contract_size,
                 tick_size=item.trade_tick_size,

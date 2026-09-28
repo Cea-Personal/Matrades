@@ -13,6 +13,7 @@ class Enforcement(StrEnum):
 
 
 class ConstraintKind(StrEnum):
+    MAX_RISK_PER_TRADE = "MAX_RISK_PER_TRADE"
     MAX_DAILY_LOSS = "MAX_DAILY_LOSS"
     MAX_TOTAL_DRAWDOWN = "MAX_TOTAL_DRAWDOWN"
     MAX_PORTFOLIO_RISK = "MAX_PORTFOLIO_RISK"

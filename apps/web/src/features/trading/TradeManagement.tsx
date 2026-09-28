@@ -18,6 +18,21 @@ function text(value: unknown, fallback = "—") {
   return value == null || value === "" ? fallback : String(value);
 }
 
+type TicketTarget = { price: string; profit_before_costs: string; research_fraction?: string | null; broker_hard_take_profit: boolean };
+type Ticket = { account_currency: string; requested_risk_limit: string; potential_loss_before_costs: string; targets: TicketTarget[]; costs_excluded: string[]; note: string };
+
+function PlanTicket({ plan }: { plan: Resource }) {
+  const construction = plan.construction as Record<string, unknown> | undefined;
+  const ticket = plan.ticket as Ticket | undefined;
+  if (!construction || !ticket) return <small>{plan.state === "BLOCKED" ? "No trade ticket: risk authority blocked this plan." : "No broker-sized ticket on this plan. Create a fresh plan for live estimates."}</small>;
+  return <div className="inset form-stack">
+    <p><strong>{text(construction.direction)} · {text(construction.approved_size)} {text(construction.quantity_unit)}</strong> · indicative entry {text(construction.entry)} · stop loss {text(construction.stop_loss)}</p>
+    <p>Potential stop loss {ticket.potential_loss_before_costs} {ticket.account_currency} before costs · per-trade limit {ticket.requested_risk_limit} {ticket.account_currency}</p>
+    <ul className="record-list">{ticket.targets.map((target, index) => <li key={`${target.price}-${index}`}><strong>TP{index + 1} {target.price} · +{target.profit_before_costs} {ticket.account_currency} before costs</strong><small>{target.broker_hard_take_profit ? "Broker hard take-profit" : "Advisory only — no automatic partial exit"}{target.research_fraction ? ` · research fraction ${target.research_fraction}` : ""}</small></li>)}</ul>
+    <small>{ticket.note} Estimates exclude {ticket.costs_excluded.join(", ")}. Actual fill price and costs can change risk and outcome.</small>
+  </div>;
+}
+
 export function TradeManagement() {
   const operations = useQuery<Operations>({
     queryKey: ["automation", "operations"],
@@ -57,7 +72,7 @@ export function TradeManagement() {
         )}
       </article>
       {trades.map(trade => <Disclosure key={`chart-${trade.id}`} title={`${text((trade.broker_position as Record<string, unknown> | undefined)?.instrument, text(trade.instrument, trade.id))} · position chart`}><ActiveTradeChart trade={trade} /></Disclosure>)}
-      <article className="card"><h2>Trade Plan lifecycle</h2>{plans.length === 0 ? <p className="empty">No autonomous Trade Plans recorded.</p> : <ProgressiveList items={newestFirst(plans)} label="trade plans">{visible => <ul className="record-list">{visible.map(plan => <li key={plan.id}><strong>{text(plan.instrument, plan.id)}</strong><span>{text(plan.state)} · risk {text((plan.risk as Record<string, unknown> | undefined)?.decision)}</span><small>{new Date(plan.updated_at).toLocaleString()}</small></li>)}</ul>}</ProgressiveList>}</article>
+      <article className="card"><h2>Trade Plan lifecycle</h2>{plans.length === 0 ? <p className="empty">No autonomous Trade Plans recorded.</p> : <ProgressiveList items={newestFirst(plans)} label="trade plans">{visible => <ul className="record-list">{visible.map(plan => <li key={plan.id}><strong>{text((plan.construction as Record<string, unknown> | undefined)?.instrument, text(plan.instrument, plan.id))}</strong><span>{text(plan.state)} · risk {text((plan.risk as Record<string, unknown> | undefined)?.decision)}</span><small>{new Date(plan.updated_at).toLocaleString()}</small><PlanTicket plan={plan} /></li>)}</ul>}</ProgressiveList>}</article>
       <article className="card"><h2>Execution command ledger</h2>{commands.length === 0 ? <p className="empty">No execution commands recorded.</p> : <ProgressiveList items={newestFirst(commands)} label="execution commands">{visible => <div className="table-wrap"><table><thead><tr><th>Action</th><th>State</th><th>Outcome certainty</th><th>Broker order</th><th>Idempotency</th></tr></thead><tbody>{visible.map(command => <tr key={command.id}><td>{text(command.action)}</td><td>{text(command.state)}</td><td>{text(command.outcome_certainty)}</td><td>{text(command.broker_order_id)}</td><td><code>{text(command.idempotency_key)}</code></td></tr>)}</tbody></table></div>}</ProgressiveList>}</article>
     </section>
   );

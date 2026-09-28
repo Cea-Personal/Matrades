@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from modules.risk.models import Direction, RiskResult
+from modules.trading.ticket import TradeTicket
 from packages.shared.domain_types import (
     AssetClass,
     AwareDateTime,
@@ -253,6 +254,7 @@ class TradePlan(BaseModel):
     strategy_version_id: UUID
     market_fingerprint_id: UUID
     risk: RiskResult
+    ticket: TradeTicket | None = None
     policy_status: str = "PASS"
     guardrail_status: str = "PASS"
     critic_status: str = "PASS"

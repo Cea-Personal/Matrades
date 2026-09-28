@@ -194,6 +194,11 @@ string PositionsJson()
       string symbol=PositionGetString(POSITION_SYMBOL);
       double stop_loss=PositionGetDouble(POSITION_SL);
       double take_profit=PositionGetDouble(POSITION_TP);
+      double stop_result=0.0;
+      bool stop_verified=stop_loss>0.0 && OrderCalcProfit(
+         position_type==POSITION_TYPE_BUY ? ORDER_TYPE_BUY : ORDER_TYPE_SELL,
+         symbol,PositionGetDouble(POSITION_VOLUME),
+         PositionGetDouble(POSITION_PRICE_OPEN),stop_loss,stop_result);
       result+="{\"position_id\":\""+IntegerToString((long)PositionGetInteger(POSITION_IDENTIFIER))+"\"";
       result+=",\"account_id\":\""+JsonEscape(InpMatradesAccountId)+"\"";
       result+=",\"symbol\":\""+JsonEscape(symbol)+"\"";
@@ -201,6 +206,8 @@ string PositionsJson()
       result+=",\"volume\":"+DoubleToString(PositionGetDouble(POSITION_VOLUME),8);
       result+=",\"entry_price\":"+DoubleToString(PositionGetDouble(POSITION_PRICE_OPEN),8);
       result+=",\"stop_loss\":"+DoubleToString(stop_loss,8);
+      result+=",\"loss_to_stop_account_currency\":"+
+              (stop_verified ? DoubleToString(MathMax(0.0,-stop_result),8) : "null");
       result+=",\"take_profit\":"+DoubleToString(take_profit,8);
       result+=",\"pnl\":"+DoubleToString(PositionGetDouble(POSITION_PROFIT),8);
       result+=",\"fees\":0";
@@ -221,6 +228,7 @@ string SnapshotJson()
    body+=",\"observed_at\":\""+IsoTime(TimeGMT())+"\"";
    body+=",\"balance\":"+DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE),8);
    body+=",\"equity\":"+DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY),8);
+   body+=",\"account_currency\":\""+JsonEscape(AccountInfoString(ACCOUNT_CURRENCY))+"\"";
    body+=",\"realized_daily_pnl\":"+DoubleToString(RealizedDailyPnl(),8);
    body+=",\"positions\":"+PositionsJson();
    body+=",\"signature\":\"ea-published-over-authenticated-channel\"}";
@@ -311,6 +319,7 @@ string MetalInstrumentsJson()
       result+="{\"symbol\":\""+JsonEscape(symbol)+"\"";
       result+=",\"path\":\""+JsonEscape(SymbolInfoString(symbol,SYMBOL_PATH))+"\"";
       result+=",\"description\":\""+JsonEscape(SymbolInfoString(symbol,SYMBOL_DESCRIPTION))+"\"";
+      result+=",\"profit_currency\":\""+JsonEscape(SymbolInfoString(symbol,SYMBOL_CURRENCY_PROFIT))+"\"";
       result+=",\"bid\":"+DoubleToString(bid,8);
       result+=",\"ask\":"+DoubleToString(ask,8);
       result+=",\"digits\":"+IntegerToString((long)SymbolInfoInteger(symbol,SYMBOL_DIGITS));
@@ -433,11 +442,15 @@ double JsonNumber(string body,string key)
    if(start<0)
       return(0.0);
    start+=StringLen(marker);
+   bool quoted=StringSubstr(body,start,1)=="\"";
+   if(quoted)
+      start++;
    int end=start;
    while(end<StringLen(body))
      {
       string character=StringSubstr(body,end,1);
-      if(character=="," || character=="}" || character=="]")
+      if((quoted && character=="\"") ||
+         (!quoted && (character=="," || character=="}" || character=="]")))
          break;
       end++;
      }
@@ -515,6 +528,19 @@ bool ExecutePlaceOrder(string command,string &broker_order_id,string &error_code
    request.tp=JsonNumber(command,"take_profit");
    request.deviation=20;
    request.type_filling=ORDER_FILLING_FOK;
+   // Recalculate the stop risk at the actual broker side, including the
+   // maximum allowed price deviation. OrderCalcProfit returns account currency.
+   double max_loss=JsonNumber(command,"max_loss_account_currency");
+   double worst_price=request.price+(request.type==ORDER_TYPE_BUY ? 1.0 : -1.0)*
+                      request.deviation*SymbolInfoDouble(symbol,SYMBOL_POINT);
+   double stop_result=0.0;
+   if(max_loss<=0.0 || request.sl<=0.0 || request.tp<=0.0 ||
+      !OrderCalcProfit(request.type,symbol,volume,worst_price,request.sl,stop_result) ||
+      stop_result>=0.0 || -stop_result>max_loss)
+     {
+      error_code="broker_stop_risk_exceeds_authorized_limit";
+      return(false);
+     }
    if(!OrderSend(request,result) || (result.retcode!=TRADE_RETCODE_DONE && result.retcode!=TRADE_RETCODE_PLACED))
      {
       error_code=IntegerToString((long)(result.retcode>0 ? result.retcode : GetLastError()));

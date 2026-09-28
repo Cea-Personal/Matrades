@@ -10,9 +10,16 @@ from packages.shared.domain_types import AssetClass, InstrumentType, ResearchLan
 
 
 @pytest.mark.parametrize(
-    "asset,symbol", [(AssetClass.METALS, "XAGUSD.a"), (AssetClass.FOREX, "EURUSD.a")]
+    "asset,symbol,profit_currency",
+    [
+        (AssetClass.METALS, "XAGUSD.a", "USD"),
+        (AssetClass.FOREX, "EURUSD.a", "USD"),
+        (AssetClass.FOREX, "USDJPY.a", "JPY"),
+    ],
 )
-async def test_mt5_market_snapshot_becomes_executable_metal_cfd_evidence(asset, symbol) -> None:
+async def test_mt5_market_snapshot_becomes_executable_metal_cfd_evidence(
+    asset, symbol, profit_currency
+) -> None:
     account_id = uuid4()
     observed_at = datetime.now(UTC)
 
@@ -80,4 +87,5 @@ async def test_mt5_market_snapshot_becomes_executable_metal_cfd_evidence(asset, 
     assert values[0].listing.asset_class == asset
     assert values[0].listing.executable is True
     assert values[0].specification.contract_multiplier == 5000
+    assert values[0].specification.price_currency == profit_currency
     assert values[0].specification.provenance["execution_authority"] == "MT5_BROKER"
