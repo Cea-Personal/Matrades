@@ -11,11 +11,11 @@ services:
   postgres:
     image: timescale/timescaledb-ha:pg17
     environment:
-      POSTGRES_USER: matrades
-      POSTGRES_PASSWORD: matrades
-      POSTGRES_DB: matrades
+      POSTGRES_USER:  ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U matrades"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -37,8 +37,8 @@ services:
       - path: ../../.env
         required: false
     environment:
-      MATRADES_DATABASE_URL: postgresql+asyncpg://matrades:matrades@postgres:5432/matrades
-      MATRADES_REDIS_URL: redis://redis:6379/0
+      MATRADES_DATABASE_URL: ${MATRADES_DATABASE_URL}
+      MATRADES_REDIS_URL: ${MATRADES_REDIS_URL}
       MATRADES_RESEARCH_ARTIFACT_ROOT: /app/data/research_cycles
       MATRADES_RESEARCH_DATA_ROOT: /app/data/quantitative_research
       MATRADES_MT5_RUNTIME_CONTROL_URL: ${MATRADES_MT5_RUNTIME_CONTROL_URL:-}
