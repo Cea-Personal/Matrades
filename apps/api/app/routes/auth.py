@@ -39,6 +39,7 @@ logger = logging.getLogger(__name__)
 class SignupRequest(BaseModel):
     email: str = Field(max_length=320)
     password: str = Field(min_length=12, max_length=256)
+    setup_code: str | None = None
 
 
 class TokenRequest(BaseModel):
@@ -101,6 +102,33 @@ def _require_email_delivery() -> str:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE, "authentication email is unavailable"
         ) from exc
+
+
+def _check_owner_setup_code(code: str | None) -> None:
+    settings = get_settings()
+    if settings.env != "production" or settings.auth_email_verification_enabled:
+        return
+    secret = settings.owner_setup_secret
+    if secret is None or len(secret.get_secret_value()) < 32:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "owner setup code is not configured",
+        )
+    if not code or not hmac.compare_digest(code, secret.get_secret_value()):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "invalid owner setup code")
+
+
+def _issue_mfa_bootstrap(db: AsyncSession, user: UserRecord) -> str:
+    raw = secrets.token_urlsafe(40)
+    db.add(
+        AuthTokenRecord(
+            user_id=user.id,
+            kind="MFA_BOOTSTRAP",
+            token_hash=_digest(raw),
+            expires_at=utc_now() + timedelta(minutes=30),
+        )
+    )
+    return raw
 
 
 async def _signup_available(db: AsyncSession) -> bool:
@@ -207,15 +235,25 @@ async def _token_user(
 
 @router.get("/registration-status")
 async def registration_status(db: Annotated[AsyncSession, Depends(get_db)]):
-    return {"signup_available": await _signup_available(db)}
+    settings = get_settings()
+    return {
+        "signup_available": await _signup_available(db),
+        "email_verification_enabled": settings.auth_email_verification_enabled,
+        "setup_code_required": settings.env == "production"
+        and not settings.auth_email_verification_enabled,
+    }
 
 
 @router.post("/signup", status_code=status.HTTP_202_ACCEPTED)
 async def signup(payload: SignupRequest, db: Annotated[AsyncSession, Depends(get_db)]):
     email = _normalized_email(payload.email)
-    _require_email_delivery()
     if not await _signup_available(db):
         raise HTTPException(status.HTTP_409_CONFLICT, "signup is closed for this installation")
+    settings = get_settings()
+    if settings.auth_email_verification_enabled:
+        _require_email_delivery()
+    else:
+        _check_owner_setup_code(payload.setup_code)
     user = UserRecord(id=uuid4(), email=email, password_hash=hash_password(payload.password))
     db.add(user)
     db.add(SignupGateRecord(id=1, user_id=user.id))
@@ -226,16 +264,21 @@ async def signup(payload: SignupRequest, db: Annotated[AsyncSession, Depends(get
         raise HTTPException(
             status.HTTP_409_CONFLICT, "signup is closed for this installation"
         ) from exc
-    raw = secrets.token_urlsafe(40)
-    token = AuthTokenRecord(
-        user_id=user.id,
-        kind="EMAIL_VERIFICATION",
-        token_hash=_digest(raw),
-        expires_at=utc_now() + timedelta(hours=24),
-    )
-    db.add(token)
     await ResourceStore(db).audit(
         user.owner_id, user.id, "user.registered", "user", user.id, {"email": email}
+    )
+    result = user.security_state()
+    if not settings.auth_email_verification_enabled:
+        result["enrollment_token"] = _issue_mfa_bootstrap(db, user)
+        return result
+    raw = secrets.token_urlsafe(40)
+    db.add(
+        AuthTokenRecord(
+            user_id=user.id,
+            kind="EMAIL_VERIFICATION",
+            token_hash=_digest(raw),
+            expires_at=utc_now() + timedelta(hours=24),
+        )
     )
     try:
         development_token = await deliver_auth_link(email, "verify", raw)
@@ -244,7 +287,6 @@ async def signup(payload: SignupRequest, db: Annotated[AsyncSession, Depends(get
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "verification email could not be sent; retry signup",
         ) from exc
-    result = user.security_state()
     if development_token:
         result["verification_token"] = development_token
     return result
@@ -298,15 +340,7 @@ async def verify_email(payload: TokenRequest, db: Annotated[AsyncSession, Depend
     token, user = await _token_user(db, payload.token, "EMAIL_VERIFICATION")
     token.used_at = utc_now()
     user.email_verified = True
-    enrollment_token = secrets.token_urlsafe(40)
-    db.add(
-        AuthTokenRecord(
-            user_id=user.id,
-            kind="MFA_BOOTSTRAP",
-            token_hash=_digest(enrollment_token),
-            expires_at=utc_now() + timedelta(minutes=30),
-        )
-    )
+    enrollment_token = _issue_mfa_bootstrap(db, user)
     await ResourceStore(db).audit(
         user.owner_id, user.id, "user.email_verified", "user", user.id, {}
     )
@@ -377,7 +411,11 @@ async def begin_session(payload: LoginRequest, db: Annotated[AsyncSession, Depen
     )
     if user is None or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid credentials")
-    if not user.email_verified or not user.mfa_enabled:
+    if get_settings().auth_email_verification_enabled and not user.email_verified:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "email verification and MFA are required")
+    if not user.mfa_enabled:
+        if not get_settings().auth_email_verification_enabled:
+            return {"enrollment_token": _issue_mfa_bootstrap(db, user)}
         raise HTTPException(status.HTTP_403_FORBIDDEN, "email verification and MFA are required")
     challenge = AuthTokenRecord(
         user_id=user.id,
@@ -456,7 +494,9 @@ async def me(
     user = await db.get(UserRecord, session.user_id)
     if user is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "user unavailable")
-    return user.security_state()
+    result = user.security_state()
+    result["email_verification_required"] = get_settings().auth_email_verification_enabled
+    return result
 
 
 @router.delete("/sessions", status_code=status.HTTP_204_NO_CONTENT)

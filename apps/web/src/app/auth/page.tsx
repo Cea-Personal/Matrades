@@ -8,6 +8,7 @@ import { useAuth } from "@/lib/providers";
 
 type SignupState = {
   verification_token?: string;
+  enrollment_token?: string;
 };
 
 type VerificationState = {
@@ -27,11 +28,14 @@ export default function AuthenticationPage() {
   const [mode, setMode] = useState<"login" | "signup" | "recovery">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [setupCode, setSetupCode] = useState("");
   const [code, setCode] = useState("");
   const [verificationToken, setVerificationToken] = useState("");
   const [awaitingEmail, setAwaitingEmail] = useState(false);
   const [recoverySent, setRecoverySent] = useState(false);
   const [signupAvailable, setSignupAvailable] = useState(false);
+  const [emailVerificationEnabled, setEmailVerificationEnabled] = useState(false);
+  const [setupCodeRequired, setSetupCodeRequired] = useState(false);
   const [enrollment, setEnrollment] = useState<EnrollmentState | null>(null);
   const [challengeId, setChallengeId] = useState("");
   const [recoveryToken, setRecoveryToken] = useState("");
@@ -41,8 +45,13 @@ export default function AuthenticationPage() {
 
   useEffect(() => {
     let active = true;
-    void api<{ signup_available: boolean }>("/auth/registration-status")
-      .then(result => { if (active) setSignupAvailable(result.signup_available); })
+    void api<{ signup_available: boolean; email_verification_enabled: boolean; setup_code_required: boolean }>("/auth/registration-status")
+      .then(result => {
+        if (!active) return;
+        setSignupAvailable(result.signup_available);
+        setEmailVerificationEnabled(result.email_verification_enabled);
+        setSetupCodeRequired(result.setup_code_required);
+      })
       .catch(() => { if (active) setSignupAvailable(false); });
     const fragment = new URLSearchParams(window.location.hash.slice(1));
     const verification = fragment.get("verify");
@@ -68,6 +77,15 @@ export default function AuthenticationPage() {
     }
   };
 
+  const startEnrollment = async (token: string) => {
+    const created = await api<EnrollmentState>("/auth/mfa/enrollments", {
+      method: "POST",
+      headers: { "X-Enrollment-Token": token },
+    });
+    setEnrollment(created);
+    setAwaitingEmail(false);
+  };
+
   const begin = (event: FormEvent) => {
     event.preventDefault();
     void run(async () => {
@@ -81,17 +99,19 @@ export default function AuthenticationPage() {
       } else if (mode === "signup") {
         const result = await api<SignupState>("/auth/signup", {
           method: "POST",
-          body: JSON.stringify({ email, password }),
+          body: JSON.stringify({ email, password, setup_code: setupCode || undefined }),
         });
-        if (result.verification_token) setVerificationToken(result.verification_token);
+        if (result.enrollment_token) await startEnrollment(result.enrollment_token);
+        else if (result.verification_token) setVerificationToken(result.verification_token);
         else setAwaitingEmail(true);
         setSignupAvailable(false);
       } else {
-        const result = await api<{ challenge_id: string }>("/auth/sessions", {
+        const result = await api<{ challenge_id?: string; enrollment_token?: string }>("/auth/sessions", {
           method: "POST",
           body: JSON.stringify({ email, password }),
         });
-        setChallengeId(result.challenge_id);
+        if (result.enrollment_token) await startEnrollment(result.enrollment_token);
+        else if (result.challenge_id) setChallengeId(result.challenge_id);
       }
     });
   };
@@ -102,12 +122,7 @@ export default function AuthenticationPage() {
         method: "POST",
         body: JSON.stringify({ token: verificationToken }),
       });
-      const created = await api<EnrollmentState>("/auth/mfa/enrollments", {
-        method: "POST",
-        headers: { "X-Enrollment-Token": result.enrollment_token },
-      });
-      setEnrollment(created);
-      setAwaitingEmail(false);
+      await startEnrollment(result.enrollment_token);
     });
 
   const resendVerification = () =>
@@ -153,11 +168,12 @@ export default function AuthenticationPage() {
       <div className="auth-card">
         <p className="eyebrow">Secure workspace</p>
         <h1>{mode === "login" ? "Sign in to Matrades" : mode === "signup" ? "Create your Matrades account" : "Recover your account"}</h1>
-        <p className="muted">Verified email and an authenticator challenge protect trading configuration.</p>
+        <p className="muted">{emailVerificationEnabled ? "Verified email and an authenticator challenge protect trading configuration." : "An authenticator challenge protects trading configuration."}</p>
         {!verificationToken && !challengeId && !enrollment && !recoveryToken && !awaitingEmail && !recoverySent && (
           <form onSubmit={begin} className="form-stack">
             <label>Email<input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} /></label>
             {mode !== "recovery" && <label>Password<input type="password" minLength={12} required value={password} onChange={(e) => setPassword(e.target.value)} /></label>}
+            {mode === "signup" && setupCodeRequired && <label>Owner setup code<input type="password" required value={setupCode} onChange={(e) => setSetupCode(e.target.value)} /></label>}
             <button className="btn primary" disabled={busy}>{busy ? "Working…" : mode === "login" ? "Continue to MFA" : mode === "signup" ? "Create account" : "Send recovery link"}</button>
           </form>
         )}
@@ -211,7 +227,7 @@ export default function AuthenticationPage() {
               {mode === "login" ? "Set up the owner account" : "Already registered? Sign in"}
             </button>}
             {mode === "login" && <button className="text-button" onClick={() => setMode("recovery")}>Forgot password?</button>}
-            {mode === "login" && !signupAvailable && error.includes("email verification and MFA") && <button className="text-button" onClick={() => { setError(""); setAwaitingEmail(true); }}>Resend verification link</button>}
+            {mode === "login" && emailVerificationEnabled && !signupAvailable && error.includes("email verification and MFA") && <button className="text-button" onClick={() => { setError(""); setAwaitingEmail(true); }}>Resend verification link</button>}
           </div>
         )}
       </div>

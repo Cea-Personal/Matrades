@@ -10,12 +10,13 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from apps.api.app.dependencies import get_db
 from apps.api.app.main import create_app
+from apps.api.app.routes import auth as auth_routes
 from modules.identity import email_delivery
 from modules.identity.service import totp
 from packages.shared.config import Settings, get_settings
 
 
-def test_signup_verification_mfa_login_and_owner_scoped_api(tmp_path, monkeypatch) -> None:
+def test_signup_mfa_login_and_owner_scoped_api(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
         email_delivery,
         "get_settings",
@@ -37,13 +38,13 @@ def test_signup_verification_mfa_login_and_owner_scoped_api(tmp_path, monkeypatc
     app = create_app(test_engine)
     app.dependency_overrides[get_db] = test_db
     with TestClient(app) as client:
-        assert client.get("/api/v1/auth/registration-status").json() == {"signup_available": True}
+        assert client.get("/api/v1/auth/registration-status").json()["signup_available"] is True
         signup = client.post(
             "/api/v1/auth/signup",
             json={"email": email, "password": "correct-horse-battery"},
         )
         assert signup.status_code == 202
-        assert client.get("/api/v1/auth/registration-status").json() == {"signup_available": False}
+        assert client.get("/api/v1/auth/registration-status").json()["signup_available"] is False
         assert (
             client.post(
                 "/api/v1/auth/signup",
@@ -54,14 +55,11 @@ def test_signup_verification_mfa_login_and_owner_scoped_api(tmp_path, monkeypatc
             ).status_code
             == 409
         )
-        verification = client.post(
-            "/api/v1/auth/email-verifications",
-            json={"token": signup.json()["verification_token"]},
-        )
-        assert verification.status_code == 200
+        assert signup.json()["email_verified"] is False
+        assert "verification_token" not in signup.json()
         enrollment = client.post(
             "/api/v1/auth/mfa/enrollments",
-            headers={"X-Enrollment-Token": verification.json()["enrollment_token"]},
+            headers={"X-Enrollment-Token": signup.json()["enrollment_token"]},
         )
         assert enrollment.status_code == 201
         recovery_code = enrollment.json()["recovery_codes"][0]
@@ -74,6 +72,7 @@ def test_signup_verification_mfa_login_and_owner_scoped_api(tmp_path, monkeypatc
             },
         )
         assert confirmation.status_code == 200
+        assert client.get("/api/v1/auth/me").json()["email_verification_required"] is False
         created = client.post(
             "/api/v1/configuration/accounts",
             json={"name": "Primary", "starting_balance": "200000", "currency": "USD"},
@@ -215,9 +214,11 @@ def test_production_signup_sends_link_without_exposing_token_and_closes_signup(
         smtp_username="mailer",
         smtp_password=SecretStr("smtp-password"),
         smtp_from="Matrades <auth@matrades.example>",
+        auth_email_verification_enabled=True,
     )
     delivery = {"settings": configured.model_copy(update={"smtp_host": None}), "fail": False}
     monkeypatch.setattr(email_delivery, "get_settings", lambda: delivery["settings"])
+    monkeypatch.setattr(auth_routes, "get_settings", lambda: delivery["settings"])
     sent = []
 
     def send(message, _) -> None:
@@ -244,11 +245,11 @@ def test_production_signup_sends_link_without_exposing_token_and_closes_signup(
         email = "only-owner@example.com"
         credentials = {"email": email, "password": "correct-horse-battery"}
         assert client.post("/api/v1/auth/signup", json=credentials).status_code == 503
-        assert client.get("/api/v1/auth/registration-status").json() == {"signup_available": True}
+        assert client.get("/api/v1/auth/registration-status").json()["signup_available"] is True
         delivery["settings"] = configured
         delivery["fail"] = True
         assert client.post("/api/v1/auth/signup", json=credentials).status_code == 503
-        assert client.get("/api/v1/auth/registration-status").json() == {"signup_available": True}
+        assert client.get("/api/v1/auth/registration-status").json()["signup_available"] is True
         delivery["fail"] = False
         signup = client.post(
             "/api/v1/auth/signup",
@@ -268,7 +269,7 @@ def test_production_signup_sends_link_without_exposing_token_and_closes_signup(
             ).status_code
             == 409
         )
-        assert client.get("/api/v1/auth/registration-status").json() == {"signup_available": False}
+        assert client.get("/api/v1/auth/registration-status").json()["signup_available"] is False
         verified = client.post("/api/v1/auth/email-verifications", json={"token": token.group(1)})
         assert verified.status_code == 200
         assert (
@@ -289,3 +290,63 @@ def test_production_signup_sends_link_without_exposing_token_and_closes_signup(
         assert recovered.status_code == 202
         assert "recovery_token" not in recovered.json()
         assert "https://matrades.example/auth#recover=" in sent[-1].get_content()
+
+
+def test_production_owner_setup_code_and_resume_mfa_without_email(tmp_path, monkeypatch) -> None:
+    configured = Settings(
+        _env_file=None,
+        env="production",
+        auth_email_verification_enabled=False,
+        owner_setup_secret=SecretStr("owner-setup-secret-longer-than-32-characters"),
+    )
+    settings_holder = {"settings": configured.model_copy(update={"owner_setup_secret": None})}
+    monkeypatch.setattr(auth_routes, "get_settings", lambda: settings_holder["settings"])
+    test_engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'setup-auth.db'}")
+    factory = async_sessionmaker(test_engine, expire_on_commit=False)
+
+    async def test_db():
+        async with factory() as session:
+            try:
+                yield session
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+
+    app = create_app(test_engine)
+    app.dependency_overrides[get_db] = test_db
+    with TestClient(app) as client:
+        assert client.get("/api/v1/auth/registration-status").json() == {
+            "signup_available": True,
+            "email_verification_enabled": False,
+            "setup_code_required": True,
+        }
+        credentials = {"email": "owner@example.com", "password": "correct-horse-battery"}
+        assert client.post("/api/v1/auth/signup", json=credentials).status_code == 503
+        settings_holder["settings"] = configured
+        assert client.post("/api/v1/auth/signup", json=credentials).status_code == 403
+        assert (
+            client.post(
+                "/api/v1/auth/signup", json={**credentials, "setup_code": "wrong-code"}
+            ).status_code
+            == 403
+        )
+        assert client.get("/api/v1/auth/registration-status").json()["signup_available"] is True
+        signup = client.post(
+            "/api/v1/auth/signup",
+            json={**credentials, "setup_code": configured.owner_setup_secret.get_secret_value()},
+        )
+        assert signup.status_code == 202
+        assert signup.json()["email_verified"] is False
+        assert "enrollment_token" in signup.json()
+        assert "verification_token" not in signup.json()
+        resumed = client.post("/api/v1/auth/sessions", json=credentials)
+        assert resumed.status_code == 202
+        assert "enrollment_token" in resumed.json()
+        assert (
+            client.post(
+                "/api/v1/auth/mfa/enrollments",
+                headers={"X-Enrollment-Token": resumed.json()["enrollment_token"]},
+            ).status_code
+            == 201
+        )

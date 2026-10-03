@@ -24,7 +24,9 @@ test("signup is unavailable after the installation has an owner", async () => {
 
 test("first signup waits for an email link instead of showing a development token", async () => {
   vi.mocked(api).mockImplementation(async path => {
-    if (path === "/auth/registration-status") return { signup_available: true };
+    if (path === "/auth/registration-status") return {
+      signup_available: true, email_verification_enabled: true, setup_code_required: false,
+    };
     if (path === "/auth/signup") return { email_verified: false };
     throw new Error(`Unexpected endpoint ${path}`);
   });
@@ -36,6 +38,50 @@ test("first signup waits for an email link instead of showing a development toke
   expect(await screen.findByText(/Check your email for a verification link/)).toBeInTheDocument();
   expect(screen.queryByText(/development mode/i)).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Resend verification email" })).toBeInTheDocument();
+});
+
+test("signup with a setup code opens authenticator enrollment without email", async () => {
+  vi.mocked(api).mockImplementation(async path => {
+    if (path === "/auth/registration-status") return {
+      signup_available: true, email_verification_enabled: false, setup_code_required: true,
+    };
+    if (path === "/auth/signup") return { enrollment_token: "bootstrap" };
+    if (path === "/auth/mfa/enrollments") return {
+      enrollment_id: "enrollment", secret: "TOTPSECRET", setup_uri: "otpauth://totp/example",
+      recovery_codes: ["one-time-recovery"],
+    };
+    throw new Error(`Unexpected endpoint ${path}`);
+  });
+  render(<AuthenticationPage />);
+  fireEvent.click(await screen.findByRole("button", { name: "Set up the owner account" }));
+  fireEvent.change(screen.getByLabelText("Email"), { target: { value: "owner@example.com" } });
+  fireEvent.change(screen.getByLabelText("Password"), { target: { value: "correct-horse-battery" } });
+  fireEvent.change(screen.getByLabelText("Owner setup code"), { target: { value: "private-setup-code" } });
+  fireEvent.click(screen.getByRole("button", { name: "Create account" }));
+  expect(await screen.findByText(/Save these recovery codes once/)).toBeInTheDocument();
+  expect(screen.queryByText(/Check your email for a verification link/)).not.toBeInTheDocument();
+  expect(vi.mocked(api).mock.calls).toContainEqual([
+    "/auth/signup", expect.objectContaining({ body: expect.stringContaining("private-setup-code") }),
+  ]);
+});
+
+test("signing in before MFA setup resumes authenticator enrollment", async () => {
+  vi.mocked(api).mockImplementation(async path => {
+    if (path === "/auth/registration-status") return {
+      signup_available: false, email_verification_enabled: false, setup_code_required: true,
+    };
+    if (path === "/auth/sessions") return { enrollment_token: "resume-bootstrap" };
+    if (path === "/auth/mfa/enrollments") return {
+      enrollment_id: "enrollment", secret: "TOTPSECRET", setup_uri: "otpauth://totp/example",
+      recovery_codes: ["one-time-recovery"],
+    };
+    throw new Error(`Unexpected endpoint ${path}`);
+  });
+  render(<AuthenticationPage />);
+  fireEvent.change(screen.getByLabelText("Email"), { target: { value: "owner@example.com" } });
+  fireEvent.change(screen.getByLabelText("Password"), { target: { value: "correct-horse-battery" } });
+  fireEvent.click(screen.getByRole("button", { name: "Continue to MFA" }));
+  expect(await screen.findByText(/Save these recovery codes once/)).toBeInTheDocument();
 });
 
 test("an email fragment verifies the address and opens MFA enrollment", async () => {

@@ -12,6 +12,7 @@ export type CurrentUser = {
   owner_id: string;
   email: string;
   email_verified: boolean;
+  email_verification_required: boolean;
   mfa_enabled: boolean;
   role: string;
 };

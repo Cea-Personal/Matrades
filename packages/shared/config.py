@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     smtp_password: SecretStr | None = None
     smtp_from: str | None = None
     auth_dev_tokens_enabled: bool = False
+    auth_email_verification_enabled: bool = False
+    owner_setup_secret: SecretStr | None = None
     mt5_authority_token: SecretStr = Field(default=SecretStr("development-mt5-authority-token"))
     blob_root: Path = Path("data/blobs")
     codex_enabled: bool = True
