@@ -49,6 +49,16 @@ API docs are at `http://localhost:8000/docs`; the web UI is at `http://localhost
 
 ## Connections and MT5
 
+When adding a trading account under **Configuration → Accounts & risk**, enter both its
+starting balance and its current balance at setup. Matrades shows the difference as
+balance change, not trading P&L: deposits and withdrawals can also change balance.
+Once broker snapshots arrive, the overview shows the broker balance and equity instead.
+Live lot sizing, drawdown hard limits, and trade authorization continue to require a
+fresh broker equity snapshot; a manually entered balance never substitutes for one.
+Fresh broker equity affects available risk capacity and therefore approved volume.
+The manually entered balance does not set the market-derived entry price or stop level.
+Older API clients that omit current balance default it to starting balance.
+
 Open **Connections** in the main navigation. First save an encrypted credential when a provider
 requires one, then create a named connection for Twelve Data, Coinbase, CoinGecko, FRED, a
 calendar/news HTTPS endpoint, or the MT5 Bridge. **Test** performs a real bounded health probe and

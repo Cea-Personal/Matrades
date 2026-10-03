@@ -81,7 +81,11 @@ export function OverviewDashboard() {
   const currency = String(history.data?.currency || account?.currency || "USD");
   const points = (history.data?.points ?? []).filter(point => point.equity != null && point.balance != null && Number.isFinite(Number(point.equity)) && Number.isFinite(Number(point.balance)) && Number.isFinite(Date.parse(point.observed_at))).sort((a, b) => Date.parse(a.observed_at) - Date.parse(b.observed_at));
   const latest = points.at(-1);
-  const change = points.length > 1 && Number(points[0].equity) > 0 ? (Number(latest!.equity) / Number(points[0].equity) - 1) * 100 : null;
+  const startingBalance = Number(account?.starting_balance);
+  const currentBalance = latest?.balance ?? account?.current_balance ?? account?.starting_balance;
+  const balanceChange = account && currentBalance != null && Number.isFinite(startingBalance) && Number.isFinite(Number(currentBalance))
+    ? Number(currentBalance) - startingBalance : null;
+  const change = latest && startingBalance > 0 ? (Number(latest.equity) / startingBalance - 1) * 100 : null;
   const age = now && latest ? now.getTime() - Date.parse(latest.observed_at) : null;
   const live = !history.isError && age !== null && age >= 0 && age < 60_000;
   const dailyLimit = limits.data?.effective.MAX_DAILY_LOSS;
@@ -139,10 +143,11 @@ export function OverviewDashboard() {
       <article className="overview-panel overview-equity" aria-labelledby="equity-heading">
         <div className="panel-heading"><h2 id="equity-heading">Account Equity <span>({live ? "Live" : "Recorded"})</span></h2></div>
         {ownedAccounts.length ? <select className="equity-account" aria-label="Equity account" value={account?.id ?? ""} onChange={event => setAccountId(event.target.value)}>{ownedAccounts.map(item => <option value={item.id} key={item.id}>{String(item.name ?? item.id)}</option>)}</select> : null}
-        <div className="equity-headline"><strong>{money(latest?.equity, currency)}</strong>{change !== null ? <span className={change < 0 ? "bad" : "good"}>{change > 0 ? "+" : ""}{change.toFixed(1)}% <small>in view</small></span> : null}</div>
+        <div className="equity-headline"><strong>{money(latest?.equity, currency)}</strong>{change !== null ? <span className={change < 0 ? "bad" : "good"}>{change > 0 ? "+" : ""}{change.toFixed(1)}% <small>since start</small></span> : null}</div>
         {history.isError || accounts.isError ? <p className="overview-empty">Equity history unavailable. {latest ? "Showing last recorded values." : "Try again when the connection is restored."}</p> : null}
         {points.length > 1 ? <EquityChart points={points} currency={currency} /> : <div className="overview-empty equity-empty">{accounts.isPending || (account && history.isPending) ? "Loading account history…" : !account ? <><span>No trading account yet.</span><Link href="/configuration">Configure an account →</Link></> : "The chart will appear after two broker snapshots are recorded."}</div>}
-        <div className="equity-footer"><span>Starting Equity <strong>{money(account?.starting_balance, currency)}</strong></span><span>Max Daily Loss <strong>{account && limits.isPending ? "…" : dailyLimitLabel}</strong></span></div>
+        <div className="equity-footer"><span>Starting balance <strong>{money(account?.starting_balance, currency)}</strong></span><span>{latest ? "Broker balance" : account?.current_balance != null ? "Balance entered at setup" : "Assumed opening balance"} <strong>{money(currentBalance, currency)}</strong></span><span>Balance change <strong className={balanceChange !== null && balanceChange < 0 ? "bad" : ""}>{balanceChange === null ? "—" : `${balanceChange > 0 ? "+" : ""}${money(balanceChange, currency)}`}</strong></span><span>Max Daily Loss <strong>{account && limits.isPending ? "…" : dailyLimitLabel}</strong></span></div>
+        {account ? <small className="muted">Balance change is not trading P&amp;L when deposits or withdrawals have occurred. Trade sizing requires a fresh broker snapshot.</small> : null}
         {latest ? <small className="equity-timestamp">Last snapshot {relativeTime(latest.observed_at, now)}{history.isError ? " · connection unavailable" : ""}</small> : null}
       </article>
 

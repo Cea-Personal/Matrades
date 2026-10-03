@@ -75,12 +75,18 @@ def test_signup_mfa_login_and_owner_scoped_api(tmp_path, monkeypatch) -> None:
         assert client.get("/api/v1/auth/me").json()["email_verification_required"] is False
         created = client.post(
             "/api/v1/configuration/accounts",
-            json={"name": "Primary", "starting_balance": "200000", "currency": "USD"},
+            json={
+                "name": "Primary",
+                "starting_balance": "200000",
+                "current_balance": "198000",
+                "currency": "USD",
+            },
         )
         assert created.status_code == 201
         listed = client.get("/api/v1/configuration/accounts")
         assert listed.status_code == 200
         assert [item["name"] for item in listed.json()] == ["Primary"]
+        assert listed.json()[0]["current_balance"] == "198000"
         account_id = created.json()["id"]
         guardrail = client.post(
             "/api/v1/configuration/guardrails",

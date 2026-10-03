@@ -41,6 +41,7 @@ class AccountInput(BaseModel):
     currency: str = Field(default="USD", min_length=3, max_length=3)
     kind: str = "PERSONAL"
     starting_balance: Decimal = Field(gt=0)
+    current_balance: Decimal | None = Field(default=None, gt=0)
     broker_account_reference: str | None = None
     prop_firm: str | None = None
     program: str | None = None
@@ -174,11 +175,15 @@ async def create_account(
     actor: Annotated[Actor, Depends(require_roles(Role.OWNER, Role.OPERATOR))],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
+    data = payload.model_dump(mode="json")
+    # Existing API clients may omit the new field; the opening balance then
+    # matches the starting balance until a broker snapshot is available.
+    data["current_balance"] = str(payload.current_balance or payload.starting_balance)
     record = await ResourceStore(db).create(
         "account",
         actor.owner_id,
         {
-            **payload.model_dump(mode="json"),
+            **data,
             "research_schedule": _default_research_schedule(),
             "forex_factory_schedule": _default_forex_factory_schedule(),
             "strategy_validation_automation": StrategyAutomationPolicy().model_dump(mode="json"),
@@ -200,11 +205,14 @@ async def update_account(
     record = await store.get("account", account_id, actor.owner_id)
     if record is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "account not found")
+    changes = payload.model_dump(mode="json", exclude_unset=True)
+    if changes.get("current_balance") is None:
+        changes.pop("current_balance", None)
     updated = await store.update(
         record,
         {
             **record.data,
-            **payload.model_dump(mode="json"),
+            **changes,
             "research_schedule": record.data.get("research_schedule", _default_research_schedule()),
             "forex_factory_schedule": record.data.get(
                 "forex_factory_schedule", _default_forex_factory_schedule()

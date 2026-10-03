@@ -21,6 +21,7 @@ class TradingAccount(BaseModel):
     currency: str = "USD"
     kind: AccountKind = AccountKind.PERSONAL
     starting_balance: Decimal
+    current_balance: Decimal | None = Field(default=None, gt=0)
     active: bool = True
 
 

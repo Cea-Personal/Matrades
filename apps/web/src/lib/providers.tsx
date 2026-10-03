@@ -65,7 +65,8 @@ export function useAuth() {
 function AuthBoundary({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const auth = useQuery<CurrentUser>({
+  const queryClient = useQueryClient();
+  const auth = useQuery<CurrentUser | null>({
     queryKey: ["auth", "me"],
     queryFn: () => api("/auth/me"),
     retry: false,
@@ -85,7 +86,10 @@ function AuthBoundary({ children }: { children: React.ReactNode }) {
 
   const logout = async () => {
     await api<void>("/auth/sessions", { method: "DELETE" });
-    await auth.refetch();
+    await queryClient.cancelQueries();
+    queryClient.removeQueries({ predicate: query => query.queryKey[0] !== "auth" });
+    queryClient.setQueryData<CurrentUser | null>(["auth", "me"], null);
+    window.sessionStorage.removeItem("matrades_step_up");
     router.replace("/auth" as Route);
   };
 
