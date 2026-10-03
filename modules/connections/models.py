@@ -96,7 +96,7 @@ def validated_endpoint(value: str, *, allow_loopback_http: bool = False) -> str:
 
             address = ip_address(hostname)
 
-            for network in get_settings().trusted_private_networks_list:
+            for network in get_settings().http_allowed_networks_list:
 
                 if address in ip_network(network, strict=False):
 
