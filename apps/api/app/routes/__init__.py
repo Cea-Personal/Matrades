@@ -10,6 +10,9 @@ from apps.api.app.routes.internal_mt5 import router as internal_mt5_router
 from apps.api.app.routes.knowledge import assistant_router as knowledge_assistant_router
 from apps.api.app.routes.knowledge import router as knowledge_router
 from apps.api.app.routes.operations import router as operations_router
+from apps.api.app.routes.provider_binding_assistance import (
+    router as provider_binding_assistance_router,
+)
 from apps.api.app.routes.research import router as research_router
 from apps.api.app.routes.research_data import router as research_data_router
 from apps.api.app.routes.research_matrix import router as research_matrix_router
@@ -29,6 +32,7 @@ api_router.include_router(trade_proposals_router)
 api_router.include_router(research_router)
 api_router.include_router(research_data_router)
 api_router.include_router(research_matrix_router)
+api_router.include_router(provider_binding_assistance_router)
 api_router.include_router(trade_management_router)
 api_router.include_router(trade_plans_router)
 api_router.include_router(strategies_router)

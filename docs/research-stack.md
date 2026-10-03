@@ -27,6 +27,24 @@ These public sources require no private exchange credentials. Configure each acc
 Provider bindings, then use **Test & verify**. Do not infer a broker symbol from its
 display name: map suffixes, contracts, and provider symbols explicitly.
 
+In **Provider bindings**, select a trading account and use **Suggest bindings with AI**
+to review compatible sources for its active matrix. The knowledge assistant receives
+bounded configuration facts and eligible option IDs through the existing agent worker;
+credentials and network addresses are excluded. One request covers the account's enabled
+lanes, history and economic context. Review the reasons and select **Apply selected bindings**.
+Sources with healthy tested capabilities can be verified during application; untested
+sources are saved as unverified and still require **Test & verify**. Existing verified
+choices are retained, repeated applications do not duplicate bindings, and changed
+configuration requires fresh suggestions. AI failure is labeled explicitly and leaves
+rule-based compatible suggestions available.
+
+Recommendations follow installed adapter coverage: MT5 Forex/Metals CFDs, Twelve Data
+Forex/Stocks spot or CFD research, and Coinbase crypto spot or CFD research. Public
+independent history and context keep their respective authority roles. Unsupported
+discovery lanes are shown as missing coverage. MT5 suggestions still require the EA's
+`InpMatradesAccountId` to match the selected account; testing capabilities alone does
+not establish broker-account identity.
+
 Independent pair history must have `CANDLES` capability and `HISTORY` purpose for the
 same account and lane. Context uses `REFERENCE`.
 For CFTC choose `OPEN_INTEREST + REFERENCE`; for ECB/FRED choose account economic

@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.app.dependencies import current_actor, get_db, require_roles
 from apps.worker.app.tasks.research import run_research_cycle
+from modules.connections.capabilities import supports_capability
 from modules.connections.models import (
     ConnectionProvider,
     MarketDataCapability,
@@ -244,14 +245,10 @@ async def create_account_provider_binding(
             422, "public research sources can only bind HISTORY or REFERENCE authority"
         )
     if payload.binding_scope == "MARKET_RESEARCH":
-        active_matrix = next(
-            (
-                item
-                for item in await store.list("research_matrix", actor.owner_id)
-                if item.data.get("account_id") == str(account_id)
-            ),
-            None,
+        history = _account_matrix_history(
+            await store.list("research_matrix", actor.owner_id), account_id
         )
+        active_matrix = history[0] if history else None
         active_lanes = (
             active_matrix.data.get("lanes", [])
             if active_matrix
@@ -316,51 +313,7 @@ async def verify_account_provider_binding(
         )
     advertised = {str(item).upper() for item in connection.data.get("capabilities", [])}
     required = str(record.data["capability"]).upper()
-    aliases = {
-        "DISCOVERY": {
-            "DISCOVERY",
-            "MARKET.DISCOVERY",
-            "INSTRUMENT_DIRECTORY",
-            "INSTRUMENT_DIRECTORY.READ",
-            "INSTRUMENTS.READ",
-            "CRYPTO.DISCOVERY",
-            "ASSET_METADATA.READ",
-        },
-        "INSTRUMENT_DIRECTORY": {
-            "DISCOVERY",
-            "MARKET.DISCOVERY",
-            "INSTRUMENT_DIRECTORY",
-            "INSTRUMENT_DIRECTORY.READ",
-            "INSTRUMENTS.READ",
-        },
-        "QUOTE": {
-            "QUOTE",
-            "QUOTES",
-            "QUOTES.READ",
-            "FOREX.READ",
-            "METALS.READ",
-            "CRYPTO.READ",
-        },
-        "CANDLES": {"CANDLE", "CANDLES", "HISTORY", "CANDLES.READ", "HISTORY.READ"},
-        "FUTURES_CHAIN": {"FUTURES_CHAIN", "CONTRACT_DETAILS"},
-        "CONTRACT_DETAILS": {
-            "CONTRACT_DETAILS",
-            "CONTRACT_TERMS.READ",
-            "FUTURES_CHAIN",
-        },
-        "OPEN_INTEREST": {"OPEN_INTEREST", "CFTC_COT"},
-        "ECONOMIC_CALENDAR": {
-            "ECONOMIC_CALENDAR",
-            "CALENDAR",
-            "NEWS",
-            "CALENDAR.READ",
-            "NEWS.READ",
-            "FOREX_FACTORY.SCRAPE",
-        },
-        "MACROECONOMIC": {"MACROECONOMIC", "MACRO", "ECONOMIC", "MACRO.READ"},
-        "NEWS": {"NEWS", "NEWS.READ", "SEARCH.READ"},
-    }
-    if advertised and not (aliases.get(required, {required}) & advertised):
+    if advertised and not supports_capability(list(advertised), required):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             f"connection does not advertise a compatible {required} capability",
