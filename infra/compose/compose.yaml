@@ -1,6 +1,6 @@
 name: matrades
 
-# These services run the same Python packages with different entry commands.
+# Shared backend image used by API, MT5 bridge, worker, and scheduler.
 x-backend-image: &backend-image
   image: matrades-backend:local
   build:
@@ -11,15 +11,17 @@ services:
   postgres:
     image: timescale/timescaledb-ha:pg17
     environment:
-      POSTGRES_USER:  ${POSTGRES_USER}
+      POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 3s
       retries: 20
-    volumes: ["postgres-data:/home/postgres/pgdata/data"]
+    volumes:
+      - postgres-data:/home/postgres/pgdata/data
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
@@ -29,110 +31,144 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
-    volumes: ["redis-data:/data"]
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
 
   api:
     <<: *backend-image
-    env_file:
-      - path: ../../.env
-        required: false
     environment:
       MATRADES_DATABASE_URL: ${MATRADES_DATABASE_URL}
       MATRADES_REDIS_URL: ${MATRADES_REDIS_URL}
-      MATRADES_RESEARCH_ARTIFACT_ROOT: /app/data/research_cycles
-      MATRADES_RESEARCH_DATA_ROOT: /app/data/quantitative_research
+      MATRADES_RESEARCH_ARTIFACT_ROOT: ${MATRADES_RESEARCH_ARTIFACT_ROOT:-/app/data/research_cycles}
+      MATRADES_RESEARCH_DATA_ROOT: ${MATRADES_RESEARCH_DATA_ROOT:-/app/data/quantitative_research}
       MATRADES_MT5_RUNTIME_CONTROL_URL: ${MATRADES_MT5_RUNTIME_CONTROL_URL:-}
       MATRADES_MT5_RUNTIME_CONTROL_TOKEN: ${MATRADES_MT5_RUNTIME_CONTROL_TOKEN:-}
-    ports: ["8000:8000"]
-    volumes: ["research-artifacts:/app/data/research_cycles", "research-data:/app/data/quantitative_research"]
+    ports:
+      - "8000:8000"
+    volumes:
+      - research-artifacts:/app/data/research_cycles
+      - research-data:/app/data/quantitative_research
+    restart: unless-stopped
     depends_on:
-      postgres: { condition: service_healthy }
-      redis: { condition: service_healthy }
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   mt5-bridge:
     <<: *backend-image
-    env_file:
-      - path: ../../.env
-        required: false
     environment:
-      MATRADES_MT5_AUTHORITY_URL: http://api:8000/api/v1/internal/mt5/authenticate
+      MATRADES_MT5_AUTHORITY_URL: ${MATRADES_MT5_AUTHORITY_URL:-}
       MATRADES_MT5_RUNTIME_CONTROL_TOKEN: ${MATRADES_MT5_RUNTIME_CONTROL_TOKEN:-}
       MATRADES_MT5_COMMAND_QUEUE_PATH: /app/data/mt5-commands/commands.json
-    command: ["uvicorn", "bridges.mt5.app:app", "--host", "0.0.0.0", "--port", "8765"]
-    ports: ["8765:8765"]
-    volumes: ["mt5-command-data:/app/data/mt5-commands"]
+    command:
+      - uvicorn
+      - bridges.mt5.app:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8765"
+    ports:
+      - "8765:8765"
+    volumes:
+      - mt5-command-data:/app/data/mt5-commands
     restart: unless-stopped
     depends_on:
-      api: { condition: service_started }
+      api:
+        condition: service_started
 
   worker:
     <<: *backend-image
-    command: ["celery", "-A", "apps.worker.app.celery_app:celery_app", "worker", "--loglevel=INFO"]
-    env_file:
-      - path: ../../.env
-        required: false
+    command:
+      - celery
+      - -A
+      - apps.worker.app.celery_app:celery_app
+      - worker
+      - --loglevel=INFO
     environment:
-      MATRADES_DATABASE_URL: postgresql+asyncpg://matrades:matrades@postgres:5432/matrades
-      MATRADES_REDIS_URL: redis://redis:6379/0
-      MATRADES_RESEARCH_ARTIFACT_ROOT: /app/data/research_cycles
-      MATRADES_RESEARCH_DATA_ROOT: /app/data/quantitative_research
-    volumes: ["research-artifacts:/app/data/research_cycles", "research-data:/app/data/quantitative_research"]
+      MATRADES_DATABASE_URL: ${MATRADES_DATABASE_URL}
+      MATRADES_REDIS_URL: ${MATRADES_REDIS_URL}
+      MATRADES_RESEARCH_ARTIFACT_ROOT: ${MATRADES_RESEARCH_ARTIFACT_ROOT:-/app/data/research_cycles}
+      MATRADES_RESEARCH_DATA_ROOT: ${MATRADES_RESEARCH_DATA_ROOT:-/app/data/quantitative_research}
+    volumes:
+      - research-artifacts:/app/data/research_cycles
+      - research-data:/app/data/quantitative_research
+    restart: unless-stopped
     depends_on:
-      postgres: { condition: service_healthy }
-      redis: { condition: service_healthy }
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   scheduler:
     <<: *backend-image
-    command: ["celery", "-A", "apps.worker.app.celery_app:celery_app", "beat", "--loglevel=INFO"]
-    env_file:
-      - path: ../../.env
-        required: false
+    command:
+      - celery
+      - -A
+      - apps.worker.app.celery_app:celery_app
+      - beat
+      - --loglevel=INFO
     environment:
-      MATRADES_DATABASE_URL: postgresql+asyncpg://matrades:matrades@postgres:5432/matrades
-      MATRADES_REDIS_URL: redis://redis:6379/0
-      MATRADES_RESEARCH_ARTIFACT_ROOT: /app/data/research_cycles
-      MATRADES_RESEARCH_DATA_ROOT: /app/data/quantitative_research
-    volumes: ["research-artifacts:/app/data/research_cycles", "research-data:/app/data/quantitative_research"]
+      MATRADES_DATABASE_URL: ${MATRADES_DATABASE_URL}
+      MATRADES_REDIS_URL: ${MATRADES_REDIS_URL}
+      MATRADES_RESEARCH_ARTIFACT_ROOT: ${MATRADES_RESEARCH_ARTIFACT_ROOT:-/app/data/research_cycles}
+      MATRADES_RESEARCH_DATA_ROOT: ${MATRADES_RESEARCH_DATA_ROOT:-/app/data/quantitative_research}
+    volumes:
+      - research-artifacts:/app/data/research_cycles
+      - research-data:/app/data/quantitative_research
     restart: unless-stopped
     depends_on:
-      postgres: { condition: service_healthy }
-      redis: { condition: service_healthy }
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   agent-worker:
     build:
       context: ../..
       dockerfile: apps/agent_worker/Dockerfile
-    env_file:
-      - path: ../../.env
-        required: false
     environment:
-      MATRADES_DATABASE_URL: postgresql+asyncpg://matrades:matrades@postgres:5432/matrades
-      MATRADES_REDIS_URL: redis://redis:6379/0
-      MATRADES_CODEX_ENABLED: "true"
-      MATRADES_RESEARCH_AGENT_TIMEOUT_SECONDS: "180"
+      MATRADES_DATABASE_URL: ${MATRADES_DATABASE_URL}
+      MATRADES_REDIS_URL: ${MATRADES_REDIS_URL}
+      MATRADES_CODEX_ENABLED: ${MATRADES_CODEX_ENABLED:-true}
+      MATRADES_RESEARCH_AGENT_TIMEOUT_SECONDS: ${MATRADES_RESEARCH_AGENT_TIMEOUT_SECONDS:-180}
       MATRADES_AGENT_WORKER_CONCURRENCY: ${MATRADES_AGENT_WORKER_CONCURRENCY:-4}
-      CODEX_HOME: /root/.codex
+      CODEX_HOME: ${CODEX_HOME:-/root/.codex}
     volumes:
-      - ${HOME}/.codex/auth.json:/root/.codex/auth.json
+      - ${HOME}/.codex/auth.json:/root/.codex/auth.json:ro
     restart: unless-stopped
     depends_on:
-      postgres: { condition: service_healthy }
-      redis: { condition: service_healthy }
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   web:
     build:
       context: ../..
       dockerfile: apps/web/Dockerfile.vercel
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8000
-    ports: ["3000:3000"]
-    depends_on: [api]
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_started
 
   litellm:
     image: ghcr.io/berriai/litellm:main-latest
-    profiles: ["litellm"]
-    command: ["--port", "4000"]
-    ports: ["4000:4000"]
+    profiles:
+      - litellm
+    command:
+      - --port
+      - "4000"
+    ports:
+      - "4000:4000"
+    restart: unless-stopped
 
 volumes:
   postgres-data:
