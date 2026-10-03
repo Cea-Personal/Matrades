@@ -71,7 +71,7 @@ services:
       - --port
       - "8765"
     ports:
-      - "8765:8765"
+      - "10.0.0.3:8765:8765"
     volumes:
       - mt5-command-data:/app/data/mt5-commands
     restart: unless-stopped
