@@ -6,7 +6,8 @@ from enum import StrEnum
 from typing import Any
 from urllib.parse import urlparse
 from uuid import UUID, uuid4
-from ipaddress import ip_address
+from ipaddress import ip_address, ip_network
+from packages.shared.config import get_settings
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -53,49 +54,69 @@ PROVIDER_LABELS = {
     ConnectionProvider.MT5_BRIDGE: "MT5 Bridge",
 }
 
-
 def validated_endpoint(value: str, *, allow_loopback_http: bool = False) -> str:
+
     parsed = urlparse(value)
 
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+
         raise ValueError("endpoint must be an HTTP(S) URL")
 
     hostname = parsed.hostname.lower()
 
     blocked = {
+
         "169.254.169.254",
+
         "metadata.google.internal",
+
     }
 
     if hostname in blocked:
+
         raise ValueError("metadata endpoints are prohibited")
 
-    internal_hostnames = {
+    trusted = hostname in {
+
         "localhost",
+
+        "127.0.0.1",
+
+        "::1",
+
         "host.docker.internal",
+
         "gateway.docker.internal",
+
     }
 
-    private_or_loopback = hostname in internal_hostnames
+    if not trusted:
 
-    try:
-        address = ip_address(hostname)
-        private_or_loopback = (
-            private_or_loopback
-            or address.is_private
-            or address.is_loopback
-        )
-    except ValueError:
-        # Hostname rather than an IP address.
-        pass
+        try:
+
+            address = ip_address(hostname)
+
+            for network in get_settings().trusted_private_networks_list:
+
+                if address in ip_network(network, strict=False):
+
+                    trusted = True
+
+                    break
+
+        except ValueError:
+
+            pass
 
     if parsed.scheme != "https" and not (
-        allow_loopback_http and private_or_loopback
+
+        allow_loopback_http and trusted
+
     ):
+
         raise ValueError("remote endpoints must use HTTPS")
 
     return value.rstrip("/")
-
 
 class ConnectionProfile(BaseModel):
     model_config = ConfigDict(extra="forbid")

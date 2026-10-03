@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     mt5_runtime_control_url: str | None = None
     mt5_runtime_control_token: SecretStr | None = None
     litellm_enabled: bool = False
+    http_allowed_networks: str = ""
     litellm_url: str = "http://localhost:4000"
     litellm_api_key: SecretStr | None = None
     default_owner_id: UUID = UUID("00000000-0000-0000-0000-000000000001")
@@ -81,7 +82,15 @@ class Settings(BaseSettings):
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+    
+    @property
+    def http_allowed_networks_list(self) -> list[str]:
+        return [
+            network.strip()
+            for network in self.http_allowed_networks.split(",")
+            if network.strip()
 
+        ]
 
 @lru_cache
 def get_settings() -> Settings:
