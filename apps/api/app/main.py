@@ -12,7 +12,9 @@ from apps.api.app.errors import install_error_handlers
 from apps.api.app.routes import api_router
 from packages.shared.database import engine
 from packages.shared.persistence import Base
+from packages.shared.config import get_settings
 
+settings = get_settings()
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
@@ -34,9 +36,10 @@ def create_app(database_engine: AsyncEngine = engine) -> FastAPI:
         description="Human-controlled, Codex-first trading decision support",
         lifespan=database_lifespan(database_engine),
     )
+  
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+        allow_origins=settings.cors_origins_list,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
