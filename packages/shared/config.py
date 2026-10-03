@@ -22,9 +22,14 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
     redis_url: str = "redis://localhost:6379/0"
     secret_key: SecretStr = Field(default=SecretStr("development-only-secret-key-change-me"))
-    mt5_authority_token: SecretStr = Field(
-        default=SecretStr("development-mt5-authority-token")
-    )
+    public_app_url: str | None = None
+    smtp_host: str | None = None
+    smtp_port: int = Field(default=587, ge=1, le=65535)
+    smtp_username: str | None = None
+    smtp_password: SecretStr | None = None
+    smtp_from: str | None = None
+    auth_dev_tokens_enabled: bool = False
+    mt5_authority_token: SecretStr = Field(default=SecretStr("development-mt5-authority-token"))
     blob_root: Path = Path("data/blobs")
     codex_enabled: bool = True
     codex_binary: str = "codex"
@@ -70,15 +75,11 @@ class Settings(BaseSettings):
     strategy_research_simulation_risk_percent: Decimal = Field(
         default=Decimal("0.5"), gt=0, le=Decimal("1")
     )
-    
+
     @property
     def cors_origins_list(self) -> list[str]:
-        return [
-            origin.strip()
-            for origin in self.cors_origins.split(",")
-            if origin.strip()
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
-        ]
 
 @lru_cache
 def get_settings() -> Settings:

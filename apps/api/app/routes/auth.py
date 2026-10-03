@@ -3,20 +3,28 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import logging
 import secrets
-from datetime import timedelta
+from datetime import UTC, timedelta
 from typing import Annotated
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.app.dependencies import get_db
+from modules.identity.email_delivery import AuthEmailUnavailable, deliver_auth_link, delivery_mode
 from modules.identity.models import User
-from modules.identity.persistence import AuthTokenRecord, SessionRecord, UserRecord
+from modules.identity.persistence import (
+    AuthTokenRecord,
+    SessionRecord,
+    SignupGateRecord,
+    UserRecord,
+)
 from modules.identity.service import enroll, hash_password, totp, verify_password
 from modules.mt5.desktop_runtime import MT5StartupError, ensure_mt5_started
 from packages.shared.config import get_settings
@@ -25,10 +33,11 @@ from packages.shared.store import ResourceStore
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 SESSION_COOKIE = "matrades_session"
+logger = logging.getLogger(__name__)
 
 
 class SignupRequest(BaseModel):
-    email: str
+    email: str = Field(max_length=320)
     password: str = Field(min_length=12, max_length=256)
 
 
@@ -57,7 +66,11 @@ class StepUpRequest(BaseModel):
 
 
 class RecoveryStartRequest(BaseModel):
-    email: str
+    email: str = Field(max_length=320)
+
+
+class ResendVerificationRequest(BaseModel):
+    email: str = Field(max_length=320)
 
 
 class RecoveryCompleteRequest(BaseModel):
@@ -67,6 +80,33 @@ class RecoveryCompleteRequest(BaseModel):
 
 def _digest(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
+
+
+def _normalized_email(value: str) -> str:
+    email = value.lower().strip()
+    if (
+        len(email) > 320
+        or email.count("@") != 1
+        or any(character.isspace() or ord(character) < 32 for character in email)
+        or "." not in email.split("@", 1)[1]
+    ):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "valid email required")
+    return email
+
+
+def _require_email_delivery() -> str:
+    try:
+        return delivery_mode()
+    except AuthEmailUnavailable as exc:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "authentication email is unavailable"
+        ) from exc
+
+
+async def _signup_available(db: AsyncSession) -> bool:
+    if await db.scalar(select(UserRecord.id).limit(1)) is not None:
+        return False
+    return await db.get(SignupGateRecord, 1) is None
 
 
 def _cipher_key() -> bytes:
@@ -148,12 +188,14 @@ async def _token_user(
         AuthTokenRecord.id == UUID(token) if by_id else AuthTokenRecord.token_hash == _digest(token)
     )
     item = await db.scalar(
-        select(AuthTokenRecord).where(
+        select(AuthTokenRecord)
+        .where(
             match,
             AuthTokenRecord.kind == kind,
             AuthTokenRecord.used_at.is_(None),
             AuthTokenRecord.expires_at > utc_now(),
         )
+        .with_for_update()
     )
     if item is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid or expired token")
@@ -163,16 +205,27 @@ async def _token_user(
     return item, user
 
 
+@router.get("/registration-status")
+async def registration_status(db: Annotated[AsyncSession, Depends(get_db)]):
+    return {"signup_available": await _signup_available(db)}
+
+
 @router.post("/signup", status_code=status.HTTP_202_ACCEPTED)
 async def signup(payload: SignupRequest, db: Annotated[AsyncSession, Depends(get_db)]):
-    email = payload.email.lower().strip()
-    if "@" not in email:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "valid email required")
-    if await db.scalar(select(UserRecord).where(UserRecord.email == email)):
-        raise HTTPException(status.HTTP_409_CONFLICT, "email already registered")
-    user = UserRecord(email=email, password_hash=hash_password(payload.password))
+    email = _normalized_email(payload.email)
+    _require_email_delivery()
+    if not await _signup_available(db):
+        raise HTTPException(status.HTTP_409_CONFLICT, "signup is closed for this installation")
+    user = UserRecord(id=uuid4(), email=email, password_hash=hash_password(payload.password))
     db.add(user)
-    await db.flush()
+    db.add(SignupGateRecord(id=1, user_id=user.id))
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "signup is closed for this installation"
+        ) from exc
     raw = secrets.token_urlsafe(40)
     token = AuthTokenRecord(
         user_id=user.id,
@@ -184,9 +237,59 @@ async def signup(payload: SignupRequest, db: Annotated[AsyncSession, Depends(get
     await ResourceStore(db).audit(
         user.owner_id, user.id, "user.registered", "user", user.id, {"email": email}
     )
+    try:
+        development_token = await deliver_auth_link(email, "verify", raw)
+    except AuthEmailUnavailable as exc:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "verification email could not be sent; retry signup",
+        ) from exc
     result = user.security_state()
-    if get_settings().env != "production":
-        result["verification_token"] = raw
+    if development_token:
+        result["verification_token"] = development_token
+    return result
+
+
+@router.post("/email-verifications/resend", status_code=status.HTTP_202_ACCEPTED)
+async def resend_email_verification(
+    payload: ResendVerificationRequest, db: Annotated[AsyncSession, Depends(get_db)]
+):
+    _require_email_delivery()
+    email = _normalized_email(payload.email)
+    result: dict[str, str] = {"status": "accepted"}
+    user = await db.scalar(select(UserRecord).where(UserRecord.email == email).with_for_update())
+    if user is None or user.mfa_enabled:
+        return result
+    latest = await db.scalar(
+        select(AuthTokenRecord)
+        .where(AuthTokenRecord.user_id == user.id, AuthTokenRecord.kind == "EMAIL_VERIFICATION")
+        .order_by(AuthTokenRecord.created_at.desc())
+        .limit(1)
+    )
+    if latest is not None:
+        issued_at = latest.created_at
+        if issued_at.tzinfo is None:
+            issued_at = issued_at.replace(tzinfo=UTC)
+        if utc_now() - issued_at < timedelta(seconds=60):
+            return result
+    raw = secrets.token_urlsafe(40)
+    try:
+        async with db.begin_nested():
+            db.add(
+                AuthTokenRecord(
+                    user_id=user.id,
+                    kind="EMAIL_VERIFICATION",
+                    token_hash=_digest(raw),
+                    expires_at=utc_now() + timedelta(hours=24),
+                )
+            )
+            await db.flush()
+            development_token = await deliver_auth_link(email, "verify", raw)
+    except AuthEmailUnavailable:
+        logger.warning("authentication verification email delivery failed")
+        return result
+    if development_token:
+        result["verification_token"] = development_token
     return result
 
 
@@ -378,22 +481,44 @@ async def revoke_session(
 async def start_password_recovery(
     payload: RecoveryStartRequest, db: Annotated[AsyncSession, Depends(get_db)]
 ):
+    _require_email_delivery()
     result: dict[str, str] = {"status": "accepted"}
     user = await db.scalar(
-        select(UserRecord).where(UserRecord.email == payload.email.lower().strip())
+        select(UserRecord)
+        .where(UserRecord.email == _normalized_email(payload.email))
+        .with_for_update()
     )
     if user:
-        raw = secrets.token_urlsafe(40)
-        db.add(
-            AuthTokenRecord(
-                user_id=user.id,
-                kind="PASSWORD_RECOVERY",
-                token_hash=_digest(raw),
-                expires_at=utc_now() + timedelta(minutes=30),
-            )
+        latest = await db.scalar(
+            select(AuthTokenRecord)
+            .where(AuthTokenRecord.user_id == user.id, AuthTokenRecord.kind == "PASSWORD_RECOVERY")
+            .order_by(AuthTokenRecord.created_at.desc())
+            .limit(1)
         )
-        if get_settings().env != "production":
-            result["recovery_token"] = raw
+        if latest is not None:
+            issued_at = latest.created_at
+            if issued_at.tzinfo is None:
+                issued_at = issued_at.replace(tzinfo=UTC)
+            if utc_now() - issued_at < timedelta(seconds=60):
+                return result
+        raw = secrets.token_urlsafe(40)
+        try:
+            async with db.begin_nested():
+                db.add(
+                    AuthTokenRecord(
+                        user_id=user.id,
+                        kind="PASSWORD_RECOVERY",
+                        token_hash=_digest(raw),
+                        expires_at=utc_now() + timedelta(minutes=30),
+                    )
+                )
+                await db.flush()
+                development_token = await deliver_auth_link(user.email, "recover", raw)
+        except AuthEmailUnavailable:
+            logger.warning("authentication password-recovery email delivery failed")
+            return result
+        if development_token:
+            result["recovery_token"] = development_token
     return result
 
 

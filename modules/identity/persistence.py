@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import JSON, Boolean, DateTime, String, Uuid, func
+from sqlalchemy import JSON, Boolean, DateTime, Integer, String, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from packages.shared.domain_types import utc_now
@@ -36,6 +36,15 @@ class UserRecord(Base):
             "mfa_enabled": self.mfa_enabled,
             "role": self.role,
         }
+
+
+class SignupGateRecord(Base):
+    """The database-enforced single installation signup slot."""
+
+    __tablename__ = "auth_signup_gate"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[UUID] = mapped_column(Uuid, unique=True, nullable=False)
 
 
 class SessionRecord(Base):

@@ -1,13 +1,13 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/providers";
 
 type SignupState = {
-  verification_token: string;
+  verification_token?: string;
 };
 
 type VerificationState = {
@@ -29,12 +29,32 @@ export default function AuthenticationPage() {
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [verificationToken, setVerificationToken] = useState("");
+  const [awaitingEmail, setAwaitingEmail] = useState(false);
+  const [recoverySent, setRecoverySent] = useState(false);
+  const [signupAvailable, setSignupAvailable] = useState(false);
   const [enrollment, setEnrollment] = useState<EnrollmentState | null>(null);
   const [challengeId, setChallengeId] = useState("");
   const [recoveryToken, setRecoveryToken] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    void api<{ signup_available: boolean }>("/auth/registration-status")
+      .then(result => { if (active) setSignupAvailable(result.signup_available); })
+      .catch(() => { if (active) setSignupAvailable(false); });
+    const fragment = new URLSearchParams(window.location.hash.slice(1));
+    const verification = fragment.get("verify");
+    const recovery = fragment.get("recover");
+    const fragmentTimer = window.setTimeout(() => {
+      if (!active) return;
+      if (verification) setVerificationToken(verification);
+      if (recovery) { setMode("recovery"); setRecoveryToken(recovery); }
+      if (verification || recovery) window.history.replaceState(null, "", window.location.pathname);
+    }, 0);
+    return () => { active = false; window.clearTimeout(fragmentTimer); };
+  }, []);
 
   const run = async (work: () => Promise<void>) => {
     setBusy(true);
@@ -56,13 +76,16 @@ export default function AuthenticationPage() {
           method: "POST",
           body: JSON.stringify({ email }),
         });
-        setRecoveryToken(result.recovery_token ?? "sent-by-email");
+        if (result.recovery_token) setRecoveryToken(result.recovery_token);
+        else setRecoverySent(true);
       } else if (mode === "signup") {
         const result = await api<SignupState>("/auth/signup", {
           method: "POST",
           body: JSON.stringify({ email, password }),
         });
-        setVerificationToken(result.verification_token ?? "");
+        if (result.verification_token) setVerificationToken(result.verification_token);
+        else setAwaitingEmail(true);
+        setSignupAvailable(false);
       } else {
         const result = await api<{ challenge_id: string }>("/auth/sessions", {
           method: "POST",
@@ -84,6 +107,16 @@ export default function AuthenticationPage() {
         headers: { "X-Enrollment-Token": result.enrollment_token },
       });
       setEnrollment(created);
+      setAwaitingEmail(false);
+    });
+
+  const resendVerification = () =>
+    run(async () => {
+      const result = await api<{ verification_token?: string }>("/auth/email-verifications/resend", {
+        method: "POST", body: JSON.stringify({ email }),
+      });
+      if (result.verification_token) setVerificationToken(result.verification_token);
+      else setAwaitingEmail(true);
     });
 
   const completeMfa = () =>
@@ -121,25 +154,39 @@ export default function AuthenticationPage() {
         <p className="eyebrow">Secure workspace</p>
         <h1>{mode === "login" ? "Sign in to Matrades" : mode === "signup" ? "Create your Matrades account" : "Recover your account"}</h1>
         <p className="muted">Verified email and an authenticator challenge protect trading configuration.</p>
-        {!verificationToken && !challengeId && !enrollment && !recoveryToken && (
+        {!verificationToken && !challengeId && !enrollment && !recoveryToken && !awaitingEmail && !recoverySent && (
           <form onSubmit={begin} className="form-stack">
             <label>Email<input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} /></label>
             {mode !== "recovery" && <label>Password<input type="password" minLength={12} required value={password} onChange={(e) => setPassword(e.target.value)} /></label>}
             <button className="btn primary" disabled={busy}>{busy ? "Working…" : mode === "login" ? "Continue to MFA" : mode === "signup" ? "Create account" : "Send recovery link"}</button>
           </form>
         )}
+        {mode === "recovery" && recoverySent && !recoveryToken && (
+          <div className="form-stack">
+            <p>Check your email for a one-time password-reset link. It expires after 30 minutes.</p>
+            <button className="text-button" onClick={() => { setRecoverySent(false); setMode("login"); }}>Return to sign in</button>
+          </div>
+        )}
         {mode === "recovery" && recoveryToken && (
           <div className="form-stack">
-            <p className="muted">Enter the one-time token delivered to your verified email. Development mode displays it below.</p>
+            <p className="muted">Enter the one-time token from your password-reset email.</p>
             <label>Recovery token<input required value={recoveryToken} onChange={(e) => setRecoveryToken(e.target.value)} /></label>
             <label>New password<input type="password" minLength={12} required value={newPassword} onChange={(e) => setNewPassword(e.target.value)} /></label>
             <button className="btn primary" disabled={busy || newPassword.length < 12} onClick={() => void completeRecovery()}>Reset password and revoke sessions</button>
           </div>
         )}
+        {awaitingEmail && !verificationToken && (
+          <div className="form-stack">
+            <p>Check your email for a verification link. It expires after 24 hours.</p>
+            <label>Email<input type="email" value={email} onChange={event => setEmail(event.target.value)} /></label>
+            <button className="btn" disabled={busy || !email} onClick={() => void resendVerification()}>Resend verification email</button>
+            <button className="text-button" onClick={() => { setAwaitingEmail(false); setMode("login"); }}>Return to sign in</button>
+          </div>
+        )}
         {verificationToken && !enrollment && (
           <div className="form-stack">
-            <p>Email delivery is in development mode. Use the generated one-time verification token.</p>
-            <label>Verification token<textarea value={verificationToken} onChange={(e) => setVerificationToken(e.target.value)} /></label>
+            <p>Confirm your email and set up an authenticator.</p>
+            <label>Verification token<input value={verificationToken} onChange={(e) => setVerificationToken(e.target.value)} /></label>
             <button className="btn primary" disabled={busy} onClick={() => void verifyEmail()}>Verify and enroll MFA</button>
           </div>
         )}
@@ -158,12 +205,13 @@ export default function AuthenticationPage() {
           </div>
         )}
         {error && <p className="notice bad" role="alert">{error}</p>}
-        {!verificationToken && !challengeId && !enrollment && !recoveryToken && (
+        {!verificationToken && !challengeId && !enrollment && !recoveryToken && !awaitingEmail && !recoverySent && (
           <div className="actions">
-            <button className="text-button" onClick={() => setMode(mode === "login" ? "signup" : "login")}>
-              {mode === "login" ? "Need an account? Sign up" : "Already registered? Sign in"}
-            </button>
+            {(mode !== "login" || signupAvailable) && <button className="text-button" onClick={() => setMode(mode === "login" ? "signup" : "login")}>
+              {mode === "login" ? "Set up the owner account" : "Already registered? Sign in"}
+            </button>}
             {mode === "login" && <button className="text-button" onClick={() => setMode("recovery")}>Forgot password?</button>}
+            {mode === "login" && !signupAvailable && error.includes("email verification and MFA") && <button className="text-button" onClick={() => { setError(""); setAwaitingEmail(true); }}>Resend verification link</button>}
           </div>
         )}
       </div>

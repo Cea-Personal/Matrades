@@ -1,17 +1,26 @@
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from apps.api.app.dependencies import get_db
 from apps.api.app.main import create_app
+from modules.identity import email_delivery
 from modules.identity.service import totp
+from packages.shared.config import Settings, get_settings
 
 
-def test_signup_verification_mfa_login_and_owner_scoped_api(tmp_path) -> None:
+def test_signup_verification_mfa_login_and_owner_scoped_api(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        email_delivery,
+        "get_settings",
+        lambda: get_settings().model_copy(update={"auth_dev_tokens_enabled": True}),
+    )
     email = f"owner-{uuid4()}@example.com"
     test_engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'auth.db'}")
     factory = async_sessionmaker(test_engine, expire_on_commit=False)
@@ -28,11 +37,23 @@ def test_signup_verification_mfa_login_and_owner_scoped_api(tmp_path) -> None:
     app = create_app(test_engine)
     app.dependency_overrides[get_db] = test_db
     with TestClient(app) as client:
+        assert client.get("/api/v1/auth/registration-status").json() == {"signup_available": True}
         signup = client.post(
             "/api/v1/auth/signup",
             json={"email": email, "password": "correct-horse-battery"},
         )
         assert signup.status_code == 202
+        assert client.get("/api/v1/auth/registration-status").json() == {"signup_available": False}
+        assert (
+            client.post(
+                "/api/v1/auth/signup",
+                json={
+                    "email": "second-owner@example.com",
+                    "password": "another-correct-horse-battery",
+                },
+            ).status_code
+            == 409
+        )
         verification = client.post(
             "/api/v1/auth/email-verifications",
             json={"token": signup.json()["verification_token"]},
@@ -180,3 +201,91 @@ def test_signup_verification_mfa_login_and_owner_scoped_api(tmp_path) -> None:
             ).status_code
             == 200
         )
+
+
+def test_production_signup_sends_link_without_exposing_token_and_closes_signup(
+    tmp_path, monkeypatch
+) -> None:
+    configured = Settings(
+        _env_file=None,
+        env="production",
+        public_app_url="https://matrades.example",
+        smtp_host="smtp.example",
+        smtp_port=587,
+        smtp_username="mailer",
+        smtp_password=SecretStr("smtp-password"),
+        smtp_from="Matrades <auth@matrades.example>",
+    )
+    delivery = {"settings": configured.model_copy(update={"smtp_host": None}), "fail": False}
+    monkeypatch.setattr(email_delivery, "get_settings", lambda: delivery["settings"])
+    sent = []
+
+    def send(message, _) -> None:
+        if delivery["fail"]:
+            raise OSError("mail relay unavailable")
+        sent.append(message)
+
+    monkeypatch.setattr(email_delivery, "_send_smtp", send)
+    test_engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'production-auth.db'}")
+    factory = async_sessionmaker(test_engine, expire_on_commit=False)
+
+    async def test_db():
+        async with factory() as session:
+            try:
+                yield session
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+
+    app = create_app(test_engine)
+    app.dependency_overrides[get_db] = test_db
+    with TestClient(app) as client:
+        email = "only-owner@example.com"
+        credentials = {"email": email, "password": "correct-horse-battery"}
+        assert client.post("/api/v1/auth/signup", json=credentials).status_code == 503
+        assert client.get("/api/v1/auth/registration-status").json() == {"signup_available": True}
+        delivery["settings"] = configured
+        delivery["fail"] = True
+        assert client.post("/api/v1/auth/signup", json=credentials).status_code == 503
+        assert client.get("/api/v1/auth/registration-status").json() == {"signup_available": True}
+        delivery["fail"] = False
+        signup = client.post(
+            "/api/v1/auth/signup",
+            json=credentials,
+        )
+        assert signup.status_code == 202
+        assert "verification_token" not in signup.json()
+        assert len(sent) == 1
+        link = sent[0].get_content()
+        assert "https://matrades.example/auth#verify=" in link
+        token = re.search(r"#verify=([A-Za-z0-9_-]+)", link)
+        assert token is not None
+        assert (
+            client.post(
+                "/api/v1/auth/signup",
+                json={"email": "someone-else@example.com", "password": "correct-horse-battery"},
+            ).status_code
+            == 409
+        )
+        assert client.get("/api/v1/auth/registration-status").json() == {"signup_available": False}
+        verified = client.post("/api/v1/auth/email-verifications", json={"token": token.group(1)})
+        assert verified.status_code == 200
+        assert (
+            client.post(
+                "/api/v1/auth/email-verifications", json={"token": token.group(1)}
+            ).status_code
+            == 401
+        )
+        resent = client.post("/api/v1/auth/email-verifications/resend", json={"email": email})
+        assert resent.status_code == 202
+        assert "verification_token" not in resent.json()
+        assert len(sent) == 1  # 60-second resend throttle
+        unknown = client.post(
+            "/api/v1/auth/email-verifications/resend", json={"email": "unknown@example.com"}
+        )
+        assert unknown.json() == {"status": "accepted"}
+        recovered = client.post("/api/v1/auth/password-recovery", json={"email": email})
+        assert recovered.status_code == 202
+        assert "recovery_token" not in recovered.json()
+        assert "https://matrades.example/auth#recover=" in sent[-1].get_content()

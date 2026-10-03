@@ -46,7 +46,7 @@ services:
       MATRADES_MT5_RUNTIME_CONTROL_URL: ${MATRADES_MT5_RUNTIME_CONTROL_URL:-}
       MATRADES_MT5_RUNTIME_CONTROL_TOKEN: ${MATRADES_MT5_RUNTIME_CONTROL_TOKEN:-}
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - research-artifacts:/app/data/research_cycles
       - research-data:/app/data/quantitative_research
@@ -154,7 +154,7 @@ services:
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     restart: unless-stopped
     depends_on:
       api:
@@ -168,7 +168,7 @@ services:
       - --port
       - "4000"
     ports:
-      - "4000:4000"
+      - "127.0.0.1:4000:4000"
     restart: unless-stopped
 
 volumes:
